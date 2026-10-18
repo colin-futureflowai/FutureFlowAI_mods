@@ -1,9 +1,9 @@
 {
   "name": "futureflow-skills",
   "author": {
-    "name": "Future Flow AI"
+    "name": "FutureFlowAI"
   },
   "version": "0.1.0",
-  "description": "Future Flow AI's own working methods as skills, picked up by Claude Code automatically",
+  "description": "FutureFlowAI's own working methods as skills, picked up by Claude Code automatically",
   "license": "MIT"
 }

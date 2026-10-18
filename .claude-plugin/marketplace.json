@@ -1,9 +1,9 @@
 {
   "name": "futureflowai-mods",
   "owner": {
-    "name": "Future Flow AI"
+    "name": "FutureFlowAI"
   },
-  "description": "Claude Code plugins, skills and mods by Future Flow AI",
+  "description": "Claude Code plugins, skills and mods by FutureFlowAI",
   "plugins": [
     {
       "name": "voice-chat",
@@ -13,7 +13,7 @@
     {
       "name": "futureflow-skills",
       "source": "./futureflow-skills",
-      "description": "Future Flow AI's own working methods as skills, picked up by Claude Code automatically"
+      "description": "FutureFlowAI's own working methods as skills, picked up by Claude Code automatically"
     },
     {
       "name": "content-skills",

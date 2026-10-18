@@ -1,11 +1,11 @@
-# Future Flow AI — Claude Code plugins
+# FutureFlowAI — Claude Code plugins
 
-Claude Code plugins, skills and mods by Future Flow AI, published as one marketplace (`futureflowai-mods`). Install only what you need; each plugin stands on its own.
+Claude Code plugins, skills and mods by FutureFlowAI, published as one marketplace (`futureflowai-mods`). Install only what you need; each plugin stands on its own.
 
 | Plugin | Type | What it does |
 | --- | --- | --- |
 | [voice-chat](voice-chat/) | mod | Talk to your Claude Code session through a fast Inworld voice agent. It handles small talk itself, hands real tasks to Claude Code and tells you the outcome (`/voice`). |
-| [futureflow-skills](futureflow-skills/) | skills | Future Flow AI's own working methods, picked up by Claude Code automatically. |
+| [futureflow-skills](futureflow-skills/) | skills | FutureFlowAI's own working methods, picked up by Claude Code automatically. |
 | [content-skills](content-skills/) | skills | 54 content and social media skills (reels, hooks, carousels, captions, planning), based on [Ootto's claude-content-skills](https://github.com/Ootto-AI/claude-content-skills). |
 
 ## Install

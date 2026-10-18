@@ -1,7 +1,7 @@
 {
   "name": "content-skills",
   "author": {
-    "name": "Future Flow AI"
+    "name": "FutureFlowAI"
   },
   "version": "1.4.0",
   "description": "Content and social media skills (reels, hooks, carousels, captions, planning), based on Ootto's claude-content-skills",

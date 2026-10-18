@@ -1,7 +1,7 @@
 {
   "name": "voice-chat",
   "author": {
-    "name": "Future Flow AI"
+    "name": "FutureFlowAI"
   },
   "version": "0.6.0",
   "description": "Talk to Claude Code through a fast Inworld voice agent that hands real tasks to Claude Code and tells you the outcome",

@@ -1,4 +1,4 @@
-# FutureFlowAI_mods — Claude Code plugins, skills en mods van Future Flow AI
+# FutureFlowAI_mods — Claude Code plugins, skills en mods van FutureFlowAI
 
 Eigen Claude Code plugins. Elke submap is één plugin; `.claude-plugin/marketplace.json` in de root maakt de repo installeerbaar als marketplace (`futureflowai-mods`). Een plugin kan een mod zijn (hooks-module), een bundel skills, of beide.
 
@@ -60,7 +60,7 @@ Na een wijziging: `/reload-plugins` in de sessie (een lokale marketplace wordt d
 ## Plugins
 
 ### futureflow-skills
-Bundel skills van Future Flow AI. Claude Code vindt elke `skills/<naam>/SKILL.md` vanzelf; er hoeft niets in `plugin.json` bij.
+Bundel skills van FutureFlowAI. Claude Code vindt elke `skills/<naam>/SKILL.md` vanzelf; er hoeft niets in `plugin.json` bij.
 - `SKILL.md` begint met frontmatter: `name` (gelijk aan de mapnaam, kebab-case) en `description` (wanneer Claude hem moet gebruiken; dit bepaalt of hij getriggerd wordt). Daarna de instructies.
 - Hulpbestanden (scripts, sjablonen, referenties) in dezelfde skill-map, en vanuit `SKILL.md` relatief ernaar verwijzen.
 - Geen klant-specifieke context of secrets in een skill; die horen in de vault van het bedrijf.
