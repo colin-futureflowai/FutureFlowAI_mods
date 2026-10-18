@@ -43,7 +43,7 @@ test('limiet bereikt: weigering noemt de houder en de volgende stap', async () =
   const c = json(['check', 'dev'])
   assert.equal(c.ok, false)
   assert.equal(c.reason, 'slots')
-  assert.match(c.message, /agent-slot wait dev/)
+  assert.match(c.message, /agent-slot(\.mjs')? wait dev/)
   assert.match(c.message, /sleep 30/)
   const r = cli(['run', 'dev', '--wait', '0', '--', 'sh', '-c', 'true'])
   assert.equal(r.status, 75)
@@ -90,7 +90,7 @@ test('browser-slot hoort bij een sessie en verloopt na stilte', async () => {
   const b = json(['acquire', 'browser', '--session', 'sessie-b'])
   assert.equal(b.ok, false)
   assert.match(b.message, /sessie sessie-a/)
-  assert.match(b.message, /agent-slot wait browser/)
+  assert.match(b.message, /agent-slot(\.mjs')? wait browser/)
   writeConfig({ browserIdleMinutes: 0.002 }) // ~120 ms
   await sleep(250)
   assert.equal(json(['acquire', 'browser', '--session', 'sessie-b']).ok, true, 'na stilte vrij')
@@ -106,8 +106,8 @@ test('te weinig geheugen: geweigerd met uitleg', () => {
   assert.equal(json(['check', 'agent', '--gate', 'critical'], { AGENT_SLOT_FAKE_FREE: '12' }).ok, true, 'subagents pas bij kritiek')
   const crit = json(['check', 'agent', '--gate', 'critical'], { AGENT_SLOT_FAKE_FREE: '8' })
   assert.equal(crit.ok, false)
-  assert.match(crit.message, /`agent-slot wait agent --gate critical`/)
-  assert.match(c.message, /`agent-slot status` laat zien/)
+  assert.match(crit.message, /agent-slot(\.mjs')? wait agent --gate critical`/)
+  assert.match(c.message, /agent-slot(\.mjs')? status` laat zien/)
 })
 
 test('wait geeft vrij zodra er plek is', async () => {
@@ -121,12 +121,43 @@ test('wait geeft vrij zodra er plek is', async () => {
   a.kill()
 })
 
-test('status toont slots, geheugen en weigeringen', () => {
-  cli(['log', 'refuse', JSON.stringify({ kind: 'dev', reason: 'slots', command: 'pnpm dev' })])
+test('status toont slots, geheugen en weigeringen: nieuwste eerst, in lokale tijd', () => {
+  cli(['log', 'refuse', JSON.stringify({ kind: 'dev', reason: 'slots', command: 'oud-commando' })])
+  cli(['log', 'refuse', JSON.stringify({ kind: 'test', reason: 'slots', command: 'nieuw-commando' })])
   const s = cli(['status']).stdout
   assert.match(s, /Geheugen: 60% vrij/)
   assert.match(s, /dev: 0\/2/)
-  assert.match(s, /pnpm dev/)
+  assert.ok(s.indexOf('nieuw-commando') < s.indexOf('oud-commando'), 'nieuwste bovenaan')
+  const local = new Date().toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' })
+  assert.match(s, new RegExp(local.replace(':', ':')), 'lokale tijd')
+  assert.doesNotMatch(s, /\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/, 'geen UTC-stempel')
+})
+
+test('log: pakken en vrijgeven onder hetzelfde proces-id, met kind erbij', () => {
+  cli(['run', 'test', '--label', 'pnpm test', '--', 'sh', '-c', 'true'])
+  const ev = fs.readFileSync(path.join(home, 'log.jsonl'), 'utf8').trim().split('\n').map(l => JSON.parse(l))
+  const acq = ev.find(e => e.event === 'acquire')
+  const rel = ev.find(e => e.event === 'release')
+  assert.equal(acq.pid, rel.pid)
+  assert.ok(rel.childPid, 'childPid staat erbij')
+  assert.equal(rel.command, 'pnpm test', 'label in plaats van het hele commando')
+})
+
+test('browser: vrijgeven wordt gelogd met de tool die het deed', () => {
+  json(['acquire', 'browser', '--session', 's1', '--tool', 'mcp__x_playwright__browser_navigate'])
+  json(['release', 'browser', '--session', 's1', '--tool', 'mcp__x_playwright__browser_close'])
+  const rel = fs.readFileSync(path.join(home, 'log.jsonl'), 'utf8').trim().split('\n').map(l => JSON.parse(l)).find(e => e.event === 'release')
+  assert.equal(rel.tool, 'mcp__x_playwright__browser_close')
+  assert.equal(rel.command, 'Playwright MCP-browser')
+})
+
+test('weigermelding gebruikt het korte commando als agent-slot op het PATH staat', () => {
+  const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-slot-bin-'))
+  fs.writeFileSync(path.join(bin, 'agent-slot'), '#!/bin/sh\n', { mode: 0o755 })
+  const c = json(['check', 'dev'], { AGENT_SLOT_FAKE_FREE: '5', PATH: `${bin}${path.delimiter}${process.env.PATH}` })
+  assert.match(c.message, /`agent-slot wait dev`/)
+  const d = json(['check', 'dev'], { AGENT_SLOT_FAKE_FREE: '5', PATH: '/usr/bin:/bin' })
+  assert.match(d.message, /`node '[^']+agent-slot\.mjs' wait dev`/)
 })
 
 test('install zet de CLI op een vaste plek', () => {

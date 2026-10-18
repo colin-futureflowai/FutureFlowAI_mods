@@ -34,6 +34,8 @@ export function splitSegments(command) {
     if (c === '\\' && i + 1 < command.length) { cur += c + command[++i]; continue }
     const two = command.slice(i, i + 2)
     if (two === '&&' || two === '||') { parts.push(cur); cur = ''; i++; continue }
+    // `2>&1` en `&>` zijn omleidingen, geen scheiding.
+    if (c === '&' && (command[i - 1] === '>' || command[i - 1] === '<' || command[i + 1] === '>')) { cur += c; continue }
     if (c === ';' || c === '|' || c === '\n' || c === '&') { parts.push(cur); cur = ''; continue }
     cur += c
   }
@@ -154,6 +156,11 @@ function classifyWords(w) {
   return null
 }
 
+// Het stuk zonder omleidingen (`> log`, `2>&1`), zodat meldingen tonen wát er draait.
+export function cleanSegment(segment) {
+  return segment.replace(/\s*\d*(>>?|<)&?\s*("[^"]*"|'[^']*'|\S+)/g, '').replace(/\s+/g, ' ').trim()
+}
+
 // Volgorde van zwaarte: het zwaarste stuk wint.
 const RANK = { browser: 5, dev: 4, test: 3, agent: 2, 'unknown-heavy': 1 }
 
@@ -164,7 +171,7 @@ export function classify(command) {
     const r = classifyWords(words(segment))
     if (!r) continue
     if (r.kind === 'self') return { kind: 'self', segment }
-    if (!best.kind || RANK[r.kind] > RANK[best.kind]) best = { ...r, segment }
+    if (!best.kind || RANK[r.kind] > RANK[best.kind]) best = { ...r, segment: cleanSegment(segment) }
   }
   return best
 }

@@ -25,7 +25,7 @@ Doel: Claude Code (en andere agents) mogen niet zoveel zware dingen tegelijk sta
 | `test` | 1 | `pnpm test`, `vitest`, `jest`, `node --test`, `playwright test`, `tsc`, `pnpm typecheck`, `pnpm build` |
 | `browser` | 1 | Playwright-MCP-tools, `npx playwright` (niet `test`) |
 
-Geheugen: `floorPercent` 20 (krap) en `criticalPercent` 10 (kritiek). Gemeten als vrij percentage: macOS `memory_pressure -Q`, Linux `MemAvailable` uit `/proc/meminfo`, Windows `os.freemem()`.
+Geheugen: `floorPercent` 25 (krap; was 20, verhoogd na de test met twee workers: 2 dev-servers + 1 testrun brachten een Mac met 16 GB op ~32% vrij) en `criticalPercent` 10 (kritiek). Gemeten als vrij percentage: macOS `memory_pressure -Q`, Linux `MemAvailable` uit `/proc/meminfo`, Windows `os.freemem()`.
 
 ## Regels in Claude Code
 
@@ -57,6 +57,10 @@ agent-slot status [--json]                      slots, geheugen, laatste weigeri
 agent-slot kill-idle                            dode en verlopen slots opruimen
 agent-slot install                              shim op het PATH zetten
 ```
+
+## Dashboard
+
+`/agent-slots` opent een paneel (`$.ui.open`, `ui.render` op `Pane`). De mod haalt elke 3 s `agent-slot status --json` op zolang het paneel open is (`$.clock.every`, stopt als `$.ui.panes()` het niet meer noemt) en zet het in `$.state` `agent-slots.snapshot`. `/agent-slots status` geeft dezelfde info als tekst.
 
 ## Later (v2)
 

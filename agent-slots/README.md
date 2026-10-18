@@ -5,12 +5,13 @@ Keeps Claude Code (and other coding agents) from starting more dev servers, test
 ## What it does
 
 - **Slots for heavy commands.** Dev servers, test/typecheck/build runs and browser sessions each have a limit (default: 2 dev, 1 test, 1 browser), shared across every session and worktree on the machine.
-- **Memory floor.** Below 20% free memory, new heavy commands, sessions and workflows are refused; below 10%, new subagents too.
+- **Memory floor.** Below 25% free memory, new heavy commands, sessions and workflows are refused; below 10%, new subagents too.
 - **Automatic in Claude Code.** Heavy Bash commands are recognised (`pnpm dev`, `cd web && NODE_OPTIONS=… pnpm dev`, `vitest`, `tsc`, `npx playwright test`, …) and wrapped in `agent-slot run`, which holds the slot exactly as long as the process lives. Your existing permission rules still apply to the original command.
 - **Clear refusals.** A refusal says who holds the slot, since when, and what to do next (`agent-slot wait dev`), so an agent waits instead of retrying or giving up.
 - **Browser lock for the Playwright MCP**, tied to the session and released after 10 minutes without use or when the session ends.
 - **Crash-safe.** Every slot records its process ID and start time; dead processes, reboots and reused PIDs never leave a slot stuck.
-- **Log and status.** Every acquire, release, refusal and clean-up goes to one log; `/agent-slots` or `agent-slot status` shows slots in use, free memory and the latest refusals.
+- **Dashboard.** `/agent-slots` opens a live pane in Claude Code: a memory bar, each slot type with who holds it, and the latest refusals (refreshed every 3 seconds).
+- **Log and status.** Every acquire, release, refusal and clean-up goes to one log; `/agent-slots status` or `agent-slot status` shows the same as text.
 
 If the mod itself fails (for example `node` can't be found), it lets everything through, shows a notice once, and writes the reason to `~/.claude/agent-slots-mod.log`.
 
@@ -43,7 +44,7 @@ Optional, in `~/.claude/agent-slots/config.json`:
 ```json
 {
   "limits": { "dev": 2, "test": 1, "browser": 1 },
-  "floorPercent": 20,
+  "floorPercent": 25,
   "criticalPercent": 10,
   "browserIdleMinutes": 10,
   "waitTimeoutSeconds": 540

@@ -34,6 +34,7 @@ FutureFlowAI_mods/
 - **`tsc -p <mod>`** kan in een sessie met veel MCP-servers falen op TS2589 (te diepe types door de union van alle MCP-tools). Type-check dan zonder `claude-code-mcp` in `types`.
 - **Unix-socket-paden** onder `/tmp` houden; macOS kapt af bij ~104 tekens.
 - **Gedeelde code** tussen hooks-module en Node-scripts: pure `.mjs` zonder Node-API's (bv. `agent-slots/lib/classify.mjs`), met een `.d.mts` ernaast voor de types.
+- **Geen variabele `h` in een `.tsx`-module**: JSX compileert naar de globale `h`; een `h` in scope (bv. `list.map(h => …)`) breekt het tekenen met "h is not a function".
 - **Mock-antwoorden in `*.test.ts`**: een test-hook op `$`-aanroepen (`env.get`, `session.id`, `process.run`) geeft `{ value }` terug, niet de waarde zelf.
 - Taal van UI-teksten en code-commentaar: Nederlands; README's in het Engels.
 
@@ -73,6 +74,8 @@ Houdt agents tegen voordat ze zoveel dev-servers, tests, browsers of sessies sta
 - **Faalt open**: `.catch(failOpen)` op de guards laat alles door bij een fout, met één toast en een regel in `~/.claude/agent-slots-mod.log`. Bewust, zodat een fout in de mod nooit al het werk blokkeert.
 - **Valkuilen uit de live test (18-10-2026)**: `node` via `/usr/bin/env` starten (kaal PATH); de CLI vergelijkt realpaths om te zien of hij het hoofdscript is (de dev-mods-map is een symlink); een kapotte CLI geeft exitcode ≠ 0 en dat wordt een melding, geen stille doorlaat.
 - Bewust gekozen (18-10-2026): vooral goed voor Claude Code; de CLI op het PATH is voor andere agents (Orca-workers e.d.). Eisen kwamen van een code-agent die vaak tegen geheugenproblemen aanliep (8 punten, zie DESIGN.md).
+- Dashboard: `/agent-slots` opent een paneel dat elke 3 s `status --json` ophaalt (state `agent-slots.snapshot`, contract in `types/index.d.ts`); `/agent-slots status` is de tekstversie.
+- Bijgesteld na de test met twee Orca-workers (18-10-2026): standaardgrens 25% (was 20%), status nieuwste eerst in lokale tijd, labels zonder omleidingen, meldingen met het korte `agent-slot` als dat op het PATH staat.
 - Testen: `node --test agent-slots/tests/*.test.mjs` (CLI met echte processen, `AGENT_SLOT_HOME` en `AGENT_SLOT_FAKE_FREE`) en `claude plugin test agent-slots` (hook-logica met nep-CLI).
 
 ### futureflow-skills

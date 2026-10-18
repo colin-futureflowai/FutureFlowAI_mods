@@ -28,7 +28,7 @@ const TEMPFAIL = 75
 
 const DEFAULTS = {
   limits: { dev: 2, test: 1, browser: 1 },
-  floorPercent: 20,
+  floorPercent: 25,
   criticalPercent: 10,
   browserIdleMinutes: 10,
   waitTimeoutSeconds: 540,
@@ -54,6 +54,27 @@ function readLog(limit = 2000) {
     const lines = fs.readFileSync(LOG, 'utf8').trim().split('\n')
     return lines.slice(-limit).map(l => { try { return JSON.parse(l) } catch { return null } }).filter(Boolean)
   } catch { return [] }
+}
+
+// Hoe de gebruiker/agent de CLI aanroept in meldingen: `agent-slot` als dat op het PATH
+// staat (na /agent-slots install), anders het volledige pad naar dit bestand.
+let invokeCache
+function invoke() {
+  if (invokeCache) return invokeCache
+  const names = IS_WIN ? ['agent-slot.cmd', 'agent-slot.exe'] : ['agent-slot']
+  const onPath = (process.env.PATH ?? '').split(path.delimiter).some(dir => names.some(n => { try { return fs.statSync(path.join(dir, n)).isFile() } catch { return false } }))
+  let self = fileURLToPath(import.meta.url)
+  try { self = fs.realpathSync(self) } catch {}
+  return (invokeCache = onPath ? 'agent-slot' : `node '${self}'`)
+}
+const cmd = rest => `\`${invoke()} ${rest}\``
+
+// Lokale tijd voor meldingen en status (het log zelf blijft UTC/ISO).
+const localTime = iso => {
+  const d = new Date(iso)
+  const today = new Date().toDateString() === d.toDateString()
+  const time = d.toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  return today ? time : `${d.toLocaleDateString('nl-NL', { day: 'numeric', month: 'short' })} ${time}`
 }
 
 // ---------- geheugen ----------
@@ -178,8 +199,8 @@ function reap(cfg = config()) {
 function holderText(l) {
   const who = l.session ? `sessie ${String(l.session).slice(0, 8)}` : l.pid ? `pid ${l.childPid ?? l.pid}` : 'onbekend'
   const where = l.cwd ? ` in ${l.cwd.replace(os.homedir(), '~')}` : ''
-  const what = l.command ? ` (${String(l.command).slice(0, 60)})` : ''
-  return `${who}${where}${what}, sinds ${l.since ? new Date(l.since).toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' }) : '?'}`
+  const what = l.command ? ` (${String(l.command).slice(0, 80)})` : ''
+  return `${who}${where}${what}, sinds ${l.since ? localTime(l.since) : '?'}`
 }
 
 // Mag er nu een slot van deze soort bij? `gate` is de geheugengrens voor aanroepen zonder slot.
@@ -193,7 +214,7 @@ export function check(kind, { session, gate = 'floor' } = {}) {
   if (mem.freePercent < threshold) {
     return {
       ok: false, reason: 'memory', memory: mem, threshold,
-      message: `Te weinig vrij geheugen: ${mem.freePercent}% vrij, de grens is ${threshold}%. Rond eerst lopend werk af of stop een dev-server die je niet meer nodig hebt (\`agent-slot status\` laat zien wat er draait), en probeer het daarna opnieuw. Of wacht met: \`agent-slot wait ${kind}${gate === 'critical' ? ' --gate critical' : ''}\``,
+      message: `Te weinig vrij geheugen: ${mem.freePercent}% vrij, de grens is ${threshold}%. Rond eerst lopend werk af of stop een dev-server die je niet meer nodig hebt (${cmd('status')} laat zien wat er draait), en probeer het daarna opnieuw. Of wacht met: ${cmd(`wait ${kind}${gate === 'critical' ? ' --gate critical' : ''}`)}`,
     }
   }
   const limit = cfg.limits[kind]
@@ -203,7 +224,7 @@ export function check(kind, { session, gate = 'floor' } = {}) {
   return {
     ok: false, reason: 'slots', memory: mem, used: holders.length, limit,
     holders: holders.map(l => ({ session: l.session, cwd: l.cwd, command: l.command, since: l.since, pid: l.childPid ?? l.pid })),
-    message: `Alle ${limit} ${kind}-slot${limit === 1 ? '' : 's'} zijn bezet: ${holders.map(holderText).join('; ')}. Volgende stap: draai \`agent-slot wait ${kind}\` (wacht tot er plek is, max. ${Math.round(cfg.waitTimeoutSeconds / 60)} min) en probeer het dan opnieuw, of hergebruik de server die al draait.`,
+    message: `Alle ${limit} ${kind}-slot${limit === 1 ? '' : 's'} zijn bezet: ${holders.map(holderText).join('; ')}. Volgende stap: draai ${cmd(`wait ${kind}`)} (wacht tot er plek is, max. ${Math.round(cfg.waitTimeoutSeconds / 60)} min) en probeer het dan opnieuw, of hergebruik de server die al draait.`,
   }
 }
 
@@ -231,6 +252,7 @@ function acquire(kind, data, { session } = {}) {
   const file = tryAcquire(kind, data)
   if (!file) return { ...check(kind, { session }), ok: false }
   log('acquire', { kind, session: data.session, cwd: data.cwd, command: data.command, pid: data.pid, memory: c.memory.freePercent })
+  // pid is altijd het proces dat het slot houdt (bij `run` de wrapper); childPid staat erbij zodra bekend.
   return { ok: true, file }
 }
 
@@ -243,11 +265,11 @@ function updateLock(file, patch) {
   } catch {}
 }
 
-function release(file, reason = 'release') {
+function release(file, reason = 'release', extra = {}) {
   let lock = null
   try { lock = JSON.parse(fs.readFileSync(file, 'utf8')) } catch {}
   try { fs.unlinkSync(file) } catch { return }
-  log(reason, { kind: lock?.kind, session: lock?.session, cwd: lock?.cwd, command: lock?.command, pid: lock?.childPid ?? lock?.pid })
+  log(reason, { kind: lock?.kind, session: lock?.session, cwd: lock?.cwd, command: lock?.command, pid: lock?.pid, childPid: lock?.childPid, ...extra })
 }
 
 const sleep = ms => new Promise(r => setTimeout(r, ms))
@@ -337,7 +359,7 @@ function cmdBrowser(action, opts) {
   if (!session) { out({ ok: false, message: '--session ontbreekt' }); return 2 }
   const cfg = config()
   if (action === 'release') {
-    for (const l of reap(cfg)) if (l.kind === 'browser' && l.session === session && !l.pid) release(l.file)
+    for (const l of reap(cfg)) if (l.kind === 'browser' && l.session === session && !l.pid) release(l.file, 'release', { tool: opts.tool })
     out({ ok: true }); return 0
   }
   const alive = reap(cfg)
@@ -345,11 +367,11 @@ function cmdBrowser(action, opts) {
   if (mine) { updateLock(mine.file, { lastUsed: new Date().toISOString() }); out({ ok: true, reuse: true }); return 0 }
   if (action === 'touch') { out({ ok: false, message: 'geen browser-slot voor deze sessie' }); return 0 }
   const now = new Date().toISOString()
-  const got = acquire('browser', { session, cwd: opts.cwd ?? process.cwd(), command: opts.tool ?? 'Playwright MCP', since: now, lastUsed: now }, { session })
+  const got = acquire('browser', { session, cwd: opts.cwd ?? process.cwd(), command: 'Playwright MCP-browser', tool: opts.tool, since: now, lastUsed: now }, { session })
   if (!got.ok) {
     const idle = cfg.browserIdleMinutes
     log('refuse', { kind: 'browser', via: 'mcp', session, reason: got.reason, memory: got.memory?.freePercent })
-    out({ ...got, message: got.reason === 'slots' ? `${got.message.replace(/Volgende stap:.*/, '')}De browser komt vanzelf vrij na ${idle} min zonder gebruik. Volgende stap: draai \`agent-slot wait browser\` en probeer het daarna opnieuw.` : got.message })
+    out({ ...got, message: got.reason === 'slots' ? `${got.message.replace(/Volgende stap:.*/, '')}De browser komt vanzelf vrij na ${idle} min zonder gebruik. Volgende stap: draai ${cmd('wait browser')} en probeer het daarna opnieuw.` : got.message })
     return 0
   }
   out({ ok: true }); return 0
@@ -374,11 +396,11 @@ function cmdStatus(opts) {
     lines.push(`${kind}: ${held.length}/${limit}`)
     for (const l of held) lines.push(`  - ${holderText(l)}`)
   }
-  lines.push('', refusals.length ? 'Laatste weigeringen:' : 'Geen weigeringen.')
-  for (const r of refusals) lines.push(`  ${r.t.slice(0, 19).replace('T', ' ')}  ${r.kind ?? r.tool ?? ''}  ${r.reason ?? ''}  ${String(r.command ?? '').slice(0, 50)}`)
+  lines.push('', refusals.length ? 'Laatste weigeringen (nieuwste eerst):' : 'Geen weigeringen.')
+  for (const r of [...refusals].reverse()) lines.push(`  ${localTime(r.t)}  ${r.kind ?? r.tool ?? ''}  ${r.reason ?? ''}  ${String(r.command ?? r.tool ?? '').slice(0, 70)}`)
   if (unknown.length) {
     lines.push('', 'Doorgelaten twijfelgevallen (om de regels aan te scherpen):')
-    for (const u of unknown) lines.push(`  ${u.t.slice(0, 19).replace('T', ' ')}  ${String(u.command ?? '').slice(0, 60)}`)
+    for (const u of [...unknown].reverse()) lines.push(`  ${localTime(u.t)}  ${String(u.command ?? '').slice(0, 70)}`)
   }
   lines.push('', `Log: ${LOG}`)
   console.log(lines.join('\n'))

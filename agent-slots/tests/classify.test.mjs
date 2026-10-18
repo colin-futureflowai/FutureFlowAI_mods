@@ -1,7 +1,7 @@
 // node --test agent-slots/tests/
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { classify, hasShellBackground, unwrapCommand, wrapCommand } from '../lib/classify.mjs'
+import { classify, cleanSegment, hasShellBackground, unwrapCommand, wrapCommand } from '../lib/classify.mjs'
 
 const kind = c => classify(c).kind
 
@@ -49,6 +49,12 @@ test('browser en agents', () => {
   assert.equal(kind('claude -p "doe iets"'), 'agent')
   assert.equal(kind('codex exec "fix"'), 'agent')
   assert.equal(kind('orca worktree spawn --agent claude'), 'agent')
+})
+
+test('label: het zware deel zonder omleidingen', () => {
+  assert.equal(classify('echo "START $(date +%T)"; pnpm test > /tmp/x/out.log 2>&1').segment, 'pnpm test')
+  assert.equal(classify('PORT=6001 pnpm dev 2>&1 | head -15').segment, 'PORT=6001 pnpm dev')
+  assert.equal(cleanSegment('vitest run >> "my log.txt"'), 'vitest run')
 })
 
 test('zwaarste stuk wint', () => {

@@ -37,11 +37,11 @@ test('licht commando gaat ongewijzigd door, zonder de CLI aan te roepen', async 
 
 const cmdOf = (f: { ran: Answer[] }) => f.ran[0]?.command as string | undefined
 
-test('melding over geheugen: status- en wacht-commando worden uitvoerbaar, de zin blijft heel', async ($, on) => {
-  fake(on, { 'check test': { ok: false, reason: 'memory', message: 'Te weinig vrij geheugen. Stop een server (`agent-slot status` laat zien wat er draait). Of wacht met: `agent-slot wait test`' } })
+test('melding van de CLI gaat ongewijzigd naar Claude', async ($, on) => {
+  const msg = 'Te weinig vrij geheugen. Of wacht met: `agent-slot wait test`'
+  fake(on, { 'check test': { ok: false, reason: 'memory', message: msg } })
   const r = JSON.stringify(await $.tool.call({ tool: 'Bash', command: 'pnpm test' } as any))
-  expect(r).toMatch(/agent-slot\.mjs' status` laat zien/)
-  expect(r).toMatch(/agent-slot\.mjs' wait test`/)
+  expect(r).toContain(msg.replace(/`/g, '`'))
 })
 
 test('dev-server met vrij slot wordt ingepakt in agent-slot run', async ($, on) => {
@@ -57,7 +57,7 @@ test('alle slots bezet: geweigerd met een direct uitvoerbare volgende stap', asy
   const f = fake(on, { 'check dev': { ok: false, reason: 'slots', message: 'Alle 2 dev-slots zijn bezet: sessie abc. Volgende stap: draai `agent-slot wait dev` (max. 9 min).' } })
   const r = await $.tool.call({ tool: 'Bash', command: 'pnpm dev' } as any)
   expect(f.ran.length).toBe(0)
-  expect(JSON.stringify(r)).toMatch(/node '[^']*agent-slot\.mjs' wait dev/)
+  expect(JSON.stringify(r)).toContain('agent-slot wait dev')
   expect(cmdOf(f)).toBeUndefined()
   expect(f.calls.some(c => c[2] === 'log' && c[3] === 'refuse')).toBe(true)
 })
@@ -122,6 +122,7 @@ test('browser: elke aanroep pakt of ververst het slot, browser_close geeft het v
   await $.tool.call({ tool: 'mcp__plugin_playwright_playwright__browser_close' } as any)
   expect(f.ran.length).toBe(1)
   expect(f.calls.map(c => c.slice(2, 4).join(' '))).toEqual(['acquire browser', 'release browser'])
+  expect(f.calls[1]).toEqual(expect.arrayContaining(['--tool', 'mcp__plugin_playwright_playwright__browser_close']))
 })
 
 test('subagent pas tegengehouden bij kritiek geheugen', async ($, on) => {
@@ -130,4 +131,36 @@ test('subagent pas tegengehouden bij kritiek geheugen', async ($, on) => {
   expect(f.ran.length).toBe(0)
   expect(JSON.stringify(r)).toContain('Geen nieuwe subagent')
   expect(f.calls.find(c => c[2] === 'check')).toEqual(expect.arrayContaining(['--gate', 'critical']))
+})
+
+const STATUS = {
+  memory: { freePercent: 31, totalGB: 16, source: 'memory_pressure' },
+  config: { limits: { dev: 2, test: 1, browser: 1 }, floorPercent: 25, criticalPercent: 10 },
+  slots: [{ kind: 'dev', session: '8d044485-e2a1', cwd: '/Users/x/orca/workspaces/a', command: 'pnpm dev', since: '2026-10-18T11:40:00.000Z' }],
+  refusals: [{ t: '2026-10-18T11:42:12.134Z', kind: 'dev', reason: 'slots', command: 'PORT=6001 pnpm dev' }],
+}
+
+test('dashboard: /agent-slots opent het paneel met geheugen, slots en weigeringen', async ($, on) => {
+  const f = fake(on, { status: STATUS })
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('ui.panes', () => ({ value: [{ id: 'agent-slots' }] }))
+  const ran = await $.command.run({ origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 }, command: 'agent-slots', args: '' } as any)
+  expect(ran.text).toContain('Dashboard')
+  expect(f.calls.some(c => c[2] === 'status' && c[3] === '--json')).toBe(true)
+
+  for (const surface of ['terminal', 'desktop'] as const) {
+    const ui = await $.ui.mount({ plugin: 'agent-slots', surface, component: 'Pane', requestId: 'agent-slots', props: {} } as any)
+    expect(await ui.find({ type: 'Text', text: /31% vrij van 16 GB/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /1\/2/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /~\/orca\/workspaces\/a · pnpm dev/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /PORT=6001 pnpm dev/ })).toBeDefined()
+    await ui.unmount()
+  }
+})
+
+test('/agent-slots status geeft de tekstversie', async ($, on) => {
+  on('env.get', () => ({ value: undefined }))
+  on('process.run', () => ({ value: { exitCode: 0, stdout: 'Geheugen: 31% vrij\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
+  const ran = await $.command.run({ origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 }, command: 'agent-slots', args: 'status' } as any)
+  expect(ran.text).toContain('31% vrij')
 })
