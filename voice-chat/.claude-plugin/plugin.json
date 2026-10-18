@@ -1,0 +1,53 @@
+{
+  "name": "voice-chat",
+  "author": {
+    "name": "Future Flow AI"
+  },
+  "version": "0.5.0",
+  "description": "Talk to Claude Code through a fast Inworld voice agent that hands real tasks to Claude Code and tells you the outcome",
+  "userConfig": {
+    "inworld_api_key": {
+      "type": "string",
+      "title": "Inworld API key",
+      "description": "De Base64 \"Basic\" credentials uit het Inworld Portal (zonder \"Basic \"). Leeg laten om voice-chat/.env te gebruiken.",
+      "sensitive": true
+    },
+    "language": {
+      "type": "string",
+      "title": "Taal",
+      "description": "Taal voor spraakherkenning en stem, bv. nl of en. Leeg: nl."
+    },
+    "voice_id": {
+      "type": "string",
+      "title": "Inworld stem",
+      "description": "Stem-ID uit Inworld Portal > Voices. Leeg: Dennis."
+    },
+    "tts_model": {
+      "type": "string",
+      "title": "Inworld TTS-model",
+      "description": "Alleen voor /voice voorlezen. Leeg: inworld-tts-2-flash."
+    },
+    "mic_device": {
+      "type": "string",
+      "title": "Microfoon",
+      "description": "Naam uit: ffmpeg -f avfoundation -list_devices true -i \"\". Leeg: default."
+    },
+    "barge_in": {
+      "type": "boolean",
+      "title": "Onderbreken tijdens praten",
+      "description": "Microfoon blijft open terwijl Claude praat. Alleen met koptelefoon."
+    },
+    "agent_model": {
+      "type": "string",
+      "title": "Model van de spraakagent",
+      "description": "LLM dat Inworld Realtime voor de agent gebruikt. Leeg: openai/gpt-4.1-mini."
+    },
+    "agent_context_roots": {
+      "type": "string",
+      "title": "Vertrouwde mappen voor agent-context",
+      "description": "Kommagescheiden paden (bv. ~/Projects). Alleen in deze mappen krijgt de spraakagent de inhoud van CLAUDE.md mee; elders alleen bestandsnamen."
+    }
+  },
+  "types": "./types/index.d.ts",
+  "license": "MIT"
+}

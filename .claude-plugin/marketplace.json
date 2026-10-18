@@ -1,0 +1,24 @@
+{
+  "name": "futureflowai-mods",
+  "owner": {
+    "name": "Future Flow AI"
+  },
+  "description": "Claude Code plugins, skills and mods by Future Flow AI",
+  "plugins": [
+    {
+      "name": "voice-chat",
+      "source": "./voice-chat",
+      "description": "Talk to Claude Code through a fast Inworld voice agent that hands real tasks to Claude Code and tells you the outcome"
+    },
+    {
+      "name": "futureflow-skills",
+      "source": "./futureflow-skills",
+      "description": "Future Flow AI's own working methods as skills, picked up by Claude Code automatically"
+    },
+    {
+      "name": "content-skills",
+      "source": "./content-skills",
+      "description": "Content and social media skills (reels, hooks, carousels, captions, planning), based on Ootto's claude-content-skills"
+    }
+  ]
+}

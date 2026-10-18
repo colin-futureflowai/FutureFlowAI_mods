@@ -1,0 +1,94 @@
+# FutureFlowAI_mods — Claude Code plugins, skills en mods van Future Flow AI
+
+Eigen Claude Code plugins. Elke submap is één plugin; `.claude-plugin/marketplace.json` in de root maakt de repo installeerbaar als marketplace (`futureflowai-mods`). Een plugin kan een mod zijn (hooks-module), een bundel skills, of beide.
+
+## Structuur
+
+```
+FutureFlowAI_mods/
+├── CLAUDE.md
+├── README.md                         ← tabel met alle plugins (bij elke nieuwe plugin bijwerken)
+├── .claude-plugin/marketplace.json   ← lijst van alle plugins (bij elke nieuwe plugin bijwerken)
+├── futureflow-skills/                ← skills-plugin
+│   ├── .claude-plugin/plugin.json
+│   └── skills/<skill-naam>/SKILL.md  ← één map per skill (+ eventuele scripts/referenties)
+├── content-skills/                   ← skills-plugin, overgenomen van Ootto (MIT)
+└── voice-chat/                       ← één mod
+    ├── .claude-plugin/plugin.json    ← naam, versie, beschrijving
+    ├── hooks/hooks.json              ← { "modules": ["./register.tsx"] }
+    ├── hooks/register.tsx            ← de hooks-module (draait in Claude Code, geen Node/DOM)
+    ├── bridge/                       ← losse Node-processen die de mod start (wel Node)
+    ├── tests/*.test.ts               ← `claude plugin test <mod>`
+    ├── .env                          ← secrets, NIET in git
+    └── .env.example                  ← wel in git
+```
+
+## Regels
+
+- **Pluginnamen** mogen niet beginnen met `claude-`, `anthropic-` of `cc-plugin-` (gereserveerd; validatie faalt).
+- **Hooks-module ≠ Node.** `hooks/register.tsx` heeft geen `fs`, `child_process`, `fetch` of `WebSocket`. Alles via `$`: `$.process.spawn`, `$.http.fetch` (ook over een Unix-socket met `socketPath`), `$.env.get` (alleen string-literals), `$.plugin.root`. Wat echt Node nodig heeft (microfoon, websockets naar derden) hoort in een `bridge/`-script dat de mod spawnt.
+- **Secrets** via `userConfig` in `plugin.json` met `"sensitive": true`: Claude Code vraagt ze bij installeren en bewaart ze in de keychain; de mod krijgt ze in `register(on, options)` en geeft ze bij spawnen als `env` door aan de bridge. `<mod>/.env` (chmod 600) is alleen de terugval voor ontwikkelen. Nooit committen; `.env.example` meenemen bij elke nieuwe variabele.
+- **Binaries uit Homebrew** (`ffmpeg`, `ffplay`, `node`): de desktop-app heeft een kaal PATH, dus bij spawnen `/opt/homebrew/bin` vooraan zetten.
+- **Unix-socket-paden** onder `/tmp` houden; macOS kapt af bij ~104 tekens.
+- Taal van UI-teksten en code-commentaar: Nederlands.
+
+## Checken vóór commit
+
+```bash
+claude plugin validate <mod>
+claude plugin test <mod>
+node --check <mod>/bridge/*.mjs
+```
+
+Types voor de editor legt Claude Code zelf in `<mod>/.claude-plugin/types/` zodra de mod geladen is (gitignored); `tsc -p <mod>` type-checkt dan.
+
+## Ontwikkelen met hot reload
+
+Tijdens een sessie laadt Claude Code mods uit `~/.claude/dev-mods/<sessie-id>/`. Werkwijze: de mod blijft hier in de repo staan en in die map komt een symlink naar `FutureFlowAI_mods/<mod>`. Wijzigingen hier worden dan na elke beurt opnieuw geladen.
+
+Vast installeren (alle sessies):
+
+```bash
+claude plugin marketplace add /pad/naar/FutureFlowAI_mods
+claude plugin install voice-chat@futureflowai-mods
+claude plugin install futureflow-skills@futureflowai-mods
+claude plugin install content-skills@futureflowai-mods
+```
+
+Na een wijziging: `/reload-plugins` in de sessie (een lokale marketplace wordt direct uit deze map gelezen).
+
+## Plugins
+
+### futureflow-skills
+Bundel skills van Future Flow AI. Claude Code vindt elke `skills/<naam>/SKILL.md` vanzelf; er hoeft niets in `plugin.json` bij.
+- `SKILL.md` begint met frontmatter: `name` (gelijk aan de mapnaam, kebab-case) en `description` (wanneer Claude hem moet gebruiken; dit bepaalt of hij getriggerd wordt). Daarna de instructies.
+- Hulpbestanden (scripts, sjablonen, referenties) in dezelfde skill-map, en vanuit `SKILL.md` relatief ernaar verwijzen.
+- Geen klant-specifieke context of secrets in een skill; die horen in de vault van het bedrijf.
+- Bij een nieuwe skill: versie in `plugin.json` ophogen en de skill hieronder noemen.
+
+Skills: nog geen.
+
+### content-skills
+54 content- en social-media-skills, overgenomen van [Ootto-AI/claude-content-skills](https://github.com/Ootto-AI/claude-content-skills) v1.4.0 (commit `c79c330`, 18-10-2026). Zelfde conventies als `futureflow-skills`.
+- MIT: `LICENSE` en de naamsvermelding in `README.md` blijven staan. `UPSTREAM-README.md` is het origineel, ter referentie.
+- Updates van Ootto komen niet vanzelf mee. Nieuwe upstream-versie overnemen = handmatig diffen tegen de genoemde commit, zodat onze aanpassingen blijven.
+- Elke aanpassing aan een skill: versie in `plugin.json` ophogen.
+
+### voice-chat
+Praten met een Claude Code sessie via een Inworld-spraakagent. `/voice` zet hem aan of uit, verder `/voice voorlezen|stil|mute|unmute`. Een balk boven het invoerveld (`ui.render` op `AbovePrompt`, state in `$.state` `voice-chat.band`, contract in `types/index.d.ts`) toont of de agent luistert of praat, of Claude bezig is, en de laatste zin.
+
+**Agentmodus (standaard)** — `bridge/agent-bridge.mjs`:
+- Microfoon (`ffmpeg -f avfoundation`, 24 kHz PCM16) → Inworld Realtime (`wss://api.inworld.ai/api/v1/realtime/session?key=<id>&protocol=realtime`, `Authorization: Basic <key>`, OpenAI-Realtime-protocol) → audio terug naar `ffplay`.
+- De agent draait op Inworlds eigen LLM (`agent_model`, standaard `openai/gpt-4.1-mini`) en voert het gesprek zelf. Grote taken geeft hij door met de tool `geef_taak_aan_claude_code` (`providerData.auto_tool_response: false`); de bridge zet die als `{type:"task"}` op stdout, de mod stuurt hem in als `[via spraakagent] <taak>`.
+- Koppeling: `turn.start` met dat label koppelt de beurt aan de taak; alleen bij `turn.complete` van zo'n beurt gaat Claudes antwoord als platte tekst via `POST /result` terug (`[Claude Code] …`), zodat getypte prompts er niet tussendoor lopen.
+- Sessiegeheugen: bij `ready` stuurt de mod de laatste beurten van de sessie (`$.session.messages({ as: 'api' })`, zonder system-reminders en tool-blokken, max. ~6000 tekens) via `POST /context`; elke getypte beurt daarna via `POST /note`. De bridge zet ze als stille `system`-berichten (`[Sessie-context]`, `[Sessie-update]`) in het gesprek, waar de agent niet op reageert maar wel uit put, en stuurt ze na opnieuw verbinden opnieuw mee.
+- Goedkeuring: `classic.PermissionRequest` tijdens een agent-taak → `POST /notice` (de agent zegt dat er in het scherm gekeken moet worden) en rood in de balk; de volgende `tool.call` haalt het weg.
+- Beveiliging: wat de agent doorgeeft is gesproken, door een extern model samengevat, en kan achtergrondgeluid bevatten. `prompt.compose` vertelt Claude dat zo'n taak geen getypte opdracht is en dat onomkeerbare of naar buiten gerichte acties eerst bevestigd moeten worden (de vraag gaat via de agent terug).
+- Context: de bridge draait in de werkmap van de sessie en geeft de bovenste bestandsnamen mee; de inhoud van `CLAUDE.md` alleen onder `agent_context_roots` (vertrouwde mappen, bv. `~/Projects`), en dan als achtergrond, niet als opdracht.
+- Bewust gekozen (13-10-2026): de agent is een snelle tussenpersoon met een eigen LLM; Claude Code blijft het brein voor echt werk. Dit vervangt de eerdere keuze om Realtime niet te gebruiken.
+
+**Voorleesmodus** — `/voice voorlezen`, `bridge/voice-bridge.mjs`: Inworld streaming STT → prompt naar Claude; antwoord ingekort (Haiku bij lange antwoorden) → Inworld TTS → `ffplay`. Claude praat hier zelf.
+
+Beide modi:
+- Half-duplex: de microfoon staat dicht terwijl er audio speelt (en 400 ms erna), tenzij `BARGE_IN=true` (alleen met koptelefoon).
+- Instellingen: `userConfig` (`inworld_api_key` geheim, `language`, `voice_id`, `tts_model`, `mic_device`, `barge_in`, `agent_model`, `agent_context_roots`) → env van de bridge; lege velden vallen terug op `.env`, daarna op de standaard in de bridge.
