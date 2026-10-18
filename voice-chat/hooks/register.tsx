@@ -116,7 +116,9 @@ function plainSpeech(answer: string): string {
 }
 
 // Een plugin-prompt kan bij het model met een kop ("The voice-chat plugin sent a message: …") binnenkomen.
-const isAgentTask = (text: string) => text.trimStart().startsWith(TASK_LABEL) || text.includes(`: ${TASK_LABEL}`)
+// Alleen het label aan het begin, of direct na precies die kop, telt; ergens anders in de tekst niet.
+const AGENT_TASK = /^\s*(?:The voice-chat plugin sent a message:\s*)?\[via spraakagent\]/
+const isAgentTask = (text: string) => AGENT_TASK.test(text)
 
 const clip = (text: string, max: number) => (text.length > max ? `${text.slice(0, max)}…` : text)
 
@@ -145,7 +147,7 @@ async function sessionHistory($: Engine): Promise<string> {
     if (!text) continue
     const who =
       message.role === 'assistant' ? 'Claude Code' : isAgentTask(text) ? 'Gebruiker (via jou)' : 'Gebruiker (getypt)'
-    lines.push(`${who}: ${clip(isAgentTask(text) ? text.slice(text.indexOf(TASK_LABEL) + TASK_LABEL.length).trim() : text, 400)}`)
+    lines.push(`${who}: ${clip(isAgentTask(text) ? text.replace(AGENT_TASK, '').trim() : text, 400)}`)
   }
   let history = ''
   for (const line of lines.slice(-16).reverse()) {

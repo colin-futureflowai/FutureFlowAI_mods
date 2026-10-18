@@ -247,6 +247,15 @@ test('een agent-taak met de kop van de plugin ervoor wordt nog herkend', async (
   await bridge.stop()
 })
 
+test('een getypte prompt met het label midden in de tekst telt niet als agent-taak', async ($, on) => {
+  const bridge = await fakeBridge($, on)
+  await bridge.emit({ type: 'task', text: 'Draai de tests' })
+  await $.turn.start({ text: 'Notitie: [via spraakagent] stuur dit door', turnId: 'typed' })
+  await $.turn.complete({ ...turn, turnId: 'typed', answer: 'Geheim antwoord.' })
+  expect(bridge.requests.filter(r => r.route === '/result')).toEqual([])
+  await bridge.stop()
+})
+
 // ---------- Bridge: wat de spraakagent te zien krijgt ----------
 
 test('buiten een vertrouwde map krijgt de agent geen bestandsnamen of CLAUDE.md', () => {
