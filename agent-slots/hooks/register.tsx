@@ -12,6 +12,10 @@ type Check = { ok: boolean; reuse?: boolean; reason?: string; message?: string; 
 
 let sessionId: string | undefined
 
+// Exact de commando's die deze mod zelf heeft ingepakt. Alleen die worden in tool.check
+// uitgepakt; een nagemaakte wrapper (ander programma vooraan) wordt gewoon als geheel beoordeeld.
+const produced = new Set<string>()
+
 async function session($: Engine) {
   sessionId ??= await $.session.id()
   return sessionId
@@ -119,14 +123,18 @@ export const register: Register = on => {
       await log($, 'refuse', { kind: c.kind, tool: 'Bash', command: e.command, reason: check.reason, memory: check.memory?.freePercent })
       return { deny: `agent-slots: ${await runnable($, check.message ?? 'geen slot vrij')}` }
     }
-    return next({ ...e, command: wrapCommand(e.command, c.kind, cliPath($), { session: id, label: c.segment }) })
+    const wrapped = wrapCommand(e.command, c.kind, cliPath($), { session: id, label: c.segment })
+    if (produced.size > 500) produced.clear()
+    produced.add(wrapped)
+    return next({ ...e, command: wrapped })
   }).catch(failOpen)
 
   // Toestemming: het ingepakte commando beoordelen als het origineel, zodat bestaande regels blijven werken.
   // De invoer van tool.check ligt vast, dus vragen we het oordeel voor het origineel apart op.
   on('tool.check', { tool: 'Bash' }, async ($, e, next) => {
     const input = e.input as { command?: unknown }
-    const inner = typeof input?.command === 'string' ? unwrapCommand(input.command) : null
+    const cmd = input?.command
+    const inner = typeof cmd === 'string' && produced.has(cmd) ? unwrapCommand(cmd) : null
     if (inner === null) return next(e)
     return $.tool.check({ tool: 'Bash', input: { ...input, command: inner } })
   })

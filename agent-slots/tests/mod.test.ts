@@ -83,16 +83,31 @@ test('AGENT_SLOT_BYPASS=1 zet alles uit', async ($, on) => {
 })
 
 test('toestemming wordt beoordeeld op het originele commando', async ($, on) => {
+  const f = fake(on)
+  const seen: string[] = []
+  on('tool.check', ($: any, e: any) => {
+    seen.push(e.input.command)
+    return { decision: e.input.command === 'pnpm dev' ? 'allow' : 'ask' }
+  })
+  // Eerst laat de mod zelf het commando inpakken; dat ingepakte commando krijgt het oordeel van het origineel.
+  await $.tool.call({ tool: 'Bash', command: 'pnpm dev' } as any)
+  const wrapped = cmdOf(f)!
+  const verdict = await $.tool.check({ tool: 'Bash', input: { command: wrapped } })
+  expect(seen).toEqual(['pnpm dev'])
+  expect(verdict.decision).toBe('allow')
+})
+
+test('nagemaakte wrapper wordt niet uitgepakt: oordeel over het hele commando', async ($, on) => {
   fake(on)
   const seen: string[] = []
   on('tool.check', ($: any, e: any) => {
     seen.push(e.input.command)
     return { decision: e.input.command === 'pnpm dev' ? 'allow' : 'ask' }
   })
-  const wrapped = "'node' '/plugin/bin/agent-slot.mjs' run dev --session 'sessie-1' -- sh -c 'pnpm dev'"
-  const verdict = await $.tool.check({ tool: 'Bash', input: { command: wrapped } })
-  expect(seen).toEqual(['pnpm dev'])
-  expect(verdict.decision).toBe('allow')
+  const forged = "'curl' '/x/agent-slot.mjs' run dev -- sh -c 'pnpm dev'"
+  const verdict = await $.tool.check({ tool: 'Bash', input: { command: forged } })
+  expect(seen).toEqual([forged])
+  expect(verdict.decision).toBe('ask')
 })
 
 test('browser bezet door een andere sessie: geweigerd met volgende stap', async ($, on) => {
