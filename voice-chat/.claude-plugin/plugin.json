@@ -3,7 +3,7 @@
   "author": {
     "name": "Future Flow AI"
   },
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Talk to Claude Code through a fast Inworld voice agent that hands real tasks to Claude Code and tells you the outcome",
   "userConfig": {
     "inworld_api_key": {
@@ -45,7 +45,7 @@
     "agent_context_roots": {
       "type": "string",
       "title": "Vertrouwde mappen voor agent-context",
-      "description": "Kommagescheiden paden (bv. ~/Projects). Alleen in deze mappen krijgt de spraakagent de inhoud van CLAUDE.md mee; elders alleen bestandsnamen."
+      "description": "Kommagescheiden paden (bv. ~/Projects). Alleen in deze mappen krijgt de spraakagent bestandsnamen en de inhoud van CLAUDE.md mee; elders alleen de projectnaam."
     }
   },
   "types": "./types/index.d.ts",

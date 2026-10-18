@@ -6,6 +6,8 @@ export type VoiceBand = {
   claudeBusy: boolean
   /** Tool waarvoor Claude op goedkeuring wacht; leeg als hij niet wacht. */
   waitingFor: string
+  /** Laatste taak die de spraakagent aan Claude doorgaf; leeg als er geen agent-taak loopt. */
+  task: string
   heard: string
   said: string
 }
