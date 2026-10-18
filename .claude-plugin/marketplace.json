@@ -19,6 +19,11 @@
       "name": "content-skills",
       "source": "./content-skills",
       "description": "Content and social media skills (reels, hooks, carousels, captions, planning), based on Ootto's claude-content-skills"
+    },
+    {
+      "name": "agent-slots",
+      "source": "./agent-slots",
+      "description": "Keeps agents from starting more dev servers, test runs, browsers and sessions than your machine's memory can handle"
     }
   ]
 }

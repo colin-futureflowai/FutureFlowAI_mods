@@ -13,6 +13,7 @@ FutureFlowAI_mods/
 │   ├── .claude-plugin/plugin.json
 │   └── skills/<skill-naam>/SKILL.md  ← één map per skill (+ eventuele scripts/referenties)
 ├── content-skills/                   ← skills-plugin, overgenomen van Ootto (MIT)
+├── agent-slots/                      ← mod + losse CLI (bin/agent-slot.mjs), gedeelde lib/ en node-tests
 └── voice-chat/                       ← één mod
     ├── .claude-plugin/plugin.json    ← naam, versie, beschrijving
     ├── hooks/hooks.json              ← { "modules": ["./register.tsx"] }
@@ -26,11 +27,15 @@ FutureFlowAI_mods/
 ## Regels
 
 - **Pluginnamen** mogen niet beginnen met `claude-`, `anthropic-` of `cc-plugin-` (gereserveerd; validatie faalt).
-- **Hooks-module ≠ Node.** `hooks/register.tsx` heeft geen `fs`, `child_process`, `fetch` of `WebSocket`. Alles via `$`: `$.process.spawn`, `$.http.fetch` (ook over een Unix-socket met `socketPath`), `$.env.get` (alleen string-literals), `$.plugin.root`. Wat echt Node nodig heeft (microfoon, websockets naar derden) hoort in een `bridge/`-script dat de mod spawnt.
+- **Hooks-module ≠ Node.** `hooks/register.tsx` heeft geen `fs`, `child_process`, `fetch` of `WebSocket`. Alles via `$`: `$.process.spawn`, `$.process.run`, `$.fs` (lezen/schrijven, maar niet atomair aanmaken of verwijderen), `$.http.fetch` (ook over een Unix-socket met `socketPath`), `$.env.get` (alleen string-literals), `$.plugin.root`. Wat echt Node nodig heeft (microfoon, websockets naar derden) hoort in een `bridge/`-script dat de mod spawnt.
 - **Secrets** via `userConfig` in `plugin.json` met `"sensitive": true`: Claude Code vraagt ze bij installeren en bewaart ze in de keychain; de mod krijgt ze in `register(on, options)` en geeft ze bij spawnen als `env` door aan de bridge. `<mod>/.env` (chmod 600) is alleen de terugval voor ontwikkelen. Nooit committen; `.env.example` meenemen bij elke nieuwe variabele.
-- **Binaries uit Homebrew** (`ffmpeg`, `ffplay`, `node`): de desktop-app heeft een kaal PATH, dus bij spawnen `/opt/homebrew/bin` vooraan zetten.
+- **Binaries uit Homebrew** (`ffmpeg`, `ffplay`, `node`): de desktop-app heeft een kaal PATH, en `argv[0]` wordt op dát PATH gezocht, niet op de `env.PATH` die je meegeeft. Start dus via `['/usr/bin/env', 'node', …]` met `env: { PATH: '/opt/homebrew/bin:…' }` (Windows: gewoon `node`).
+- **`tool.check`** krijgt de argumenten in `e.input` (`e.input.command` voor Bash), niet plat zoals `tool.call`, en ze liggen vast: een ander oordeel vraag je op met `$.tool.check({ tool, input })`.
+- **`tsc -p <mod>`** kan in een sessie met veel MCP-servers falen op TS2589 (te diepe types door de union van alle MCP-tools). Type-check dan zonder `claude-code-mcp` in `types`.
 - **Unix-socket-paden** onder `/tmp` houden; macOS kapt af bij ~104 tekens.
-- Taal van UI-teksten en code-commentaar: Nederlands.
+- **Gedeelde code** tussen hooks-module en Node-scripts: pure `.mjs` zonder Node-API's (bv. `agent-slots/lib/classify.mjs`), met een `.d.mts` ernaast voor de types.
+- **Mock-antwoorden in `*.test.ts`**: een test-hook op `$`-aanroepen (`env.get`, `session.id`, `process.run`) geeft `{ value }` terug, niet de waarde zelf.
+- Taal van UI-teksten en code-commentaar: Nederlands; README's in het Engels.
 
 ## Checken vóór commit
 
@@ -38,6 +43,7 @@ FutureFlowAI_mods/
 claude plugin validate <mod>
 claude plugin test <mod>
 node --check <mod>/bridge/*.mjs
+node --test agent-slots/tests/*.test.mjs   # CLI en commando-herkenning van agent-slots
 ```
 
 Types voor de editor legt Claude Code zelf in `<mod>/.claude-plugin/types/` zodra de mod geladen is (gitignored); `tsc -p <mod>` type-checkt dan.
@@ -51,6 +57,7 @@ Vast installeren (alle sessies):
 ```bash
 claude plugin marketplace add /pad/naar/FutureFlowAI_mods
 claude plugin install voice-chat@futureflowai-mods
+claude plugin install agent-slots@futureflowai-mods
 claude plugin install futureflow-skills@futureflowai-mods
 claude plugin install content-skills@futureflowai-mods
 ```
@@ -58,6 +65,15 @@ claude plugin install content-skills@futureflowai-mods
 Na een wijziging: `/reload-plugins` in de sessie (een lokale marketplace wordt direct uit deze map gelezen).
 
 ## Plugins
+
+### agent-slots
+Houdt agents tegen voordat ze zoveel dev-servers, tests, browsers of sessies starten dat de computer vastloopt. Werkt voor Claude Code automatisch; andere agents gebruiken de CLI `agent-slot`. Ontwerp en regels: `agent-slots/DESIGN.md`.
+- **CLI** `bin/agent-slot.mjs`: alle state in `~/.claude/agent-slots/` (locks met `O_EXCL`, `config.json`, `log.jsonl`). Alleen Node-builtins, want het bestand wordt los gekopieerd naar `~/.claude/agent-slots/bin/` (bij elke `session.start`) en de shim in `~/.local/bin` wijst daarheen.
+- **Mod**: `tool.call` op Bash herkent zware commando's (`lib/classify.mjs`) en pakt ze in als `'node' '<cli>' run <soort> --session '<id>' -- sh -c '<cmd>'`; `tool.check` beoordeelt toestemming op het originele commando (`unwrapCommand`). Playwright-MCP-tools: browser-slot per sessie. `Agent` bij kritiek geheugen, `Workflow`/`start_session` onder de grens.
+- **Faalt open**: `.catch(failOpen)` op de guards laat alles door bij een fout, met één toast en een regel in `~/.claude/agent-slots-mod.log`. Bewust, zodat een fout in de mod nooit al het werk blokkeert.
+- **Valkuilen uit de live test (18-10-2026)**: `node` via `/usr/bin/env` starten (kaal PATH); de CLI vergelijkt realpaths om te zien of hij het hoofdscript is (de dev-mods-map is een symlink); een kapotte CLI geeft exitcode ≠ 0 en dat wordt een melding, geen stille doorlaat.
+- Bewust gekozen (18-10-2026): vooral goed voor Claude Code; de CLI op het PATH is voor andere agents (Orca-workers e.d.). Eisen kwamen van een code-agent die vaak tegen geheugenproblemen aanliep (8 punten, zie DESIGN.md).
+- Testen: `node --test agent-slots/tests/*.test.mjs` (CLI met echte processen, `AGENT_SLOT_HOME` en `AGENT_SLOT_FAKE_FREE`) en `claude plugin test agent-slots` (hook-logica met nep-CLI).
 
 ### futureflow-skills
 Bundel skills van FutureFlowAI. Claude Code vindt elke `skills/<naam>/SKILL.md` vanzelf; er hoeft niets in `plugin.json` bij.

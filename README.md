@@ -5,6 +5,7 @@ Claude Code plugins, skills and mods by FutureFlowAI, published as one marketpla
 | Plugin | Type | What it does |
 | --- | --- | --- |
 | [voice-chat](voice-chat/) | mod | Talk to your Claude Code session through a fast Inworld voice agent. It handles small talk itself, hands real tasks to Claude Code and tells you the outcome (`/voice`). |
+| [agent-slots](agent-slots/) | mod | Keeps agents from starting more dev servers, test runs, browsers and sessions than your machine's memory can handle. Shared slots across all sessions and worktrees, with a memory floor (`/agent-slots`). |
 | [futureflow-skills](futureflow-skills/) | skills | FutureFlowAI's own working methods, picked up by Claude Code automatically. |
 | [content-skills](content-skills/) | skills | 54 content and social media skills (reels, hooks, carousels, captions, planning), based on [Ootto's claude-content-skills](https://github.com/Ootto-AI/claude-content-skills). |
 
@@ -13,6 +14,7 @@ Claude Code plugins, skills and mods by FutureFlowAI, published as one marketpla
 ```bash
 claude plugin marketplace add colin-futureflowai/FutureFlowAI_mods
 claude plugin install voice-chat@futureflowai-mods
+claude plugin install agent-slots@futureflowai-mods
 claude plugin install futureflow-skills@futureflowai-mods
 claude plugin install content-skills@futureflowai-mods
 ```

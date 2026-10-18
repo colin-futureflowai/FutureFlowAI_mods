@@ -1,0 +1,9 @@
+{
+  "name": "agent-slots",
+  "author": {
+    "name": "FutureFlowAI"
+  },
+  "version": "0.1.0",
+  "description": "Keeps agents from starting more dev servers, test runs, browsers and sessions than your machine's memory can handle",
+  "license": "MIT"
+}
