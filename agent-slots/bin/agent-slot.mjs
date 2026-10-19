@@ -39,6 +39,44 @@ const DEFAULTS = {
 
 // ---------- config, log ----------
 
+// Zelfde masker als in lib/classify.mjs (de CLI is één los bestand; een test houdt ze gelijk).
+// Maskeert geheimen in een commando voordat het in een label, het log, de status of een
+// melding komt. Het commando zelf draait ongewijzigd; alleen wat we bewaren en tonen wordt
+// gemaskeerd. Omgevingsvariabelen worden gemaskeerd, op een paar onschuldige na.
+const KEEP_ENV = new Set(['PORT', 'HOST', 'HOSTNAME', 'NODE_ENV', 'DEBUG', 'CI', 'FORCE_COLOR', 'NO_COLOR', 'TZ', 'LANG', 'NODE_OPTIONS', 'LOG_LEVEL', 'RUST_LOG', 'VERBOSE'])
+
+function maskSecrets(text) {
+  return String(text ?? '')
+    // URL met inloggegevens: https://user:pass@host -> https://***@host
+    .replace(/([a-z][a-z0-9+.-]*:\/\/)[^\s/@'"]+@/gi, '$1***@')
+    // Bekende tokenvormen, ook los in een commando
+    .replace(/\b(sk-[A-Za-z0-9_-]{16,}|sk_(?:live|test)_[A-Za-z0-9]{10,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|xox[abprs]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16}|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{5,})\b/g, '***')
+    // Authorization-headers en bearer-tokens
+    .replace(/\b(Bearer|Basic|token)\s+[A-Za-z0-9._~+/=-]{8,}/gi, '$1 ***')
+    // Opties met een geheim: --token x, --api-key=x, -p/--password x
+    .replace(/(--?[A-Za-z0-9-]*(?:token|secret|password|passwd|api-?key|apikey|auth|credential)[A-Za-z0-9-]*)(=|\s+)("[^"]*"|'[^']*'|[^\s;&|)]+)/gi, '$1$2***')
+    // Omgevingsvariabelen NAAM=waarde aan het begin van een woord
+    .replace(/(^|[\s;&|(])([A-Za-z_][A-Za-z0-9_]*)=("[^"]*"|'[^']*'|[^\s;&|)]*)/g, (m, pre, name, val) =>
+      KEEP_ENV.has(name.toUpperCase()) || val === '' ? m : `${pre}${name}=***`)
+}
+export { maskSecrets }
+
+const MASKED_FIELDS = ['command', 'full', 'label', 'task']
+const maskEntry = e => { const out = { ...e }; for (const f of MASKED_FIELDS) if (typeof out[f] === 'string') out[f] = maskSecrets(out[f]); return out }
+
+// Bestaand log (van vóór het maskeren) herschrijven met gemaskeerde velden.
+function cmdScrubLog() {
+  let lines = []
+  try { lines = fs.readFileSync(LOG, 'utf8').split('\n').filter(Boolean) } catch { console.log('Geen log.'); return 0 }
+  let changed = 0
+  const next = lines.map(l => { try { const e = JSON.parse(l); const m = maskEntry(e); if (JSON.stringify(m) !== JSON.stringify(e)) changed++; return JSON.stringify(m) } catch { return l } })
+  fs.writeFileSync(`${LOG}.tmp`, next.join('\n') + '\n')
+  fs.renameSync(`${LOG}.tmp`, LOG)
+  console.log(`${changed} van ${lines.length} logregels gemaskeerd.`)
+  return 0
+}
+
+
 function config() {
   let user = {}
   try { user = JSON.parse(fs.readFileSync(CONFIG, 'utf8')) } catch {}
@@ -48,14 +86,16 @@ function config() {
 function log(event, data = {}) {
   try {
     fs.mkdirSync(HOME, { recursive: true })
-    fs.appendFileSync(LOG, JSON.stringify({ t: new Date().toISOString(), event, ...data }) + '\n')
+    const safe = { ...data }
+    for (const f of MASKED_FIELDS) if (typeof safe[f] === 'string') safe[f] = maskSecrets(safe[f])
+    fs.appendFileSync(LOG, JSON.stringify({ t: new Date().toISOString(), event, ...safe }) + '\n')
   } catch {}
 }
 
 function readLog(limit = 2000) {
   try {
     const lines = fs.readFileSync(LOG, 'utf8').trim().split('\n')
-    return lines.slice(-limit).map(l => { try { return JSON.parse(l) } catch { return null } }).filter(Boolean)
+    return lines.slice(-limit).map(l => { try { return maskEntry(JSON.parse(l)) } catch { return null } }).filter(Boolean)
   } catch { return [] }
 }
 
@@ -202,7 +242,7 @@ function reap(cfg = config()) {
 function holderText(l) {
   const who = l.session ? `sessie ${String(l.session).slice(0, 8)}` : l.pid ? `pid ${l.childPid ?? l.pid}` : 'onbekend'
   const where = l.cwd ? ` in ${l.cwd.replace(os.homedir(), '~')}` : ''
-  const what = l.command ? ` (${String(l.command).slice(0, 80)})` : ''
+  const what = l.command ? ` (${maskSecrets(l.command).slice(0, 80)})` : ''
   return `${who}${where}${what}, sinds ${l.since ? localTime(l.since) : '?'}`
 }
 
@@ -318,7 +358,7 @@ async function cmdRun(kind, opts) {
   const waitS = opts.wait === true ? cfg.waitTimeoutSeconds : Number(opts.wait ?? 30)
   const full = cmd[0] === 'sh' && cmd[1] === '-c' ? cmd[2] : cmd.join(' ')
   // `--label` is het zware deel (bv. `pnpm dev` uit `cd web && pnpm dev`), voor leesbare meldingen.
-  const command = typeof opts.label === 'string' ? opts.label : full
+  const command = maskSecrets(typeof opts.label === 'string' ? opts.label : full)
   const data = { session: opts.session ?? process.env.CLAUDE_SESSION_ID, cwd: process.cwd(), command, pid: process.pid, pidStart: procStart(process.pid), since: new Date().toISOString() }
 
   const deadline = Date.now() + waitS * 1000
@@ -407,7 +447,7 @@ function cmdStatus(opts) {
   const mem = memory()
   const refusals = readLog().filter(e => e.event === 'refuse').slice(-5)
   const unknown = readLog().filter(e => e.event === 'unknown-heavy').slice(-5)
-  if (opts.json) { out({ memory: mem, config: cfg, slots: alive.map(({ file, ...l }) => l), refusals, unknown, overflow: readJobs().slice(-8) }); return 0 }
+  if (opts.json) { out({ memory: mem, config: cfg, slots: alive.map(({ file, ...l }) => maskEntry(l)), refusals, unknown, overflow: readJobs().slice(-8) }); return 0 }
   const lines = [`Geheugen: ${mem.freePercent}% vrij van ${mem.totalGB} GB (grens ${cfg.floorPercent}%, kritiek ${cfg.criticalPercent}%)`, '']
   for (const [kind, limit] of Object.entries(cfg.limits)) {
     const held = alive.filter(l => l.kind === kind)
@@ -620,6 +660,7 @@ export async function main(argv) {
     case 'memory': out(memory()); return 0
     case 'config': return cmdConfig(pos, opts)
     case 'overflow': return cmdOverflow(pos, opts)
+    case 'scrub-log': return cmdScrubLog()
     default:
       console.log(`agent-slot — gedeelde slots voor dev-servers, tests en de browser
 

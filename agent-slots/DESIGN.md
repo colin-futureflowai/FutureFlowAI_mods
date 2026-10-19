@@ -74,6 +74,10 @@ agent-slot install                              shim op het PATH zetten
 - `skills/cloud-overflow/SKILL.md`: voor de lokale hoofdagent. Wanneer wel/niet, basis-branch pushen (na akkoord), worker starten, `SendMessage` tussendoor, terughalen en controleren.
 - **Git-conventies** (zodat teruglezen de skill weer triggert): branch `overflow/<JJJJMMDD>-<onderwerp>`, basis `overflow-base/<onderwerp>`, trailers `Agent-Slots-Overflow: cloud-worker`, `Overflow-Base: <basis>`, `Overflow-Task: <taak>`, en een laatste commit `overflow: rapport <onderwerp>` met Gedaan / Tests / Open. De skill-beschrijving noemt de branchnaam en de trailer letterlijk.
 
+## Geheimen maskeren (0.4.1)
+
+`maskSecrets` (in `lib/classify.mjs`, en bewust gedupliceerd in de CLI, die één los bestand is; een test houdt ze gelijk) maskeert waarden van omgevingsvariabelen (behalve een korte lijst onschuldige zoals `PORT`, `NODE_ENV`), opties met token/secret/password/api-key/auth, bearer-tokens, inloggegevens in URL's en bekende tokenvormen (`sk-…`, `ghp_…`, `xox…`, `AKIA…`, JWT). Toegepast op het label (`cleanSegment`), bij het schrijven én lezen van het log, in de status en het dashboard. Het commando zelf draait ongewijzigd. Aanleiding: in het dashboard stond `TWILIO_WEBHOOK_BASE_URL=http…` leesbaar.
+
 ## Later (v2)
 
 - Een minimum per agent (lichte unit-tests zonder slot).

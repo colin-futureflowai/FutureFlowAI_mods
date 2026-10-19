@@ -79,6 +79,7 @@ Houdt agents tegen voordat ze zoveel dev-servers, tests, browsers of sessies sta
 - Cloud-overflow (0.3/0.4): vinkje in het dashboard → `cloudOverflow` in `config.json`; weigeringen voor taken noemen dan de cloud-worker. Echt in de cloud starten kan alleen via de desktop-app (sessie met `target: "cloud"`) of `claude --cloud` in een interactieve terminal; Agent-tool met `isolation: remote` draaide in de test stil lokaal. Terugkanaal = git: `agent-slot overflow add/check`, de mod meldt het rapport elke minuut aan de starter-sessie (`lib/report.mjs`). Conventies (branch `overflow/…`, trailers, rapportcommit) staan op één plek in `agent-slot overflow brief`; houd skill, agent en DESIGN.md daarmee gelijk.
 - Een testbestand (`*.test.ts`) mag geen dynamische `import()` bevatten; zet te testen functies in een pure `lib/*.mjs`.
 - In `*.test.ts` alle `on(...)`-mocks registreren vóór de eerste `$`-aanroep (ook niet in een lus erna).
+- Geheimen: alles wat agent-slots bewaart of toont gaat door `maskSecrets` (lib én CLI, gelijk gehouden door een test). Nieuwe velden met commando- of taaktekst toevoegen aan `MASKED_FIELDS` in de CLI.
 - Testen: `node --test agent-slots/tests/*.test.mjs` (CLI met echte processen, `AGENT_SLOT_HOME` en `AGENT_SLOT_FAKE_FREE`) en `claude plugin test agent-slots` (hook-logica met nep-CLI).
 
 ### futureflow-skills

@@ -131,3 +131,25 @@ test('inpakken en terughalen geeft het originele commando', () => {
   }
   assert.equal(unwrapCommand('pnpm dev'), null)
 })
+
+test('geheimen worden gemaskeerd in labels, het commando zelf blijft ongewijzigd', async () => {
+  const { maskSecrets } = await import('../lib/classify.mjs')
+  const cases = [
+    ['TWILIO_WEBHOOK_BASE_URL=http://x.ngrok.app PORT=6001 pnpm dev', 'TWILIO_WEBHOOK_BASE_URL=*** PORT=6001 pnpm dev'],
+    ['OPENAI_API_KEY=sk-abcdefghijklmnopqrstuv pnpm test', 'OPENAI_API_KEY=*** pnpm test'],
+    ['curl -H "Authorization: Bearer abcdefghijkl123" https://api', 'curl -H "Authorization: Bearer ***" https://api'],
+    ['git clone https://user:hunter2@github.com/x/y', 'git clone https://***@github.com/x/y'],
+    ['pnpm dev --token=abc123 --port 3000', 'pnpm dev --token=*** --port 3000'],
+    ['NODE_ENV=test vitest run', 'NODE_ENV=test vitest run'],
+    ['echo ghp_abcdefghijklmnopqrstuvwxyz12', 'echo ***'],
+    ['pnpm --filter=web dev', 'pnpm --filter=web dev'],
+  ]
+  for (const [input, want] of cases) assert.equal(maskSecrets(input), want, input)
+
+  const cmd = 'cd web && STRIPE_SECRET_KEY=sk_test_abcdefghijkl pnpm dev'
+  const c = classify(cmd)
+  assert.equal(c.segment, 'STRIPE_SECRET_KEY=*** pnpm dev', 'label gemaskeerd')
+  const w = wrapCommand(cmd, c.kind, '/x/agent-slot.mjs', { label: c.segment })
+  assert.equal(unwrapCommand(w), cmd, 'het echte commando draait ongewijzigd')
+  assert.doesNotMatch(w.split(' -- sh -c ')[0], /sk_test_/, 'geen geheim in het label van de wrapper')
+})

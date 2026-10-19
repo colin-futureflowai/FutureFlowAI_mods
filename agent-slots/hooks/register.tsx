@@ -3,7 +3,7 @@ import type { EngineInterface as Engine, Register } from 'claude-code'
 
 import type { OverflowJob, SlotsHolder, SlotsSnapshot } from '../types'
 
-import { classify, hasShellBackground, unwrapCommand, wrapCommand } from '../lib/classify.mjs'
+import { classify, hasShellBackground, maskSecrets, unwrapCommand, wrapCommand } from '../lib/classify.mjs'
 import { reportMessage } from '../lib/report.mjs'
 
 // Tools die een nieuwe sessie of workflow starten: tegenhouden bij krap geheugen.
@@ -195,7 +195,7 @@ export const register: Register = on => {
     if (!c.kind || c.kind === 'self') return next(e)
 
     if (c.kind === 'unknown-heavy') {
-      await log($, 'unknown-heavy', { command: c.segment, full: e.command.slice(0, 300), reason: c.reason })
+      await log($, 'unknown-heavy', { command: c.segment, full: maskSecrets(e.command).slice(0, 300), reason: c.reason })
       return next(e)
     }
 

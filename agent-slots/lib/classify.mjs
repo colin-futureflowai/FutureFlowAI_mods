@@ -170,9 +170,30 @@ function classifyWords(w) {
   return null
 }
 
-// Het stuk zonder omleidingen (`> log`, `2>&1`), zodat meldingen tonen wát er draait.
+// Maskeert geheimen in een commando voordat het in een label, het log, de status of een
+// melding komt. Het commando zelf draait ongewijzigd; alleen wat we bewaren en tonen wordt
+// gemaskeerd. Omgevingsvariabelen worden gemaskeerd, op een paar onschuldige na.
+const KEEP_ENV = new Set(['PORT', 'HOST', 'HOSTNAME', 'NODE_ENV', 'DEBUG', 'CI', 'FORCE_COLOR', 'NO_COLOR', 'TZ', 'LANG', 'NODE_OPTIONS', 'LOG_LEVEL', 'RUST_LOG', 'VERBOSE'])
+
+export function maskSecrets(text) {
+  return String(text ?? '')
+    // URL met inloggegevens: https://user:pass@host -> https://***@host
+    .replace(/([a-z][a-z0-9+.-]*:\/\/)[^\s/@'"]+@/gi, '$1***@')
+    // Bekende tokenvormen, ook los in een commando
+    .replace(/\b(sk-[A-Za-z0-9_-]{16,}|sk_(?:live|test)_[A-Za-z0-9]{10,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|xox[abprs]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16}|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{5,})\b/g, '***')
+    // Authorization-headers en bearer-tokens
+    .replace(/\b(Bearer|Basic|token)\s+[A-Za-z0-9._~+/=-]{8,}/gi, '$1 ***')
+    // Opties met een geheim: --token x, --api-key=x, -p/--password x
+    .replace(/(--?[A-Za-z0-9-]*(?:token|secret|password|passwd|api-?key|apikey|auth|credential)[A-Za-z0-9-]*)(=|\s+)("[^"]*"|'[^']*'|[^\s;&|)]+)/gi, '$1$2***')
+    // Omgevingsvariabelen NAAM=waarde aan het begin van een woord
+    .replace(/(^|[\s;&|(])([A-Za-z_][A-Za-z0-9_]*)=("[^"]*"|'[^']*'|[^\s;&|)]*)/g, (m, pre, name, val) =>
+      KEEP_ENV.has(name.toUpperCase()) || val === '' ? m : `${pre}${name}=***`)
+}
+
+// Het stuk zonder omleidingen (`> log`, `2>&1`) en met gemaskeerde geheimen, zodat
+// meldingen tonen wát er draait zonder waarden te lekken.
 export function cleanSegment(segment) {
-  return segment.replace(/\s*\d*(>>?|<)&?\s*("[^"]*"|'[^']*'|\S+)/g, '').replace(/\s+/g, ' ').trim()
+  return maskSecrets(segment.replace(/\s*\d*(>>?|<)&?\s*("[^"]*"|'[^']*'|\S+)/g, '').replace(/\s+/g, ' ').trim())
 }
 
 // Volgorde van zwaarte: het zwaarste stuk wint.

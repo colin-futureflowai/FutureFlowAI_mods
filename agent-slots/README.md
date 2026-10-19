@@ -38,6 +38,15 @@ agent-slot wait dev        # blocks until a dev slot is free
 agent-slot status
 ```
 
+## Privacy and security
+
+- **Secrets are masked** before anything is stored or shown: environment values (`API_KEY=***`, except harmless ones like `PORT` and `NODE_ENV`), `--token`/`--password`-style options, bearer tokens, credentials in URLs and well-known token formats. The command itself still runs unchanged; only labels, the log, the status, the dashboard and refusal messages are masked. `agent-slot scrub-log` masks an older log.
+- **Private repos** work with cloud overflow as long as the cloud session can push (Claude GitHub App or `/web-setup`) and your local git can fetch. Keep in mind:
+  - the whole repo is cloned into a cloud VM at Anthropic. Decide per project (and per client) whether that is acceptable; organisations with Zero Data Retention can't use cloud sessions at all;
+  - the worker is *told* to push only to `overflow/…`, but that is not enforced. Turn on **branch protection for `main`** (changes only via pull request) and give the GitHub App access only to the repos you want;
+  - `.env` is not in git and never goes along. Don't put secrets in the task text.
+- Reports from cloud workers are delivered as fenced, untrusted data; merging always waits for your approval.
+
 ## Settings
 
 Optional, in `~/.claude/agent-slots/config.json`:

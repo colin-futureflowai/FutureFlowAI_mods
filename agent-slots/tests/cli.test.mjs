@@ -213,3 +213,21 @@ Overflow-Base: main" && git push -q origin HEAD`)
   assert.deepEqual(json(['overflow', 'check', '--session', 's1']).finished, [], 'na afleveren niet nog eens')
   assert.equal(json(['status', '--json']).overflow[0].status, 'done')
 })
+
+test('masker: CLI en lib maskeren hetzelfde, log en status bevatten geen geheimen', async () => {
+  const { maskSecrets: libMask } = await import('../lib/classify.mjs')
+  const { maskSecrets: cliMask } = await import('../bin/agent-slot.mjs')
+  for (const s of ['A_KEY=geheim pnpm dev', 'PORT=1 next dev', 'x --password hunter2', 'https://u:p@h/x', 'Bearer abcdefghijkl', 'echo sk-abcdefghijklmnopqrstu']) {
+    assert.equal(cliMask(s), libMask(s), s)
+  }
+  cli(['log', 'refuse', JSON.stringify({ kind: 'dev', command: 'DB_PASSWORD=hunter2 pnpm dev' })])
+  cli(['run', 'test', '--', 'sh', '-c', 'API_TOKEN=abc123 true'])
+  const raw = fs.readFileSync(path.join(home, 'log.jsonl'), 'utf8')
+  assert.doesNotMatch(raw, /hunter2|abc123/)
+  assert.match(raw, /DB_PASSWORD=\*\*\*/)
+
+  fs.appendFileSync(path.join(home, 'log.jsonl'), JSON.stringify({ t: new Date().toISOString(), event: 'refuse', command: 'OUD_GEHEIM=zichtbaar pnpm dev' }) + '\n')
+  assert.doesNotMatch(cli(['status']).stdout, /zichtbaar/, 'status maskeert ook oude regels')
+  cli(['scrub-log'])
+  assert.doesNotMatch(fs.readFileSync(path.join(home, 'log.jsonl'), 'utf8'), /zichtbaar/, 'scrub-log schoont het bestand op')
+})
