@@ -13,6 +13,8 @@ test('dev-servers in allerlei vormen', () => {
     'cd apps/web && pnpm dev',
     'cd "my app" && npm run dev -- --port 3001',
     'pnpm --filter web dev',
+    'pnpm --filter=web dev',
+    'yarn workspace web dev',
     'npx next dev -p 3000',
     'npm start',
     'yarn dev:web',
@@ -40,6 +42,7 @@ test('tests, typecheck en builds', () => {
     'cargo test',
     'pytest -x',
     'jest --watch',
+    'yarn workspace api test',
   ]) assert.equal(kind(c), 'test', c)
 })
 
@@ -80,6 +83,11 @@ test('lichte commando\'s blijven ongemoeid', () => {
     'npm view react version',
     'lsof -i :3000',
   ]) assert.equal(kind(c), null, c)
+  // Pakketten toevoegen in een workspace is geen dev-server of test.
+  for (const c of ['yarn workspace web add react', 'pnpm --filter=web add react']) {
+    assert.notEqual(kind(c), 'dev', c)
+    assert.notEqual(kind(c), 'test', c)
+  }
 })
 
 test('twijfelgevallen worden zwaar-onbekend (doorlaten en loggen)', () => {
