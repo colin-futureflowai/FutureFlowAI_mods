@@ -91,6 +91,17 @@ function classifyWords(w) {
     }
     // `yarn workspace <naam> <script>`: de naam is geen script.
     if (bin === 'yarn' && rest[0] === 'workspace') rest.splice(0, 2)
+    // Yarn Berry: `yarn workspaces foreach [opties] [run] <script>` draait het script in elke workspace.
+    if (bin === 'yarn' && rest[0] === 'workspaces' && rest[1] === 'foreach') {
+      const FOREACH_VALUE_FLAGS = ['--include', '--exclude', '--from', '-j', '--jobs']
+      const after = args.slice(args.indexOf('foreach') + 1)
+      rest.length = 0
+      for (let i = 0; i < after.length; i++) {
+        if (FOREACH_VALUE_FLAGS.includes(after[i])) { i++; continue }
+        if (after[i].startsWith('-') && after[i] !== '--') continue
+        rest.push(after[i])
+      }
+    }
     if (rest[0] === 'exec' || rest[0] === 'dlx' || rest[0] === 'x') return classifyWords(rest.slice(1))
     if (rest[0] === 'run' || rest[0] === 'run-script') rest.shift()
     const script = rest[0]

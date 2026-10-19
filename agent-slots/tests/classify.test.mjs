@@ -46,6 +46,21 @@ test('tests, typecheck en builds', () => {
   ]) assert.equal(kind(c), 'test', c)
 })
 
+test('yarn workspaces foreach classificeert naar het script', () => {
+  assert.equal(kind('yarn workspaces foreach -A run test'), 'test')
+  assert.equal(kind('yarn workspaces foreach --all --parallel run dev'), 'dev')
+  assert.equal(kind('yarn workspaces foreach -A test'), 'test')
+  assert.equal(kind('yarn workspaces foreach -pi -v --topological run build'), 'test')
+  assert.equal(kind('yarn workspaces foreach --all -p --interlaced dev'), 'dev')
+  assert.equal(kind("yarn workspaces foreach --include 'apps/*' --exclude 'apps/docs' -p run dev"), 'dev')
+  assert.equal(kind('yarn workspaces foreach --include test run lint'), 'test')
+  assert.equal(kind('yarn workspaces foreach --exclude dev -A run dev'), 'dev')
+  assert.equal(kind('yarn workspaces foreach -A -j 4 run typecheck'), 'test')
+  assert.equal(classify('yarn workspaces foreach -A run test').reason, 'yarn test')
+  assert.equal(kind('yarn workspaces foreach -A run clean'), null)
+  assert.equal(kind('yarn workspaces list'), null)
+})
+
 test('browser en agents', () => {
   assert.equal(kind('npx playwright open https://example.com'), 'browser')
   assert.equal(kind('npx playwright codegen'), 'browser')
