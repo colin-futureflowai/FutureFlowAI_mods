@@ -59,7 +59,7 @@ Zo lees je het terug:
 ```bash
 git fetch origin
 git log --format='%h %s%n%b' origin/overflow/<naam> --not origin/<basis>
-git log --all --grep='Agent-Slots-Overflow' --format='%h %D %s'   # alle overflow-werk vinden
+git log --all --grep='^Agent-Slots-Overflow: cloud-worker$' --format='%h %D %s'   # alle overflow-werk vinden (alleen de echte trailer)
 git diff origin/<basis>...origin/overflow/<naam>
 ```
 
