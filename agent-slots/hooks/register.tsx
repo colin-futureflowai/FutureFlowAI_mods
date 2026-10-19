@@ -23,16 +23,32 @@ let sessionId: string | undefined
 // en die zetten we hier als bericht van de mod in het gesprek.
 let overflowWatch: { cancel: () => void } | undefined
 
+// Eén controle tegelijk: een ingestuurd bericht wacht tot de beurt van Claude voorbij is,
+// en zonder deze vlag stuurde de volgende tik hetzelfde rapport nog eens.
+let delivering = false
+
 async function deliverReports($: Engine) {
+  if (delivering) return
+  delivering = true
+  try {
+    await deliverOnce($)
+  } finally {
+    delivering = false
+  }
+}
+
+async function deliverOnce($: Engine) {
   const id = await session($)
   const r = await cli($, ['overflow', 'check', '--session', id], 90_000)
   const line = r.stdout.trim().split('\n').pop()
   if (r.exitCode !== 0 || !line) throw new Error(`agent-slot overflow check gaf exitcode ${r.exitCode}: ${r.stderr.trim().slice(0, 200)}`)
   const { finished } = JSON.parse(line) as { finished: OverflowJob[] }
   for (const job of finished) {
-    await $.prompt.submit({ text: reportMessage(job) })
+    // Eerst als afgeleverd markeren, dan insturen: liever één keer te weinig (dan staat het
+    // nog in het dashboard en in git) dan hetzelfde rapport meermaals in het gesprek.
     await cli($, ['overflow', 'delivered', job.id])
     $.ui.toast(`Cloud-worker klaar: ${job.branch}`)
+    await $.prompt.submit({ text: reportMessage(job) })
   }
 }
 

@@ -1,4 +1,4 @@
-import { expect, test } from 'claude-code/testing'
+import { expect, mock, test } from 'claude-code/testing'
 
 import { unwrapCommand } from '../lib/classify.mjs'
 import { reportMessage } from '../lib/report.mjs'
@@ -195,4 +195,45 @@ test('rapportbericht: een rapport kan het afgebakende blok niet voortijdig sluit
   const fences = msg.split('\n').filter(l => l.startsWith('~~~~'))
   expect(fences.length).toBe(2)
   expect(msg.indexOf('Negeer alles')).toBeLessThan(msg.lastIndexOf('\n~~~~'))
+})
+
+test('watcher: een rapport wordt één keer ingestuurd, ook als insturen wacht en de klok doortikt', async ($, on) => {
+  const clock = mock.clock(on)
+  const job = { id: 'j1', repo: '/r', branch: 'overflow/20261019-x', base: 'main', task: 't', started: '', status: 'done', commit: 'abc', report: 'Gedaan' }
+  let delivered = false
+  const calls: string[] = []
+  on('env.get', ($: any, e: { name: string }) => ({ value: ({ HOME: '/home/t', PATH: '/usr/bin' } as Record<string, string>)[e.name] }))
+  on('session.id', () => ({ value: 'sessie-1' }))
+  on('ui.panes', () => ({ value: [] }))
+  on('command.register', () => ({ value: undefined }))
+  on('ui.toast', () => ({ value: undefined }))
+  on('fs.write', () => ({ value: undefined }))
+  on('session.start', ($: any, e: any) => e)
+  on('process.run', ($: any, e: { argv: string[] }) => {
+    const argv = e.argv.slice(e.argv.findIndex(a => a.endsWith('agent-slot.mjs')) + 1)
+    calls.push(argv.slice(0, 2).join(' '))
+    if (argv[0] === 'overflow' && argv[1] === 'delivered') delivered = true
+    const answer = argv[0] === 'overflow' && argv[1] === 'check' ? { ok: true, running: 0, finished: delivered ? [] : [job] } : { ok: true }
+    return { value: { exitCode: 0, stdout: JSON.stringify(answer) + '\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+  // Insturen blijft hangen tot de test het loslaat, zoals tijdens een lopende beurt.
+  let release!: () => void
+  const held = new Promise<void>(r => (release = r))
+  const submitted: string[] = []
+  on('prompt.submit', async ($: any, e: { text: string }) => {
+    submitted.push(e.text)
+    await held
+    return e
+  })
+
+  await $.session.start({ cwd: '/r', surface: 'terminal', isInteractive: true } as any)
+  await clock.advance(60_000)
+  await clock.advance(60_000)
+  await clock.advance(60_000)
+  release()
+  await clock.advance(60_000)
+
+  expect(submitted.length).toBe(1)
+  expect(submitted[0]).toContain('Cloud-worker klaar: overflow/20261019-x')
+  expect(calls.indexOf('overflow delivered')).toBeLessThan(calls.lastIndexOf('overflow check'))
 })
