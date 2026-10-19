@@ -220,7 +220,7 @@ export const register: Register = on => {
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
-    const { Box, Text } = $.ui.resolve(e)
+    const { Box, Text, Button } = $.ui.resolve(e)
     const snap = await read($, snapshot)
     if (!snap) return <Text dimColor>Laden…</Text>
 
@@ -266,6 +266,24 @@ export const register: Register = on => {
               <Text dimColor>{clock(r.t)}</Text>  {(r.kind ?? r.tool ?? '').padEnd(8)}<Text color="warning">{r.reason ?? ''}</Text>  {r.command ?? ''}
             </Text>
           ))}
+        </Box>
+
+        <Box flexDirection="column">
+          <Button
+            key="overflow"
+            hotkey="c"
+            onPress={async () => {
+              await cli($, ['config', 'set', 'cloudOverflow', config.cloudOverflow ? 'off' : 'on'])
+              await refresh($)
+            }}
+          >
+            {config.cloudOverflow ? '☑' : '☐'} Cloud-overflow
+          </Button>
+          <Text dimColor>
+            {config.cloudOverflow
+              ? 'Aan: bij een weigering voor een taak (tests, builds, subagents) stelt de agent voor om hem uit te besteden aan een cloud-worker.'
+              : 'Uit: bij een weigering wacht de agent tot er lokaal plek is.'}
+          </Text>
         </Box>
 
         <Text dimColor>

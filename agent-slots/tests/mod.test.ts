@@ -164,3 +164,18 @@ test('/agent-slots status geeft de tekstversie', async ($, on) => {
   const ran = await $.command.run({ origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 }, command: 'agent-slots', args: 'status' } as any)
   expect(ran.text).toContain('31% vrij')
 })
+
+test('dashboard: het overflow-vinkje zet de instelling om, op terminal en desktop', async ($, on) => {
+  const f = fake(on, { status: { ...STATUS, config: { ...STATUS.config, cloudOverflow: false } } })
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('ui.panes', () => ({ value: [{ id: 'agent-slots' }] }))
+  await $.command.run({ origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 }, command: 'agent-slots', args: '' } as any)
+  for (const surface of ['terminal', 'desktop'] as const) {
+    f.calls.length = 0
+    const ui = await $.ui.mount({ plugin: 'agent-slots', surface, component: 'Pane', requestId: 'agent-slots', props: {} } as any)
+    expect(await ui.find({ type: 'Text', text: /Uit: bij een weigering wacht de agent/ })).toBeDefined()
+    await ui.press({ key: 'overflow' })
+    expect(f.calls.some(c => c.slice(2).join(' ') === 'config set cloudOverflow on')).toBe(true)
+    await ui.unmount()
+  }
+})

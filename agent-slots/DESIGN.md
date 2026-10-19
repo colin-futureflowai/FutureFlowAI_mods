@@ -62,6 +62,15 @@ agent-slot install                              shim op het PATH zetten
 
 `/agent-slots` opent een paneel (`$.ui.open`, `ui.render` op `Pane`). De mod haalt elke 3 s `agent-slot status --json` op zolang het paneel open is (`$.clock.every`, stopt als `$.ui.panes()` het niet meer noemt) en zet het in `$.state` `agent-slots.snapshot`. `/agent-slots status` geeft dezelfde info als tekst.
 
+## Cloud-overflow (0.3)
+
+- Instelling `cloudOverflow` in `config.json` (standaard uit), te zetten met het vinkje in het dashboard (`Button` key `overflow`, sneltoets `c`) of `agent-slot config set cloudOverflow on|off`.
+- Aan: een weigering voor een **taak** (`test`, `agent`, `session`, `unknown-heavy`) krijgt de uitweg "besteed uit aan een cloud-worker" erbij. `dev` en `browser` niet: een preview hoort lokaal.
+- Bewust **aanbieden, niet automatisch**: uitbesteden betekent pushen naar GitHub, een stap naar buiten die de agent eerst aan de gebruiker voorlegt.
+- `agents/cloud-worker.md`: agent-type met `isolation: remote` en `background: true`. Een cloud-sessie heeft de plugins van de gebruiker niet, dus de werkwijze staat in de agent-prompt zelf.
+- `skills/cloud-overflow/SKILL.md`: voor de lokale hoofdagent. Wanneer wel/niet, basis-branch pushen (na akkoord), worker starten, `SendMessage` tussendoor, terughalen en controleren.
+- **Git-conventies** (zodat teruglezen de skill weer triggert): branch `overflow/<JJJJMMDD>-<onderwerp>`, basis `overflow-base/<onderwerp>`, trailers `Agent-Slots-Overflow: cloud-worker`, `Overflow-Base: <basis>`, `Overflow-Task: <taak>`, en een laatste commit `overflow: rapport <onderwerp>` met Gedaan / Tests / Open. De skill-beschrijving noemt de branchnaam en de trailer letterlijk.
+
 ## Later (v2)
 
 - Een minimum per agent (lichte unit-tests zonder slot).

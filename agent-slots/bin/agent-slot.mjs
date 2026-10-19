@@ -32,6 +32,8 @@ const DEFAULTS = {
   criticalPercent: 10,
   browserIdleMinutes: 10,
   waitTimeoutSeconds: 540,
+  // Aan: weigeringen voor taken (tests, builds, subagents, sessies) noemen ook uitbesteden aan een cloud-worker.
+  cloudOverflow: false,
 }
 
 // ---------- config, log ----------
@@ -204,8 +206,23 @@ function holderText(l) {
 }
 
 // Mag er nu een slot van deze soort bij? `gate` is de geheugengrens voor aanroepen zonder slot.
-export function check(kind, { session, gate = 'floor' } = {}) {
+// Uitweg naar de cloud, alleen voor taken: een dev-server of browser is een preview die lokaal hoort.
+const OVERFLOW_KINDS = new Set(['test', 'agent', 'session', 'unknown-heavy'])
+function withOverflow(result, kind, cfg) {
+  if (result.ok || !cfg.cloudOverflow || !OVERFLOW_KINDS.has(kind)) return result
+  return {
+    ...result,
+    overflow: true,
+    message: `${result.message} Cloud-overflow staat aan: is dit een afgebakende taak, besteed hem dan uit aan een cloud-worker (skill cloud-overflow, agent-type agent-slots:cloud-worker). Push eerst je werk naar een eigen branch en leg het voor aan de gebruiker voordat je pusht.`,
+  }
+}
+
+export function check(kind, opts = {}) {
   const cfg = config()
+  return withOverflow(checkRaw(kind, opts, cfg), kind, cfg)
+}
+
+function checkRaw(kind, { session, gate = 'floor' } = {}, cfg) {
   const alive = reap(cfg)
   const mem = memory()
   const threshold = gate === 'critical' ? cfg.criticalPercent : cfg.floorPercent
@@ -446,6 +463,25 @@ function cmdInstall(opts) {
   return 0
 }
 
+// Instellingen lezen of één waarde zetten in config.json (gedeeld door alle sessies).
+const SETTABLE = { cloudOverflow: 'bool', floorPercent: 'number', criticalPercent: 'number', browserIdleMinutes: 'number' }
+function cmdConfig(pos, opts) {
+  const [action, key, raw] = pos
+  if (action !== 'set') { out(config()); return 0 }
+  const type = SETTABLE[key]
+  if (!type) { console.error(`onbekende instelling: ${key} (kan: ${Object.keys(SETTABLE).join(', ')})`); return 2 }
+  const value = type === 'bool' ? ['on', 'true', '1', 'aan'].includes(String(raw).toLowerCase()) : Number(raw)
+  if (type === 'number' && !Number.isFinite(value)) { console.error(`${key} moet een getal zijn`); return 2 }
+  let cur = {}
+  try { cur = JSON.parse(fs.readFileSync(CONFIG, 'utf8')) } catch {}
+  fs.mkdirSync(HOME, { recursive: true })
+  fs.writeFileSync(`${CONFIG}.tmp`, JSON.stringify({ ...cur, [key]: value }, null, 2) + '\n')
+  fs.renameSync(`${CONFIG}.tmp`, CONFIG)
+  log('config', { key, value })
+  out({ ok: true, [key]: value })
+  return 0
+}
+
 export async function main(argv) {
   const [cmd, ...rest] = argv
   const { pos, opts } = parseArgs(rest)
@@ -462,6 +498,7 @@ export async function main(argv) {
     case 'log': { let data = {}; try { data = JSON.parse(pos[1] ?? '{}') } catch {} log(pos[0] ?? 'note', data); return 0 }
     case 'install': return cmdInstall(opts)
     case 'memory': out(memory()); return 0
+    case 'config': return cmdConfig(pos, opts)
     default:
       console.log(`agent-slot — gedeelde slots voor dev-servers, tests en de browser
 
@@ -470,6 +507,7 @@ export async function main(argv) {
   agent-slot status [--json]
   agent-slot kill-idle
   agent-slot install --shim        zet agent-slot op je PATH (~/.local/bin)
+  agent-slot config set cloudOverflow on|off
 
 Instellingen: ${CONFIG}
 Log: ${LOG}`)

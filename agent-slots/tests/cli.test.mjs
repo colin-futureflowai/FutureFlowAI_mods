@@ -165,3 +165,17 @@ test('install zet de CLI op een vaste plek', () => {
   assert.equal(r.status, 0)
   assert.ok(fs.existsSync(path.join(home, 'bin', 'agent-slot.mjs')))
 })
+
+test('cloud-overflow: aan te zetten, uitweg alleen bij taken en niet bij een dev-server', () => {
+  assert.equal(json(['check', 'test'], { AGENT_SLOT_FAKE_FREE: '5' }).overflow, undefined, 'standaard uit')
+  assert.deepEqual(json(['config', 'set', 'cloudOverflow', 'on']), { ok: true, cloudOverflow: true })
+  const t = json(['check', 'test'], { AGENT_SLOT_FAKE_FREE: '5' })
+  assert.equal(t.overflow, true)
+  assert.match(t.message, /agent-slots:cloud-worker/)
+  assert.match(t.message, /leg het voor aan de gebruiker/)
+  assert.equal(json(['check', 'dev'], { AGENT_SLOT_FAKE_FREE: '5' }).overflow, undefined, 'dev-server blijft lokaal')
+  assert.equal(json(['config']).cloudOverflow, true)
+  json(['config', 'set', 'cloudOverflow', 'off'])
+  assert.equal(json(['config']).cloudOverflow, false)
+  assert.equal(cli(['config', 'set', 'onzin', '1']).status, 2)
+})

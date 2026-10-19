@@ -76,6 +76,8 @@ Houdt agents tegen voordat ze zoveel dev-servers, tests, browsers of sessies sta
 - Bewust gekozen (18-10-2026): vooral goed voor Claude Code; de CLI op het PATH is voor andere agents (Orca-workers e.d.). Eisen kwamen van een code-agent die vaak tegen geheugenproblemen aanliep (8 punten, zie DESIGN.md).
 - Dashboard: `/agent-slots` opent een paneel dat elke 3 s `status --json` ophaalt (state `agent-slots.snapshot`, contract in `types/index.d.ts`); `/agent-slots status` is de tekstversie.
 - Bijgesteld na de test met twee Orca-workers (18-10-2026): standaardgrens 25% (was 20%), status nieuwste eerst in lokale tijd, labels zonder omleidingen, meldingen met het korte `agent-slot` als dat op het PATH staat.
+- Cloud-overflow (0.3): vinkje in het dashboard → `cloudOverflow` in `config.json`; weigeringen voor taken noemen dan de cloud-worker. Plugin levert `agents/cloud-worker.md` (`isolation: remote`) en `skills/cloud-overflow/SKILL.md`. Git-conventies (branch `overflow/…`, trailer `Agent-Slots-Overflow`) staan in DESIGN.md; houd ze gelijk in skill, agent en docs.
+- In `*.test.ts` alle `on(...)`-mocks registreren vóór de eerste `$`-aanroep (ook niet in een lus erna).
 - Testen: `node --test agent-slots/tests/*.test.mjs` (CLI met echte processen, `AGENT_SLOT_HOME` en `AGENT_SLOT_FAKE_FREE`) en `claude plugin test agent-slots` (hook-logica met nep-CLI).
 
 ### futureflow-skills

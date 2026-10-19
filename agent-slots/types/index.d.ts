@@ -16,7 +16,7 @@ export type SlotsEvent = { t: string; kind?: string; tool?: string; reason?: str
 
 export type SlotsSnapshot = {
   memory: SlotsMemory
-  config: { limits: Record<string, number>; floorPercent: number; criticalPercent: number }
+  config: { limits: Record<string, number>; floorPercent: number; criticalPercent: number; cloudOverflow?: boolean }
   slots: SlotsHolder[]
   refusals: SlotsEvent[]
   at: number

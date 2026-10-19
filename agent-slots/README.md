@@ -11,6 +11,7 @@ Keeps Claude Code (and other coding agents) from starting more dev servers, test
 - **Browser lock for the Playwright MCP**, tied to the session and released after 10 minutes without use or when the session ends.
 - **Crash-safe.** Every slot records its process ID and start time; dead processes, reboots and reused PIDs never leave a slot stuck.
 - **Dashboard.** `/agent-slots` opens a live pane in Claude Code: a memory bar, each slot type with who holds it, and the latest refusals (refreshed every 3 seconds).
+- **Cloud overflow (optional).** Tick *Cloud-overflow* in the dashboard (or `agent-slot config set cloudOverflow on`) and a refused *task* (tests, builds, subagents) also suggests handing it to a cloud worker: the bundled `agent-slots:cloud-worker` agent runs as a remote Claude Code session and delivers its work on an `overflow/…` branch, with `Agent-Slots-Overflow` commit trailers and a report commit, so the main agent can read it back. The bundled `cloud-overflow` skill tells the main agent when and how to do that. Dev servers and the browser stay local. Pushing to GitHub is always put to you first. Requires Claude Code cloud sessions and a GitHub-connected repo.
 - **Log and status.** Every acquire, release, refusal and clean-up goes to one log; `/agent-slots status` or `agent-slot status` shows the same as text.
 
 If the mod itself fails (for example `node` can't be found), it lets everything through, shows a notice once, and writes the reason to `~/.claude/agent-slots-mod.log`.
