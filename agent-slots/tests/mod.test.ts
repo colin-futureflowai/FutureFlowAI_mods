@@ -1,6 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
 import { unwrapCommand } from '../lib/classify.mjs'
+import { reportMessage } from '../lib/report.mjs'
 
 type Answer = Record<string, unknown>
 
@@ -143,7 +144,7 @@ const STATUS = {
 test('dashboard: /agent-slots opent het paneel met geheugen, slots en weigeringen', async ($, on) => {
   const f = fake(on, { status: STATUS })
   on('ui.open', () => ({ value: { isPlaced: true } }))
-  on('ui.panes', () => ({ value: [{ id: 'agent-slots' }] }))
+  on('ui.panes', () => ({ value: [{ id: 'agent-slots', title: 'agent-slots', isShown: true, isFocused: false, isPlaced: true }] }))
   const ran = await $.command.run({ origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 }, command: 'agent-slots', args: '' } as any)
   expect(ran.text).toContain('Dashboard')
   expect(f.calls.some(c => c[2] === 'status' && c[3] === '--json')).toBe(true)
@@ -168,7 +169,7 @@ test('/agent-slots status geeft de tekstversie', async ($, on) => {
 test('dashboard: het overflow-vinkje zet de instelling om, op terminal en desktop', async ($, on) => {
   const f = fake(on, { status: { ...STATUS, config: { ...STATUS.config, cloudOverflow: false } } })
   on('ui.open', () => ({ value: { isPlaced: true } }))
-  on('ui.panes', () => ({ value: [{ id: 'agent-slots' }] }))
+  on('ui.panes', () => ({ value: [{ id: 'agent-slots', title: 'agent-slots', isShown: true, isFocused: false, isPlaced: true }] }))
   await $.command.run({ origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 }, command: 'agent-slots', args: '' } as any)
   for (const surface of ['terminal', 'desktop'] as const) {
     f.calls.length = 0
@@ -178,4 +179,12 @@ test('dashboard: het overflow-vinkje zet de instelling om, op terminal en deskto
     expect(f.calls.some(c => c.slice(2).join(' ') === 'config set cloudOverflow on')).toBe(true)
     await ui.unmount()
   }
+})
+
+test('rapportbericht: branch, rapport en de volgende stap uit de skill', async () => {
+  const msg = reportMessage({ id: 'x', repo: '/r', branch: 'overflow/20261019-yarn-foreach', base: 'main', task: 'yarn workspaces foreach herkennen', started: '', status: 'done', commit: 'b9ed698', report: 'Gedaan\n- iets' })
+  expect(msg).toContain('[agent-slots] Cloud-worker klaar: overflow/20261019-yarn-foreach')
+  expect(msg).toContain('Gedaan\n- iets')
+  expect(msg).toContain('git diff origin/main...origin/overflow/20261019-yarn-foreach')
+  expect(msg).toContain('pas na akkoord')
 })

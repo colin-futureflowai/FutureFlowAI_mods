@@ -3,7 +3,7 @@
   "author": {
     "name": "FutureFlowAI"
   },
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Keeps agents from starting more dev servers, test runs, browsers and sessions than your machine's memory can handle",
   "license": "MIT",
   "types": "./types/index.d.ts"

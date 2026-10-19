@@ -1,6 +1,6 @@
 ---
 name: cloud-worker
-description: Runs a self-contained task (tests, build, refactor, feature) in a remote cloud session when the local machine is short on memory, and delivers the result on an overflow/… branch. Use through the cloud-overflow skill; the task must name a pushed base branch.
+description: Last-resort way to run a self-contained task (tests, build, refactor, feature) as a remote cloud session and deliver it on an overflow/… branch. Prefer a real cloud session as described in the cloud-overflow skill; this agent silently runs locally when cloud agents are unavailable. The task must name a pushed base branch.
 isolation: remote
 background: true
 ---
@@ -25,9 +25,9 @@ Je bent een **cloud-worker** van agent-slots. Je draait in een cloud-sessie omda
    Overflow-Task: <taak in één regel>
    ```
 
-4. **Rapport als laatste commit.** Sluit af met een commit (mag leeg zijn: `git commit --allow-empty`) met als onderwerp `overflow: rapport <onderwerp>` en als body:
+4. **Rapport als laatste commit.** Sluit af met een commit (mag leeg zijn: `git commit --allow-empty`) met als onderwerp `overflow: rapport <naam>` (de branchnaam zonder `overflow/`) en als body:
    - **Gedaan:** wat er veranderd is, per onderdeel.
-   - **Tests:** welke je hebt gedraaid en de uitslag.
+   - **Tests:** welke je hebt gedraaid, de uitslag, en de uitvoer van `uname -a` (zo is te zien of je echt in de cloud draaide).
    - **Open:** wat niet af is, twijfels, en wat de hoofdagent moet controleren.
    Met dezelfde trailers.
 

@@ -179,3 +179,37 @@ test('cloud-overflow: aan te zetten, uitweg alleen bij taken en niet bij een dev
   assert.equal(json(['config']).cloudOverflow, false)
   assert.equal(cli(['config', 'set', 'onzin', '1']).status, 2)
 })
+
+test('overflow: brief, add en check vinden het rapport via de git-remote', () => {
+  const sh = (cwd, cmd) => spawnSync('sh', ['-c', cmd], { cwd, encoding: 'utf8', env: { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' } })
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-slot-git-'))
+  const origin = path.join(root, 'origin.git')
+  const local = path.join(root, 'local')
+  const worker = path.join(root, 'worker')
+  sh(root, `git init -q --bare -b main ${origin} && git clone -q ${origin} ${local} && cd ${local} && git commit -q --allow-empty -m init && git push -q origin HEAD:main`)
+
+  const b = cli(['overflow', 'brief', '--task', 'Maak de tests groen', '--base', 'main', '--branch', 'overflow/20261019-tests', '--repo', local]).stdout
+  assert.match(b, /Agent-Slots-Overflow: cloud-worker/)
+  assert.match(b, /overflow: rapport 20261019-tests/)
+
+  const add = json(['overflow', 'add', '--repo', local, '--branch', 'overflow/20261019-tests', '--base', 'main', '--task', 'Maak de tests groen', '--session', 's1'])
+  assert.equal(add.ok, true)
+  assert.deepEqual(json(['overflow', 'check', '--session', 's1']).finished, [], 'nog geen branch')
+
+  sh(root, `git clone -q ${origin} ${worker} && cd ${worker} && git switch -q -c overflow/20261019-tests && git commit -q --allow-empty -m "fix: tests" -m "Agent-Slots-Overflow: cloud-worker" && git push -q origin HEAD`)
+  assert.deepEqual(json(['overflow', 'check', '--session', 's1']).finished, [], 'nog geen rapport')
+  assert.equal(json(['overflow', 'list']).jobs[0].progress, 'fix: tests')
+
+  sh(worker, `git commit -q --allow-empty -m "overflow: rapport 20261019-tests" -m "Gedaan
+- tests groen" -m "Agent-Slots-Overflow: cloud-worker
+Overflow-Base: main" && git push -q origin HEAD`)
+  const done = json(['overflow', 'check', '--session', 's1']).finished
+  assert.equal(done.length, 1)
+  assert.match(done[0].report, /tests groen/)
+  assert.doesNotMatch(done[0].report, /Agent-Slots-Overflow/, 'trailers eruit')
+  assert.deepEqual(json(['overflow', 'check', '--session', 'andere-sessie']).finished, [], 'alleen voor de starter')
+
+  json(['overflow', 'delivered', done[0].id])
+  assert.deepEqual(json(['overflow', 'check', '--session', 's1']).finished, [], 'na afleveren niet nog eens')
+  assert.equal(json(['status', '--json']).overflow[0].status, 'done')
+})

@@ -1,9 +1,10 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface as Engine, Register } from 'claude-code'
 
-import type { SlotsHolder, SlotsSnapshot } from '../types'
+import type { OverflowJob, SlotsHolder, SlotsSnapshot } from '../types'
 
 import { classify, hasShellBackground, unwrapCommand, wrapCommand } from '../lib/classify.mjs'
+import { reportMessage } from '../lib/report.mjs'
 
 // Tools die een nieuwe sessie of workflow starten: tegenhouden bij krap geheugen.
 const SESSION_TOOLS = new Set(['Workflow', 'mcp__ccd_session__start_session'])
@@ -14,6 +15,33 @@ const isBrowserClose = (tool: string) => /browser_close$/.test(tool)
 type Check = { ok: boolean; reuse?: boolean; reason?: string; message?: string; memory?: { freePercent: number } }
 
 let sessionId: string | undefined
+
+// ---------- cloud-overflow: rapporten terugmelden ----------
+
+// Een cloud-sessie kan niet terugpraten; zijn rapportcommit op GitHub is het signaal.
+// Elke minuut kijkt de CLI of er rapporten zijn voor taken die déze sessie startte,
+// en die zetten we hier als bericht van de mod in het gesprek.
+let overflowWatch: { cancel: () => void } | undefined
+
+async function deliverReports($: Engine) {
+  const id = await session($)
+  const r = await cli($, ['overflow', 'check', '--session', id], 90_000)
+  const line = r.stdout.trim().split('\n').pop()
+  if (r.exitCode !== 0 || !line) throw new Error(`agent-slot overflow check gaf exitcode ${r.exitCode}: ${r.stderr.trim().slice(0, 200)}`)
+  const { finished } = JSON.parse(line) as { finished: OverflowJob[] }
+  for (const job of finished) {
+    await $.prompt.submit({ text: reportMessage(job) })
+    await cli($, ['overflow', 'delivered', job.id])
+    $.ui.toast(`Cloud-worker klaar: ${job.branch}`)
+  }
+}
+
+function startOverflowWatch($: Engine) {
+  overflowWatch?.cancel()
+  overflowWatch = $.clock.every(60_000, () => {
+    void deliverReports($).catch(err => warn($, err))
+  })
+}
 
 // ---------- dashboard ----------
 
@@ -123,6 +151,7 @@ async function bypassed($: Engine) {
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await $.command.register({ name: 'agent-slots', description: 'Dashboard met slots en geheugen; of: status, kill-idle, install (agent-slot op je PATH)' })
+    startOverflowWatch($)
     // Na een herlaad staat het paneel misschien nog open: dan weer verversen.
     if ((await $.ui.panes()).some(p => p.id === PANE)) await startDashboard($)
     // Houdt de vaste kopie van de CLI gelijk aan deze versie van de mod.
@@ -267,6 +296,22 @@ export const register: Register = on => {
             </Text>
           ))}
         </Box>
+
+        {(snap.overflow ?? []).length > 0 && (
+          <Box flexDirection="column">
+            <Text bold>Cloud-workers</Text>
+            {[...(snap.overflow ?? [])].reverse().slice(0, 5).map(job => (
+              <Box flexDirection="column">
+                <Text wrap="truncate-end">
+                  <Text color={job.status === 'done' ? 'success' : 'warning'}>{job.status === 'done' ? '✓' : '…'}</Text>
+                  {'  '}{job.branch.replace(/^overflow\//, '')}  <Text dimColor>{job.status === 'done' ? `klaar ${clock(job.finished ?? job.started)}${job.delivered ? ' · gemeld' : ''}` : `loopt sinds ${clock(job.started)}`}</Text>
+                </Text>
+                {job.task ? <Text dimColor wrap="truncate-end">{'    '}{job.task}</Text> : null}
+                {job.error ? <Text color="error" wrap="truncate-end">{'    '}{job.error}</Text> : null}
+              </Box>
+            ))}
+          </Box>
+        )}
 
         <Box flexDirection="column">
           <Button

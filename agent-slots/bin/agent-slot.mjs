@@ -23,6 +23,7 @@ const HOME = process.env.AGENT_SLOT_HOME || path.join(os.homedir(), '.claude', '
 const LOCKS = path.join(HOME, 'locks')
 const LOG = path.join(HOME, 'log.jsonl')
 const CONFIG = path.join(HOME, 'config.json')
+const JOBS = path.join(HOME, 'overflow.json')
 const IS_WIN = process.platform === 'win32'
 const TEMPFAIL = 75
 
@@ -406,7 +407,7 @@ function cmdStatus(opts) {
   const mem = memory()
   const refusals = readLog().filter(e => e.event === 'refuse').slice(-5)
   const unknown = readLog().filter(e => e.event === 'unknown-heavy').slice(-5)
-  if (opts.json) { out({ memory: mem, config: cfg, slots: alive.map(({ file, ...l }) => l), refusals, unknown }); return 0 }
+  if (opts.json) { out({ memory: mem, config: cfg, slots: alive.map(({ file, ...l }) => l), refusals, unknown, overflow: readJobs().slice(-8) }); return 0 }
   const lines = [`Geheugen: ${mem.freePercent}% vrij van ${mem.totalGB} GB (grens ${cfg.floorPercent}%, kritiek ${cfg.criticalPercent}%)`, '']
   for (const [kind, limit] of Object.entries(cfg.limits)) {
     const held = alive.filter(l => l.kind === kind)
@@ -465,6 +466,125 @@ function cmdInstall(opts) {
 
 // Instellingen lezen of één waarde zetten in config.json (gedeeld door alle sessies).
 const SETTABLE = { cloudOverflow: 'bool', floorPercent: 'number', criticalPercent: 'number', browserIdleMinutes: 'number' }
+// ---------- cloud-overflow: taken die in een cloud-sessie lopen ----------
+//
+// Een cloud-sessie kan niet terugpraten. Het terugkanaal is git: de worker pusht naar
+// overflow/<…> en sluit af met een commit `overflow: rapport …`. `overflow check` kijkt
+// op de remote of dat rapport er is; de mod meldt het dan aan de sessie die de taak startte.
+
+const TRAILER = 'Agent-Slots-Overflow: cloud-worker'
+const REPORT_PREFIX = 'overflow: rapport'
+
+function readJobs() {
+  try { return JSON.parse(fs.readFileSync(JOBS, 'utf8')) } catch { return [] }
+}
+function writeJobs(jobs) {
+  fs.mkdirSync(HOME, { recursive: true })
+  fs.writeFileSync(`${JOBS}.tmp`, JSON.stringify(jobs.slice(-50), null, 2) + '\n')
+  fs.renameSync(`${JOBS}.tmp`, JOBS)
+}
+const git = (repo, args, timeout = 20_000) => execFileSync('git', ['-C', repo, ...args], { encoding: 'utf8', timeout, stdio: ['ignore', 'pipe', 'pipe'] }).trim()
+const slug = s => String(s).toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'taak'
+const today = () => new Date().toISOString().slice(0, 10).replace(/-/g, '')
+
+// De volledige opdracht voor een cloud-worker: de taak plus de vaste werkwijze en git-conventies.
+export function brief({ task, base, branch }) {
+  return `Je bent een cloud-worker van agent-slots (overflow-taak). Je werkt zelfstandig en kunt niet terugpraten: alles wat je wilt melden gaat in je rapportcommit.
+
+1. Maak branch \`${branch}\` vanaf \`origin/${base}\` (git fetch origin eerst). Werk nooit op ${base === 'main' ? '\`main\` zelf' : `\`main\` of op \`${base}\` zelf`}.
+2. Taak:
+${task}
+   Lees eerst CLAUDE.md als die er is en houd je aan de conventies van de repo. Blijf binnen de taak; wat erbuiten valt zet je onder Open.
+3. Elke commit krijgt onderaan deze trailers:
+${TRAILER}
+Overflow-Base: ${base}
+Overflow-Task: ${String(task).split('\n')[0].slice(0, 80)}
+4. Laatste commit (mag leeg, --allow-empty): onderwerp \`${REPORT_PREFIX} ${branch.replace(/^overflow\//, '')}\`, body met de kopjes Gedaan, Tests (wat gedraaid, uitslag) en Open, met dezelfde trailers. Deze commit is het signaal dat je klaar bent: maak hem pas als alles gepusht kan worden.
+5. Push naar origin \`${branch}\`. Geen PR, niets naar main of \`${base}\`, geen deploys of berichten.
+6. Ontbreekt er iets (secrets, toegang, onduidelijke opdracht), maak dan toch de rapportcommit en zet onder Open precies wat er nodig is.`
+}
+
+function cmdOverflow(pos, opts) {
+  const [action, id] = pos
+  const repo = path.resolve(typeof opts.repo === 'string' ? opts.repo : process.cwd())
+
+  if (action === 'brief') {
+    const task = typeof opts.task === 'string' ? opts.task : ''
+    if (!task) { console.error('gebruik: agent-slot overflow brief --task "<taak>" [--base <branch>] [--branch overflow/…]'); return 2 }
+    const base = typeof opts.base === 'string' ? opts.base : (() => { try { return git(repo, ['rev-parse', '--abbrev-ref', 'HEAD']) } catch { return 'main' } })()
+    const branch = typeof opts.branch === 'string' ? opts.branch : `overflow/${today()}-${slug(task)}`
+    console.log(brief({ task, base, branch }))
+    return 0
+  }
+
+  if (action === 'add') {
+    const branch = opts.branch
+    if (typeof branch !== 'string' || !branch.startsWith('overflow/')) { console.error('--branch overflow/<naam> is verplicht'); return 2 }
+    let top = repo
+    try { top = git(repo, ['rev-parse', '--show-toplevel']) } catch { console.error(`${repo} is geen git-repo`); return 2 }
+    const job = {
+      id: `${Date.now().toString(36)}-${slug(branch.replace(/^overflow\//, ''))}`,
+      repo: top,
+      branch,
+      base: typeof opts.base === 'string' ? opts.base : 'main',
+      task: typeof opts.task === 'string' ? opts.task.split('\n')[0].slice(0, 120) : '',
+      session: typeof opts.session === 'string' ? opts.session : process.env.CLAUDE_SESSION_ID,
+      cloudSession: typeof opts['cloud-session'] === 'string' ? opts['cloud-session'] : undefined,
+      started: new Date().toISOString(),
+      status: 'running',
+    }
+    writeJobs([...readJobs(), job])
+    log('overflow-add', { id: job.id, branch, repo: top, session: job.session })
+    out({ ok: true, job })
+    return 0
+  }
+
+  if (action === 'check') {
+    const jobs = readJobs()
+    const finished = []
+    for (const job of jobs) {
+      if (job.status !== 'running') continue
+      if (typeof opts.session === 'string' && job.session !== opts.session) continue
+      try {
+        const remote = git(job.repo, ['ls-remote', 'origin', `refs/heads/${job.branch}`])
+        if (!remote) continue
+        const sha = remote.split(/\s+/)[0]
+        if (job.lastSeen === sha) continue
+        job.lastSeen = sha
+        git(job.repo, ['fetch', '-q', 'origin', `+refs/heads/${job.branch}:refs/remotes/origin/${job.branch}`], 60_000)
+        const subject = git(job.repo, ['log', '-1', '--format=%s', sha])
+        if (!subject.startsWith(REPORT_PREFIX)) { job.progress = subject; continue }
+        job.status = 'done'
+        job.finished = new Date().toISOString()
+        job.commit = sha.slice(0, 7)
+        job.report = git(job.repo, ['log', '-1', '--format=%b', sha]).split('\n').filter(l => !/^(Agent-Slots-Overflow|Overflow-[A-Za-z]+|Co-Authored-By):/i.test(l)).join('\n').trim().slice(0, 4000)
+        job.delivered = false
+        log('overflow-done', { id: job.id, branch: job.branch, commit: job.commit })
+        finished.push(job)
+      } catch (err) {
+        job.error = String(err.stderr ?? err.message ?? err).trim().slice(0, 200)
+      }
+    }
+    writeJobs(jobs)
+    const undelivered = jobs.filter(j => j.status === 'done' && !j.delivered && (typeof opts.session !== 'string' || j.session === opts.session))
+    out({ ok: true, running: jobs.filter(j => j.status === 'running').length, finished: undelivered })
+    return 0
+  }
+
+  if (action === 'delivered' || action === 'remove') {
+    const jobs = readJobs()
+    const next = action === 'remove' ? jobs.filter(j => j.id !== id) : jobs.map(j => (j.id === id ? { ...j, delivered: true } : j))
+    writeJobs(next)
+    out({ ok: true })
+    return 0
+  }
+
+  // list
+  const jobs = readJobs().filter(j => typeof opts.session !== 'string' || j.session === opts.session)
+  out({ ok: true, jobs })
+  return 0
+}
+
 function cmdConfig(pos, opts) {
   const [action, key, raw] = pos
   if (action !== 'set') { out(config()); return 0 }
@@ -499,6 +619,7 @@ export async function main(argv) {
     case 'install': return cmdInstall(opts)
     case 'memory': out(memory()); return 0
     case 'config': return cmdConfig(pos, opts)
+    case 'overflow': return cmdOverflow(pos, opts)
     default:
       console.log(`agent-slot — gedeelde slots voor dev-servers, tests en de browser
 
@@ -508,6 +629,9 @@ export async function main(argv) {
   agent-slot kill-idle
   agent-slot install --shim        zet agent-slot op je PATH (~/.local/bin)
   agent-slot config set cloudOverflow on|off
+  agent-slot overflow brief --task "<taak>" [--base <branch>]   opdracht voor een cloud-worker
+  agent-slot overflow add --branch overflow/<naam> --base <branch> --task "<taak>" [--session <id>]
+  agent-slot overflow check | list | delivered <id> | remove <id>
 
 Instellingen: ${CONFIG}
 Log: ${LOG}`)

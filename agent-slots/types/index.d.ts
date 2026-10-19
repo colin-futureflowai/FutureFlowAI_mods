@@ -14,11 +14,29 @@ export type SlotsHolder = {
 
 export type SlotsEvent = { t: string; kind?: string; tool?: string; reason?: string; command?: string }
 
+export type OverflowJob = {
+  id: string
+  repo: string
+  branch: string
+  base: string
+  task: string
+  session?: string
+  started: string
+  status: 'running' | 'done'
+  finished?: string
+  commit?: string
+  report?: string
+  progress?: string
+  error?: string
+  delivered?: boolean
+}
+
 export type SlotsSnapshot = {
   memory: SlotsMemory
   config: { limits: Record<string, number>; floorPercent: number; criticalPercent: number; cloudOverflow?: boolean }
   slots: SlotsHolder[]
   refusals: SlotsEvent[]
+  overflow?: OverflowJob[]
   at: number
   error?: string
 }
