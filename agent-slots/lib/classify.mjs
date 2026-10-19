@@ -80,7 +80,8 @@ function classifyWords(w) {
 
   if (EXECUTORS.has(bin)) return classifyWords(args.filter((a, i) => !(i === 0 && a.startsWith('-')) && a !== '--yes' && a !== '-y'))
   if (RUNNERS.has(bin)) {
-    // Opties met een waarde (`--filter web`) slaan we samen met die waarde over.
+    // Opties met een waarde (`--filter web`) slaan we samen met die waarde over;
+    // de vorm met `=` (`--filter=web`) is één woord en valt onder de gewone opties.
     const VALUE_FLAGS = ['--filter', '-F', '-C', '--dir', '--prefix', '--cwd', '-w', '--workspace']
     const rest = []
     for (let i = 0; i < args.length; i++) {
@@ -88,6 +89,8 @@ function classifyWords(w) {
       if (args[i].startsWith('-') && args[i] !== '--') continue
       rest.push(args[i])
     }
+    // `yarn workspace <naam> <script>`: de naam is geen script.
+    if (bin === 'yarn' && rest[0] === 'workspace') rest.splice(0, 2)
     if (rest[0] === 'exec' || rest[0] === 'dlx' || rest[0] === 'x') return classifyWords(rest.slice(1))
     if (rest[0] === 'run' || rest[0] === 'run-script') rest.shift()
     const script = rest[0]
