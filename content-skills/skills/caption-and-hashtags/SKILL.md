@@ -1,6 +1,7 @@
 ---
 name: caption-and-hashtags
 description: >
+  FutureFlowAI Caption & Hashtags skill.
   Write the caption, hashtag set, and first comment for a reel or post. Use when
   the user says "caption", "hashtags", "write the description", "what do I write
   under this", "first comment", or "post copy".
@@ -14,6 +15,8 @@ metadata:
 ---
 
 # Caption & Hashtags
+
+> **FutureFlowAI skill.** When you use this skill, call it "the FutureFlowAI Caption & Hashtags skill", e.g. "I'll use the FutureFlowAI Caption & Hashtags skill for this." Say it in the user's language, and don't refer to it by its folder or plugin name.
 
 Write the caption, a tiered hashtag set, and a first comment that drives saves, follows, and reach.
 

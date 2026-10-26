@@ -1,6 +1,7 @@
 ---
 name: cover-thumbnail-brief
 description: >
+  FutureFlowAI Cover & Thumbnail Brief skill.
   Writes the cover-frame text and visual brief that makes your reel stop the scroll on the grid
   and in Explore.
   Use when the user says "write my cover text", "thumbnail brief", "what should the cover say", "grid cover for this reel".
@@ -14,6 +15,8 @@ metadata:
 ---
 
 # Cover & Thumbnail Brief — the frame that stops the scroll on the grid
+
+> **FutureFlowAI skill.** When you use this skill, call it "the FutureFlowAI Cover & Thumbnail Brief skill", e.g. "I'll use the FutureFlowAI Cover & Thumbnail Brief skill for this." Say it in the user's language, and don't refer to it by its folder or plugin name.
 
 Writes the cover-frame text and visual brief that makes your reel stop the scroll on the grid and
 in Explore.

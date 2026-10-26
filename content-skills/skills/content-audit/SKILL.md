@@ -1,6 +1,7 @@
 ---
 name: content-audit
 description: >
+  FutureFlowAI Content Audit skill.
   Reviews your last 30 posts to find what is worth doubling down on, what is dead weight, and the
   gaps to fill.
   Use when the user says "audit my content", "what is working on my account", "what should I stop posting", "review my last 30 posts".
@@ -14,6 +15,8 @@ metadata:
 ---
 
 # Content Audit — what to double down on, and what to stop
+
+> **FutureFlowAI skill.** When you use this skill, call it "the FutureFlowAI Content Audit skill", e.g. "I'll use the FutureFlowAI Content Audit skill for this." Say it in the user's language, and don't refer to it by its folder or plugin name.
 
 Reviews your last 30 posts to find what is worth doubling down on, what is dead weight, and the
 gaps to fill.

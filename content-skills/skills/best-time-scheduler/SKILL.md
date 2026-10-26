@@ -1,6 +1,7 @@
 ---
 name: best-time-scheduler
 description: >
+  FutureFlowAI Best-Time Scheduler skill.
   Recommends the posting times and weekly cadence that fit your audience's actual activity
   windows.
   Use when the user says "when should I post", "best time to post", "posting schedule", "how often should I post".
@@ -14,6 +15,8 @@ metadata:
 ---
 
 # Best-Time Scheduler — a cadence you will actually keep
+
+> **FutureFlowAI skill.** When you use this skill, call it "the FutureFlowAI Best-Time Scheduler skill", e.g. "I'll use the FutureFlowAI Best-Time Scheduler skill for this." Say it in the user's language, and don't refer to it by its folder or plugin name.
 
 Recommends the posting times and weekly cadence that fit your audience's actual activity windows.
 

@@ -96,6 +96,7 @@ Skills: nog geen.
 - MIT: `LICENSE` en de naamsvermelding in `README.md` blijven staan. `UPSTREAM-README.md` is het origineel, ter referentie.
 - Updates van Ootto komen niet vanzelf mee. Nieuwe upstream-versie overnemen = handmatig diffen tegen de genoemde commit, zodat onze aanpassingen blijven.
 - Elke aanpassing aan een skill: versie in `plugin.json` ophogen.
+- FutureFlowAI-branding (1.5.0): `description` begint met `FutureFlowAI <Naam> skill.` en onder de H1 staat een `> **FutureFlowAI skill.**`-regel, zodat Claude de skill aankondigt als "de FutureFlowAI <Naam> skill". `<Naam>` = de H1 tot aan de gedachtestreep. Bij een nieuwe of overgenomen skill beide toevoegen.
 
 ### voice-chat
 Praten met een Claude Code sessie via een Inworld-spraakagent. `/voice` zet hem aan of uit, verder `/voice voorlezen|stil|mute|unmute`. Een balk boven het invoerveld (`ui.render` op `AbovePrompt`, state in `$.state` `voice-chat.band`, contract in `types/index.d.ts`) toont of de agent luistert of praat, of Claude bezig is, welke taak de agent doorgaf, en de laatste zin.

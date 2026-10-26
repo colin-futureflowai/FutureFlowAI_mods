@@ -1,6 +1,7 @@
 ---
 name: viral-carousel
 description: >
+  FutureFlowAI Viral Carousel skill.
   Finds the carousels that actually went viral in your niche, fetches every slide, breaks down why each
   one worked, and builds your own carousel on that proven structure in your words and your design.
   Use when the user says "find viral carousels", "what carousels are working in my niche",
@@ -15,6 +16,8 @@ metadata:
 ---
 
 # Viral Carousel - find the winners, then build yours on their structure
+
+> **FutureFlowAI skill.** When you use this skill, call it "the FutureFlowAI Viral Carousel skill", e.g. "I'll use the FutureFlowAI Viral Carousel skill for this." Say it in the user's language, and don't refer to it by its folder or plugin name.
 
 Making a carousel with Claude is the easy part.
 Knowing which carousel to make is the hard part.

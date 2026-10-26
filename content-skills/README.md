@@ -8,6 +8,10 @@ A copy of [Ootto-AI/claude-content-skills](https://github.com/Ootto-AI/claude-co
 
 The `agent-reach` skill is in turn taken from [Panniantong/Agent-Reach](https://github.com/Panniantong/Agent-Reach) (MIT). It relies on external command-line tools (such as `agent-reach`, `yt-dlp` and `opencli`) that you install yourself, and some platforms need your browser cookies.
 
+## FutureFlowAI branding
+
+Every skill's description starts with "FutureFlowAI <Name> skill." and a note under the title tells Claude to announce it that way ("I'll use the FutureFlowAI Content Repurposer skill for this.") instead of by its folder name. Keep both when adding or updating a skill.
+
 ## Install
 
 ```bash
