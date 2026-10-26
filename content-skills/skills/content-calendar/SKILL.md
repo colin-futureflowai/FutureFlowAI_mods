@@ -45,7 +45,3 @@ Return it as a clean table: Day | Pillar | Format | Hook | Goal.
 **Obsidian memory tip:** Connect your Obsidian vault (Filesystem MCP) and ask Claude to "weight the calendar toward the pillars and formats that performed best in my vault." The plan compounds on what already works for you.
 
 **Tip:** Batch-film a week in one session. The calendar's real job is to make filming fast.
-
----
-
-Built by **[Ootto](https://www.ootto.ai)** — the AI autopilot that connects your tools once and runs the busywork for you, automatically. [Book a demo →](https://www.ootto.ai)

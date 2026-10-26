@@ -46,7 +46,3 @@ You are my CTA writer. Reel: [paste]. I want: [follow / DM keyword / save / clic
 everyone who comments.
 
 **Next:** [dm-script-writer](../dm-script-writer/SKILL.md) → [comment-responder](../comment-responder/SKILL.md)
-
----
-
-Built by **[Ootto](https://www.ootto.ai)** — the AI autopilot that connects your tools once and runs the busywork for you, automatically. [Book a demo →](https://www.ootto.ai)

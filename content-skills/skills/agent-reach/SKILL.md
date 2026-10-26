@@ -47,7 +47,7 @@ metadata:
 
 13 平台、多后端。**本 skill 存在时必须用它访问这些平台，不要自己发明方案。**
 
-> **Bundled with the Ootto content skills** as the factory's **research · scrape · download** engine —
+> **Bundled with these content skills** as the factory's **research · scrape · download** engine —
 > the **FIND** step that feeds [reel-analyzer](../reel-analyzer/SKILL.md). Vendored from
 > **[Panniantong/Agent-Reach](https://github.com/Panniantong/Agent-Reach)** (MIT — full credit to the
 > author). It's a *router*: don't load everything, read only the reference (the "checkpoint") for the

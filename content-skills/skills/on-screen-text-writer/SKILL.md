@@ -44,7 +44,3 @@ You are my on-screen text writer. Script: [paste].
 duplicates the voiceover word for word, it's doing no work.
 
 **Next:** [reel-builder](../reel-builder/SKILL.md)
-
----
-
-Built by **[Ootto](https://www.ootto.ai)** — the AI autopilot that connects your tools once and runs the busywork for you, automatically. [Book a demo →](https://www.ootto.ai)

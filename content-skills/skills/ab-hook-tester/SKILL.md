@@ -50,7 +50,3 @@ If both hooks pull the same lever, say so and replace one.
 **Honesty:** One variable. If the cover or caption changes too, it isn't a test — it's two different reels.
 
 **Next:** [reel-scripter](../reel-scripter/SKILL.md) → [cover-thumbnail-brief](../cover-thumbnail-brief/SKILL.md)
-
----
-
-Built by **[Ootto](https://www.ootto.ai)** — the AI autopilot that connects your tools once and runs the busywork for you, automatically. [Book a demo →](https://www.ootto.ai)

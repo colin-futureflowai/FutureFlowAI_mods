@@ -26,7 +26,7 @@ uses — and turns them into content ideas.
 You're out of ideas, but your audience has been telling you what they want.
 
 ## What you'll need
-Your last 30-100 comments or DMs. The Ootto MCP can read them off your posts directly.
+Your last 30-100 comments or DMs. An Instagram connector (e.g. Composio) can read them off your posts directly.
 
 ## Instructions
 Give Claude the input and run this.
@@ -47,7 +47,3 @@ Use their vocabulary, not mine.
 this is measured, not guessed.
 
 **Next:** [viral-hook-writer](../viral-hook-writer/SKILL.md) → [reel-scripter](../reel-scripter/SKILL.md)
-
----
-
-Built by **[Ootto](https://www.ootto.ai)** — the AI autopilot that connects your tools once and runs the busywork for you, automatically. [Book a demo →](https://www.ootto.ai)

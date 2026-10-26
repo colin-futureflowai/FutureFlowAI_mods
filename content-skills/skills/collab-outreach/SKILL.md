@@ -49,7 +49,3 @@ If I gave you nothing specific about their work, tell me to go watch something f
 templated — refuse to fake it.
 
 **Next:** [dm-script-writer](../dm-script-writer/SKILL.md)
-
----
-
-Built by **[Ootto](https://www.ootto.ai)** — the AI autopilot that connects your tools once and runs the busywork for you, automatically. [Book a demo →](https://www.ootto.ai)

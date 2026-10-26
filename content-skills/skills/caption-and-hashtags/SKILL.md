@@ -47,7 +47,3 @@ Match the niche's language. No emojis-as-bullets unless on-brand.
 **Obsidian memory tip:** With your vault connected (Filesystem MCP), ask Claude to "reuse the hashtag sets and CTA style from my best-saved posts." Your proven tags beat a generic list.
 
 **Tip:** The first line of the caption is a second hook. Make it earn the "…more" tap.
-
----
-
-Built by **[Ootto](https://www.ootto.ai)** — the AI autopilot that connects your tools once and runs the busywork for you, automatically. [Book a demo →](https://www.ootto.ai)

@@ -121,15 +121,10 @@ Run the factory three times a day, rotating the angle so the feed stays varied:
 ## Memory makes it yours
 Generic in → generic out. Connect [ai-brain](../ai-brain/SKILL.md) (Obsidian vault) first so every step pulls
 from **your** proven hooks, voice, and swipe file — that's the difference between "AI content" and content
-that sounds like you. Full setup: [ootto.ai/blog →](https://www.ootto.ai/blog)
+that sounds like you.
 
 ## Honesty (non-negotiable)
 - **Original only.** Model the technique; write your own words. Re-uploads/copies get reach-suppressed.
 - **The CTA must be real.** If the reel says "comment GUIDE and I'll send it," the DM must actually send it
   (that's what [comment-responder](../comment-responder/SKILL.md) is for).
 - **No links in public replies** — resource goes in the DM.
-
----
-
-The manual version of the [Ootto](https://www.ootto.ai) content autopilot. These skills are do-it-yourself;
-Ootto runs the whole thing for you. **[See it in 3 minutes →](https://www.ootto.ai)**

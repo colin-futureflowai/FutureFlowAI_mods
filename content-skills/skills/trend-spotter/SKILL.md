@@ -27,7 +27,7 @@ You need this week's angle and you don't want to guess. Run it before you pick w
 
 ## What you'll need
 Your niche in one line, and ideally 3-8 peer handles. With [agent-reach](../agent-reach/SKILL.md)
-or the Ootto MCP connected, Claude can pull real reels and view counts instead of working from
+or an Instagram connector connected, Claude can pull real reels and view counts instead of working from
 memory.
 
 ## Instructions
@@ -49,7 +49,3 @@ Rank by fit, not by view count. Tell me to skip things.
 rather than inventing a wave.
 
 **Next:** [viral-hook-writer](../viral-hook-writer/SKILL.md) → [reel-scripter](../reel-scripter/SKILL.md)
-
----
-
-Built by **[Ootto](https://www.ootto.ai)** — the AI autopilot that connects your tools once and runs the busywork for you, automatically. [Book a demo →](https://www.ootto.ai)

@@ -47,7 +47,3 @@ Pinned: [list]. I want visitors to: [follow / click / DM].
 who it's for.
 
 **Next:** [cta-writer](../cta-writer/SKILL.md)
-
----
-
-Built by **[Ootto](https://www.ootto.ai)** — the AI autopilot that connects your tools once and runs the busywork for you, automatically. [Book a demo →](https://www.ootto.ai)

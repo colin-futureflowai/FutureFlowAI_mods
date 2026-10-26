@@ -45,7 +45,3 @@ If more than five pillars fit, the framework is too loose — force it down.
 **Honesty:** Six pillars is no pillars. If everything fits, the framework isn't doing any work.
 
 **Next:** [content-calendar](../content-calendar/SKILL.md) → [series-planner](../series-planner/SKILL.md)
-
----
-
-Built by **[Ootto](https://www.ootto.ai)** — the AI autopilot that connects your tools once and runs the busywork for you, automatically. [Book a demo →](https://www.ootto.ai)

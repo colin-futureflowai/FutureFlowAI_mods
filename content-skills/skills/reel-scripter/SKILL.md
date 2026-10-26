@@ -50,7 +50,3 @@ Output a two-column script: [SPOKEN line] | [ON-SCREEN text]. Keep spoken lines 
 **Obsidian memory tip:** With your vault connected (Filesystem MCP), ask Claude to "match the pacing and structure of my best-performing reels in my vault." It scripts in your proven format, not a generic one.
 
 **Tip:** Read it out loud and cut 20%. Short-form rewards tight.
-
----
-
-Built by **[Ootto](https://www.ootto.ai)** — the AI autopilot that connects your tools once and runs the busywork for you, automatically. [Book a demo →](https://www.ootto.ai)

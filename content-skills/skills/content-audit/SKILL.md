@@ -26,8 +26,8 @@ gaps to fill.
 Before making more, work out what to stop.
 
 ## What you'll need
-Your last 30 posts with views, saves, comments and shares. The Ootto MCP or your Instagram
-insights export.
+Your last 30 posts with views, saves, comments and shares. An Instagram connector (e.g. Composio) or your
+Instagram insights export.
 
 ## Instructions
 Give Claude the input and run this.
@@ -49,7 +49,3 @@ If a pattern isn't in the data, say "not enough signal" rather than guessing.
 contradicts my own data.
 
 **Next:** [content-pillar-builder](../content-pillar-builder/SKILL.md) → [content-calendar](../content-calendar/SKILL.md)
-
----
-
-Built by **[Ootto](https://www.ootto.ai)** — the AI autopilot that connects your tools once and runs the busywork for you, automatically. [Book a demo →](https://www.ootto.ai)

@@ -49,7 +49,3 @@ Give me the pattern, never their copy.
 platform and makes you a worse version of them.
 
 **Next:** [comment-mining](../comment-mining/SKILL.md) → [viral-hook-writer](../viral-hook-writer/SKILL.md)
-
----
-
-Built by **[Ootto](https://www.ootto.ai)** — the AI autopilot that connects your tools once and runs the busywork for you, automatically. [Book a demo →](https://www.ootto.ai)
