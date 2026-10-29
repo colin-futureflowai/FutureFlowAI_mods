@@ -48,7 +48,3 @@ Write it so someone who has never met me can shoot it correctly on the first try
 words.
 
 **Next:** [b-roll-shot-list](../b-roll-shot-list/SKILL.md)
-
----
-
-Built by **[Ootto](https://www.ootto.ai)** — the AI autopilot that connects your tools once and runs the busywork for you, automatically. [Book a demo →](https://www.ootto.ai)

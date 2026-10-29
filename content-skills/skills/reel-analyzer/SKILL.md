@@ -58,8 +58,3 @@ words and your own examples, not a re-upload.
 
 **Next:** feed the teardown into [viral-hook-writer](../viral-hook-writer/SKILL.md) →
 [reel-scripter](../reel-scripter/SKILL.md) → [reel-builder](../reel-builder/SKILL.md).
-
----
-
-Built by **[Ootto](https://www.ootto.ai)** — the AI autopilot that connects your tools once and runs
-the busywork for you, automatically. [Book a demo →](https://www.ootto.ai)

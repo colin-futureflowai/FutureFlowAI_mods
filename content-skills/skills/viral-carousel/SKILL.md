@@ -29,7 +29,7 @@ Also when a carousel in your niche blew up and you want yours built the same way
 
 ## What you'll need
 Your niche, 5-10 accounts you compete with (or carousel links), and your topic.
-For live numbers: the Instagram connector (Composio, or Ootto at ootto.ai) so Claude can read posts and counts.
+For live numbers: an Instagram connector (e.g. Composio) so Claude can read posts and counts.
 
 ## Instructions
 
@@ -63,7 +63,7 @@ Keep every slide's job. Write every word fresh in my voice. Use my colours, font
 ```
 
 6. **Render and post.** Render the slides in your own design (HTML to PNG, or your design tool), then post.
-   With Ootto connected, Claude designs the slides and posts them to your Instagram for you.
+   With an Instagram connector, Claude designs the slides and posts them to your Instagram for you.
 
 ## Output
 - The viral carousels it found, each with its multiple over its account median.
@@ -76,7 +76,3 @@ Every word, image and design on your carousel must be yours, and Instagram's ori
 Numbers come from the API or the user, never from a guess.
 
 **Next:** [carousel-builder](../carousel-builder/SKILL.md) → [caption-and-hashtags](../caption-and-hashtags/SKILL.md)
-
----
-
-Built by **[Ootto](https://www.ootto.ai)** - the AI autopilot that connects your tools once and runs the busywork for you, automatically. [Book a demo →](https://www.ootto.ai)

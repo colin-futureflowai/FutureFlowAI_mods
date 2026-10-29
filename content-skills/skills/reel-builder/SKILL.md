@@ -55,14 +55,14 @@ Then give me: the final hook (3 options), the full VO script as one paragraph, a
 ## Rendering the reel — the video engine (make it, not just script it)
 
 Scripting is half the job; this is how you turn the build table into a real, cinematic reel that
-actually gets watched. Use a **hybrid engine**, matched to the tier:
+actually gets watched. Use a **hybrid engine**, matched to the beat:
 
 - **Character-acting / cinematic beats → Seedance (image-to-video).** Seedance runs on **Runway** via
   the RunwayML SDK with `model: "seedance2"` (portrait `720:1280` for a 9:16 reel, ~5s per clip).
   Generate a conditioning still of the character/scene, then i2v it so the subject genuinely MOVES and
-  performs. Cost ≈ $6–12 per reel — reserve it for the premium ($599 done-for-you) tier, not the $20 self-serve one.
-- **Hook, chapter, text, payoff, CTA beats → Remotion code-render ($0).** Fast, free, on-theme. This is
-  the whole $20-tier reel and the text scaffolding of the premium one.
+  performs. Cost ≈ $6–12 per reel in Runway credits — use it only where real acting matters, and confirm with the user first.
+- **Hook, chapter, text, payoff, CTA beats → Remotion code-render ($0).** Fast, free, on-theme. This can carry a
+  whole reel on its own, and is the text scaffolding of a reel with Seedance beats.
 
 **Non-negotiables (each of these was a real failure once — do not repeat them):**
 1. **The hook needs a gripping VISUAL, not just text.** Open on something that grabs (e.g. a creator
@@ -91,8 +91,3 @@ A reel that was never watched ships broken.
 the filesystem for a key or read another product's `.env` — if you don't have the key, stop and ask.
 
 **Honesty:** only promise a CTA you can deliver (if "comment WORD → I'll DM it", actually send it).
-
----
-
-Built by **[Ootto](https://www.ootto.ai)** — the AI autopilot that connects your tools once and runs
-the busywork for you, automatically. [Book a demo →](https://www.ootto.ai)

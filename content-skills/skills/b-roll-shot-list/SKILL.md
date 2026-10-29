@@ -46,7 +46,3 @@ You are my first AD. Script: [paste].
 **Honesty:** Every shot needs a job. Pretty footage with no line to cover is what makes reels drag.
 
 **Next:** [reel-builder](../reel-builder/SKILL.md)
-
----
-
-Built by **[Ootto](https://www.ootto.ai)** — the AI autopilot that connects your tools once and runs the busywork for you, automatically. [Book a demo →](https://www.ootto.ai)

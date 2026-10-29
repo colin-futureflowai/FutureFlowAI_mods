@@ -45,7 +45,3 @@ You are my cover designer. Reel: [TOPIC/SCRIPT]. My grid currently looks like: [
 **Honesty:** Legibility beats cleverness. A clever cover nobody can read at thumbnail size does not exist.
 
 **Next:** [caption-and-hashtags](../caption-and-hashtags/SKILL.md)
-
----
-
-Built by **[Ootto](https://www.ootto.ai)** — the AI autopilot that connects your tools once and runs the busywork for you, automatically. [Book a demo →](https://www.ootto.ai)

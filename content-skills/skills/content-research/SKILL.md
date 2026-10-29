@@ -65,4 +65,4 @@ A short research report:
 Model the *technique*, never copy another creator's exact script, visuals, or caption. Cite the source
 reels you studied. View counts come from real data (Composio / what the user provides) — never fabricate.
 
-*Part of the Ootto content-skills marketplace. Pairs with `reel-analyzer`, `going-viral`, and `reel-scripter`.*
+*Pairs with `reel-analyzer`, `going-viral`, and `reel-scripter`.*

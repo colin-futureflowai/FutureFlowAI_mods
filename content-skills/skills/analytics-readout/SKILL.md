@@ -26,7 +26,7 @@ jargon.
 You're looking at insights and can't tell what to do differently.
 
 ## What you'll need
-Your reel or account insights. The Ootto MCP can pull them directly.
+Your reel or account insights. An Instagram connector (e.g. Composio) can pull them directly.
 
 ## Instructions
 Give Claude the input and run this.
@@ -48,7 +48,3 @@ Every number must come from what I pasted. If something isn't there, say so — 
 answer.
 
 **Next:** [content-audit](../content-audit/SKILL.md)
-
----
-
-Built by **[Ootto](https://www.ootto.ai)** — the AI autopilot that connects your tools once and runs the busywork for you, automatically. [Book a demo →](https://www.ootto.ai)

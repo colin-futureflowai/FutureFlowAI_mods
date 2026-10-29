@@ -51,7 +51,3 @@ Keep it concrete and lifted from the source — no generic filler.
 **Obsidian memory tip:** Keep your long-form library in your Obsidian vault (Filesystem MCP), and Claude can repurpose *across* sources — "find the 5 best reel ideas across everything I published this quarter," not just one post.
 
 **Tip:** One good podcast can become 8-10 reels. Batch the scripts, then film in one sitting.
-
----
-
-Built by **[Ootto](https://www.ootto.ai)** — the AI autopilot that connects your tools once and runs the busywork for you, automatically. [Book a demo →](https://www.ootto.ai)

@@ -32,7 +32,7 @@ The **keyword(s)** people will comment, the **public reply** (no link), and the 
 lives here). Optional: the specific post to scope it to.
 
 ## Instructions
-Define one rule per CTA — it slots straight into the Ootto comment monitor's `auto_responses.json`:
+Define one rule per CTA — it slots straight into a comment monitor's `auto_responses.json`:
 
 ```
 You are my comment-to-lead responder. For the post with this CTA, create a rule:
@@ -53,8 +53,3 @@ even while you sleep, and every lead is captured in one place.
 
 **Pairs with:** [reel-builder](../reel-builder/SKILL.md) ends the reel on a keyword CTA → this turns the
 comments that CTA earns into DMs + leads.
-
----
-
-Built by **[Ootto](https://www.ootto.ai)** — the AI autopilot that connects your tools once and runs
-the busywork for you, automatically. [Book a demo →](https://www.ootto.ai)

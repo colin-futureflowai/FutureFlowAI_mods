@@ -48,7 +48,3 @@ Keep every message under 950 characters.
 before you can send anything — so message one must earn a reply, not just deliver.
 
 **Next:** [comment-responder](../comment-responder/SKILL.md)
-
----
-
-Built by **[Ootto](https://www.ootto.ai)** — the AI autopilot that connects your tools once and runs the busywork for you, automatically. [Book a demo →](https://www.ootto.ai)

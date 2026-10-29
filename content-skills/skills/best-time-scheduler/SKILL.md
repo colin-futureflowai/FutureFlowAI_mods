@@ -46,7 +46,3 @@ I can realistically post [N] times a day.
 hypothesis.
 
 **Next:** [content-calendar](../content-calendar/SKILL.md)
-
----
-
-Built by **[Ootto](https://www.ootto.ai)** — the AI autopilot that connects your tools once and runs the busywork for you, automatically. [Book a demo →](https://www.ootto.ai)

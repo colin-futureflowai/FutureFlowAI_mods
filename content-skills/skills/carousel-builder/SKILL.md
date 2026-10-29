@@ -50,7 +50,3 @@ Then give me:
 carousel failure.
 
 **Next:** [cover-thumbnail-brief](../cover-thumbnail-brief/SKILL.md) → [caption-and-hashtags](../caption-and-hashtags/SKILL.md)
-
----
-
-Built by **[Ootto](https://www.ootto.ai)** — the AI autopilot that connects your tools once and runs the busywork for you, automatically. [Book a demo →](https://www.ootto.ai)

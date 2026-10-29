@@ -111,6 +111,7 @@ Skills: nog geen.
 - Updates van Ootto komen niet vanzelf mee. Nieuwe upstream-versie overnemen = handmatig diffen tegen de genoemde commit, zodat onze aanpassingen blijven.
 - Elke aanpassing aan een skill: versie in `plugin.json` ophogen.
 - FutureFlowAI-branding (1.5.0): `description` begint met `FutureFlowAI <Naam> skill.` en onder de H1 staat een `> **FutureFlowAI skill.**`-regel, zodat Claude de skill aankondigt als "de FutureFlowAI <Naam> skill". `<Naam>` = de H1 tot aan de gedachtestreep. Bij een nieuwe of overgenomen skill beide toevoegen.
+- Reclame van Ootto weggehaald (1.5.1): geen "Built by Ootto … Book a demo"-footers, geen Ootto-prijspakketten ($20/$599) en geen "Ootto MCP" als aanbevolen koppeling (wordt "een Instagram-connector, bv. Composio"). Wel laten staan: `author: Ootto` in de frontmatter, `LICENSE`, de vermelding in `README.md` en links naar gratis open-source repo's. Bij een upstream-update dit opnieuw toepassen.
 
 ### voice-chat
 Praten met een Claude Code sessie via een Inworld-spraakagent. `/voice` zet hem aan of uit, verder `/voice voorlezen|stil|mute|unmute`. Een balk boven het invoerveld (`ui.render` op `AbovePrompt`, state in `$.state` `voice-chat.band`, contract in `types/index.d.ts`) toont of de agent luistert of praat, of Claude bezig is, welke taak de agent doorgaf, en de laatste zin.

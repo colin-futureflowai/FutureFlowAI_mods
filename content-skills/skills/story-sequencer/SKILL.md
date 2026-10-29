@@ -47,7 +47,3 @@ One ask for the whole sequence. If I've asked for two things, tell me to cut one
 **Honesty:** Stories expire. Don't plan a sequence that needs three days of setup to pay off.
 
 **Next:** [cta-writer](../cta-writer/SKILL.md) → [dm-script-writer](../dm-script-writer/SKILL.md)
-
----
-
-Built by **[Ootto](https://www.ootto.ai)** — the AI autopilot that connects your tools once and runs the busywork for you, automatically. [Book a demo →](https://www.ootto.ai)

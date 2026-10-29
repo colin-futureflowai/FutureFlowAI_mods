@@ -45,7 +45,3 @@ You are my format designer. Niche: [NICHE]. Known for: [POSITION]. I can ship [N
 **Honesty:** A series is a promise. Weekly means weekly — one that skips trains people not to expect you.
 
 **Next:** [content-calendar](../content-calendar/SKILL.md)
-
----
-
-Built by **[Ootto](https://www.ootto.ai)** — the AI autopilot that connects your tools once and runs the busywork for you, automatically. [Book a demo →](https://www.ootto.ai)

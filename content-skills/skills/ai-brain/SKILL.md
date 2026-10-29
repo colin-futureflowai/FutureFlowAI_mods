@@ -79,7 +79,3 @@ Notes live under an `AI Brain/` folder; use Obsidian `[[wikilinks]]` and `#tags`
   low on long-running projects.
 - Never invent memories. If the vault has no answer, say "not in memory yet."
 - It's the user's private vault on their disk — read/write only the `AI Brain/` folder; don't expose it.
-
----
-
-Built by **[Ootto](https://www.ootto.ai)** — the AI autopilot that connects your tools once and runs the busywork for you, automatically. [Book a demo →](https://www.ootto.ai)
