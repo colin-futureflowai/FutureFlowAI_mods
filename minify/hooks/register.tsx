@@ -1,16 +1,20 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface as Engine, Register } from 'claude-code'
 
-import type { MinifyNiveau, MinifyTeller } from '../types'
+import type { MinifyInkorting, MinifyNiveau, MinifyTeller } from '../types'
 
 import { herinnering, isUitVerzoek, leesCommando, NIVEAUS, regelsVoor, STANDAARD, subagentRegel } from '../lib/regels.mjs'
 import { inkorten, voetregel } from '../lib/uitvoer.mjs'
+import { kort, lijn, staven, tekstBalk } from '../lib/grafiek.mjs'
 import { controleer, diff, opdracht, tokens, uitAntwoord, weigerReden } from '../lib/bestand.mjs'
 
 const MODEL_BESTAND = 'claude-haiku-5-5'
+const PANE = 'minify'
 
 const niveauAtom = atom({ plugin: 'minify', key: 'niveau' } as const, null as MinifyNiveau | null)
 const tellerAtom = atom({ plugin: 'minify', key: 'teller' } as const, null as MinifyTeller | null)
+const reeksAtom = atom({ plugin: 'minify', key: 'reeks' } as const, null as number[] | null)
+const recentAtom = atom({ plugin: 'minify', key: 'recent' } as const, null as MinifyInkorting[] | null)
 const LEGE_TELLER: MinifyTeller = { beurten: 0, output: 0, ingekort: 0, uitvoerVoor: 0, uitvoerNa: 0 }
 
 // Per niveau over alle sessies heen, voor /minify stats.
@@ -125,11 +129,12 @@ async function bewaar($: Engine, tool: string, origineel: string) {
   return pad
 }
 
-async function tel($: Engine, voor: number, na: number) {
+async function tel($: Engine, tool: string, pad: string, voor: number, na: number) {
   await update($, tellerAtom, t => {
     const o = t ?? LEGE_TELLER
     return { ...o, ingekort: o.ingekort + 1, uitvoerVoor: o.uitvoerVoor + voor, uitvoerNa: o.uitvoerNa + na }
   })
+  await update($, recentAtom, lijst => [{ tool, voor, na, pad, t: Date.now() }, ...(lijst ?? [])].slice(0, 8))
   await toonStatus($)
 }
 
@@ -138,7 +143,7 @@ async function kortIn($: Engine, tool: string, tekst: string, drempel: number) {
   const r = inkorten(tekst, { drempel })
   if (!r.ingekort) return null
   const pad = await bewaar($, tool, tekst)
-  await tel($, r.voor, r.na)
+  await tel($, tool, pad, r.voor, r.na)
   return r.tekst + voetregel(pad, r.voor, r.na)
 }
 
@@ -198,6 +203,7 @@ async function bestandHerstellen($: Engine, invoer: string) {
 // ---------- tekst van /minify ----------
 
 const HULP = `minify — kort antwoorden en lange uitvoer inkorten.
+/minify                 dashboard (tekstversie: /minify status)
 /minify O1 | O2 | O3   niveau voor deze sessie (O1 hele zinnen, O2 standaard, O3 fragmenten)
 /minify uit             normaal praten (ook: "doe normaal")
 /minify standaard O3    niveau voor nieuwe sessies (of: standaard uit)
@@ -205,13 +211,19 @@ const HULP = `minify — kort antwoorden en lange uitvoer inkorten.
 /minify bestand <pad>   CLAUDE.md of todo inkorten (voorstel; daarna /minify toepassen)
 /minify herstel <pad>   origineel terugzetten`
 
+// Welk niveau het script (bin/regels.sh) deze sessie het laatst volledig meegaf, of ''.
+async function gemeldNiveau($: Engine) {
+  const pad = `${await map($)}/gemeld/${await $.session.id()}`
+  return (await $.fs.exists(pad)) ? (await $.fs.read(pad)).trim() : ''
+}
+
+const regelsRegel = (n: MinifyNiveau, gemeld: string) =>
+  gemeld ? `ja, -${gemeld}${gemeld !== n ? ` (bij je volgende bericht -${n})` : ''}` : 'nog niet; ze gaan mee met je volgende bericht'
+
 async function statusTekst($: Engine) {
   const n = await niveau($)
   const t = (await read($, tellerAtom)) ?? LEGE_TELLER
-  let gemeld = ''
-  const gemeldPad = `${await map($)}/gemeld/${await $.session.id()}`
-  if (await $.fs.exists(gemeldPad)) gemeld = (await $.fs.read(gemeldPad)).trim()
-  const regels = gemeld ? `ja, -${gemeld}${gemeld !== n ? ` (bij je volgende bericht -${n})` : ''}` : 'nog niet; ze gaan mee met je volgende bericht'
+  const regels = regelsRegel(n, await gemeldNiveau($))
   return [
     `Niveau: ${n === 'uit' ? 'uit' : `-${n}`} (standaard voor nieuwe sessies: ${await standaard($)})`,
     n === 'uit' ? '' : `Regels meegegeven aan Claude: ${regels}`,
@@ -277,8 +289,8 @@ export const register: Register = on => {
         const volledig = await $.fs.read(res.persistedOutputPath)
         const k = inkorten(volledig, { drempel: 6000 })
         if (!k.ingekort) return r
-        await tel($, k.voor, k.na)
         const { persistedOutputPath: pad, persistedOutputSize: _grootte, ...rest } = res
+        await tel($, tool, pad, k.voor, k.na)
         return { result: { ...rest, stdout: k.tekst + voetregel(pad, k.voor, k.na), stderr: '' } as typeof r.result, context: r.context }
       }
       const stdout = res.stdout ? await kortIn($, tool, res.stdout, 6000) : null
@@ -316,6 +328,7 @@ export const register: Register = on => {
       const o = t ?? LEGE_TELLER
       return { ...o, beurten: o.beurten + 1, output: o.output + out }
     })
+    await update($, reeksAtom, r => [...(r ?? []), out].slice(-60))
     const per = ((await $.store.get('perNiveau')) ?? {}) as PerNiveau
     const p = per[n] ?? { beurten: 0, output: 0 }
     await $.store.set('perNiveau', { ...per, [n]: { beurten: p.beurten + 1, output: p.output + out } })
@@ -326,6 +339,10 @@ export const register: Register = on => {
   on('command.run', { command: 'minify' }, async ($, e) => {
     const c = leesCommando(e.args)
     switch (c.soort) {
+      case 'dashboard': {
+        const opened = await $.ui.open({ id: PANE, title: 'minify' })
+        return { text: opened.isPlaced ? 'Dashboard van minify geopend.' : 'Dashboard klaargezet; het verschijnt zodra er ruimte is. Tekstversie: /minify status' }
+      }
       case 'status':
         return { text: await statusTekst($) }
       case 'niveau':
@@ -349,5 +366,104 @@ export const register: Register = on => {
       default:
         return { text: HULP }
     }
+  })
+
+  // ---------- dashboard ----------
+  // Leest de atoms, dus elke beurt en elke inkorting tekent het opnieuw. Svg op desktop, tekstbalken in de terminal.
+  on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
+    const el = $.ui.resolve(e)
+    const { Box, Text, Button } = el
+    // Alleen de terminal tekent geen Svg. Niet `'Svg' in el` gebruiken: de tabel antwoordt daar ook in de terminal ja.
+    const Svg = e.surface !== 'terminal' && 'Svg' in el ? el.Svg : undefined
+    const n = await niveau($)
+    const t = (await read($, tellerAtom)) ?? LEGE_TELLER
+    const reeks = (await read($, reeksAtom)) ?? []
+    const recent = (await read($, recentAtom)) ?? []
+    const per = ((await $.store.get('perNiveau')) ?? {}) as PerNiveau
+    const gemeld = await gemeldNiveau($)
+
+    const gem = t.beurten ? t.output / t.beurten : 0
+    const bespaard = t.uitvoerVoor - t.uitvoerNa
+    const pct = t.uitvoerVoor ? Math.round((bespaard / t.uitvoerVoor) * 100) : 0
+    const niveauRijen = ['uit', 'O1', 'O2', 'O3']
+      .filter(x => per[x]?.beurten)
+      .map(x => ({ label: x, waarde: per[x]!.output / per[x]!.beurten, nadruk: x === n, tekst: `${kort(per[x]!.output / per[x]!.beurten)} · ${per[x]!.beurten}×` }))
+
+    const kaart = (titel: string, waarde: string, onder: string) => (
+      <Box flexDirection="column" borderStyle="round" borderDimColor paddingX={2} paddingY={1} minWidth={22} flexGrow={1}>
+        <Text dimColor size="caption">{titel}</Text>
+        <Text size="title" weight="bold" tabular>{waarde}</Text>
+        <Text dimColor size="footnote">{onder}</Text>
+      </Box>
+    )
+
+    const lijnSvg = Svg ? lijn(reeks) : null
+    const stavenSvg = Svg ? staven(niveauRijen) : null
+    const maxNiveau = Math.max(1, ...niveauRijen.map(r => r.waarde))
+
+    return (
+      <Box flexDirection="column" gap={1} padding={1}>
+        <Box flexDirection="row" justifyContent="space-between" alignItems="center" flexWrap="wrap" gap={1}>
+          <Box flexDirection="column">
+            <Text size="title" weight="bold">minify</Text>
+            <Text dimColor size="footnote">{n === 'uit' ? 'uit: Claude antwoordt normaal' : `-${n} · regels meegegeven: ${regelsRegel(n, gemeld)}`}</Text>
+          </Box>
+          <Box flexDirection="row" gap={1}>
+            {(['O1', 'O2', 'O3', 'uit'] as const).map(x => (
+              <Button key={`niveau-${x}`} variant={x === n ? 'primary' : 'secondary'} onPress={() => void zetNiveau($, x)}>
+                {x === n ? `● ${x}` : x}
+              </Button>
+            ))}
+          </Box>
+        </Box>
+
+        <Box flexDirection="row" gap={1} flexWrap="wrap">
+          {kaart('Output per beurt', t.beurten ? kort(gem) : '–', `${t.beurten} beurten deze sessie`)}
+          {kaart('Uitvoer ingekort', t.ingekort ? `−${pct}%` : '–', `${t.ingekort}× · ${kort(t.uitvoerVoor)} → ${kort(t.uitvoerNa)} tekens`)}
+          {kaart('Niet gelezen', bespaard ? `~${kort(bespaard / 4)}` : '–', 'tokens (schatting: 4 tekens per token)')}
+        </Box>
+
+        <Box flexDirection="column" gap={1}>
+          <Text weight="semibold">Output-tokens per beurt</Text>
+          {lijnSvg && Svg ? (
+            <Svg source={lijnSvg} alt={`Output-tokens per beurt, ${reeks.length} beurten, gemiddeld ${kort(gem)}`} />
+          ) : reeks.length ? (
+            <Text tabular>{reeks.slice(-30).map(v => '▁▂▃▄▅▆▇█'[Math.min(7, Math.floor((v / Math.max(...reeks)) * 7.99))]).join('')}</Text>
+          ) : (
+            <Text dimColor>Nog geen beurten gemeten.</Text>
+          )}
+        </Box>
+
+        <Box flexDirection="column" gap={1}>
+          <Text weight="semibold">Gemiddeld per niveau, alle sessies</Text>
+          {stavenSvg && Svg ? (
+            <Svg source={stavenSvg} alt={niveauRijen.map(r => `${r.label}: ${r.tekst}`).join(', ')} />
+          ) : niveauRijen.length ? (
+            niveauRijen.map(r => (
+              <Text tabular>
+                {r.label.padEnd(4)} {tekstBalk(r.waarde, maxNiveau)} {r.tekst}
+              </Text>
+            ))
+          ) : (
+            <Text dimColor>Nog niets gemeten.</Text>
+          )}
+          <Text dimColor size="footnote">Geen A/B-test: beurten verschillen per taak. Vergelijk pas bij veel beurten per niveau.</Text>
+        </Box>
+
+        <Box flexDirection="column">
+          <Text weight="semibold">Laatst ingekort</Text>
+          {recent.length === 0 && <Text dimColor>Nog niets ingekort.</Text>}
+          {recent.map(r => (
+            <Box flexDirection="row" gap={1}>
+              <Text tabular>{tekstBalk(r.na, r.voor, 10)}</Text>
+              <Text tabular>{`${kort(r.voor)} → ${kort(r.na)}`.padEnd(14)}</Text>
+              <Text dimColor wrap="truncate-end">{r.tool.replace(/^mcp__(plugin_)?/, '').replace(/__/g, ' · ')}</Text>
+            </Box>
+          ))}
+        </Box>
+
+        <Text dimColor size="footnote">/minify status · /minify stats · /minify bestand {'<pad>'} · originelen in ~/.claude/minify/uitvoer/</Text>
+      </Box>
+    )
   })
 }

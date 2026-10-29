@@ -59,11 +59,12 @@ export function subagentRegel(niveau) {
 
 /**
  * Leest het argument van /minify. Geeft { soort, ... } terug:
- * niveau (O1-O3), uit (ook O0), status, stats, bestand <pad>, toepassen, herstel <pad>, standaard <niveau|uit>, of onbekend.
+ * dashboard (ook zonder argument), niveau (O1-O3), uit (ook O0), status, stats, bestand <pad>, toepassen, herstel <pad>, standaard <niveau|uit>, of onbekend.
  */
 export function leesCommando(args) {
   const tekst = String(args ?? '').trim()
-  if (!tekst || tekst === 'status') return { soort: 'status' }
+  if (!tekst || tekst === 'dashboard') return { soort: 'dashboard' }
+  if (tekst === 'status') return { soort: 'status' }
   const [eerste, ...rest] = tekst.split(/\s+/)
   const woord = eerste.toLowerCase()
   const pad = tekst.slice(eerste.length).trim()

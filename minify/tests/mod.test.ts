@@ -39,9 +39,9 @@ test('/minify O3 en uit schrijven het niveau voor het script; status zegt of de 
   const { files } = fake(on)
   await minify($, 'O3')
   expect(files.get('/home/t/.claude/minify/niveau/sessie-1')).toBe('O3')
-  expect(String(((await minify($, '')) as Answer).text)).toContain('nog niet; ze gaan mee met je volgende bericht')
+  expect(String(((await minify($, 'status')) as Answer).text)).toContain('nog niet; ze gaan mee met je volgende bericht')
   files.set('/home/t/.claude/minify/gemeld/sessie-1', 'O3')
-  expect(String(((await minify($, '')) as Answer).text)).toContain('Regels meegegeven aan Claude: ja, -O3')
+  expect(String(((await minify($, 'status')) as Answer).text)).toContain('Regels meegegeven aan Claude: ja, -O3')
   await minify($, 'uit')
   expect(files.get('/home/t/.claude/minify/niveau/sessie-1')).toBe('uit')
   await minify($, 'standaard O1')
@@ -161,3 +161,36 @@ test('heel grote uitvoer die Claude Code zelf wegschreef: het hele bestand wordt
   expect(res.stdout).toContain('Volledige uitvoer: /home/t/tool-results/x.txt')
 })
 
+
+const PANE = {
+  plugin: 'minify',
+  component: 'Pane',
+  requestId: 'minify',
+  props: { title: 'minify', isFocused: false, bodyColumns: 80, placement: 'dock', scroll: { offset: 0, bodyRows: 40 }, view: {} },
+} as const
+
+test('dashboard: kaarten, grafiek op desktop, tekst in de terminal, niveauknop werkt', async ($, on) => {
+  const { files } = fake(on)
+  on('turn.complete', () => ({ text: 'x' }))
+  on('tool.call', () => ({ result: { stdout: lang(800), stderr: '', interrupted: false } }))
+  const usage = { input_tokens: 1, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, model: 'm' }
+  for (const [i, out] of [200, 400, 300].entries())
+    await $.turn.complete({ answer: 'x', durationMs: 1, isAborted: false, reason: 'answer', turnId: `t${i}`, usage: { ...usage, output_tokens: out } } as any)
+  await $.tool.call({ tool: 'Bash', command: 'pnpm test' } as any)
+
+  for (const surface of ['terminal', 'desktop'] as const) {
+    const ui = await $.ui.mount({ ...PANE, surface })
+    expect((await ui.find({ type: 'Text', text: /^Uitvoer ingekort$/ }))?.text).toBe('Uitvoer ingekort')
+    expect((await ui.find({ type: 'Text', text: /^300$/ }))?.text).toBe('300')
+    expect((await ui.find({ type: 'Text', text: /3 beurten deze sessie/ }))?.text).toBe('3 beurten deze sessie')
+    const boom = JSON.stringify(await ui.drawn())
+    if (surface === 'desktop') expect(boom).toContain('"type":"Svg"')
+    else expect(boom).toContain('▄█▆')
+    await ui.unmount()
+  }
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await ui.press({ key: 'niveau-O3' } as any)
+  expect(files.get('/home/t/.claude/minify/niveau/sessie-1')).toBe('O3')
+  await ui.unmount()
+})

@@ -73,7 +73,8 @@ De volledige regels kosten zo'n 1.000 tokens, één keer per sessie (en na een n
 4. **Meten — `turn.complete`.** Telt per beurt de `usage` (output-tokens, input, cache) en bewaart per sessie het totaal plus het niveau in `$.store`. Daarnaast wordt per sessie bijgehouden hoeveel tekens de tooluitvoer-inkorting heeft gescheeld.
    - Statusregel (`$.ui.status`): `minify -O2 · ⌀ 340 uit/beurt · −48k tekens gelezen`.
    - `/minify stats`: gemiddelde output-tokens per beurt per niveau, over je eigen sessies. Dat is een eerlijke vergelijking met de beurten met minify uit, maar geen A/B-test. Dat staat er ook bij.
-5. **Fail-open**, net als agent-slots: bij een fout in de mod gaat alles gewoon door, met één toast per sessie en een regel in `~/.claude/minify-mod.log`.
+5. **Dashboard — `/minify`.** Een pane (`ui.render` op `Pane`, id `minify`): knoppen voor het niveau, drie kaarten (output per beurt, uitvoer ingekort, niet gelezen tokens als schatting van tekens/4), een lijn van output-tokens per beurt (`minify.reeks`, laatste 60), staven met het gemiddelde per niveau over alle sessies (`perNiveau` in `$.store`) en de laatste 8 inkortingen (`minify.recent`). SVG-grafieken komen uit pure `lib/grafiek.mjs`; in de terminal tekstbalken. `/minify status` blijft de tekstversie.
+6. **Fail-open**, net als agent-slots: bij een fout in de mod gaat alles gewoon door, met één toast per sessie en een regel in `~/.claude/minify-mod.log`.
 
 ## Wat het oplevert (verwachting)
 

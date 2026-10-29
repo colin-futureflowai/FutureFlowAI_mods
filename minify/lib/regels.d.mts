@@ -1,6 +1,6 @@
 export type Niveau = 'O1' | 'O2' | 'O3'
 export type Commando =
-  | { soort: 'status' | 'stats' | 'uit' | 'toepassen' }
+  | { soort: 'dashboard' | 'status' | 'stats' | 'uit' | 'toepassen' }
   | { soort: 'niveau'; niveau: Niveau }
   | { soort: 'standaard'; niveau: Niveau | 'uit' }
   | { soort: 'bestand' | 'herstel'; pad: string }

@@ -17,7 +17,8 @@ test('niveaus lezen, ook met streepje en als getal', () => {
 })
 
 test('commando /minify lezen', () => {
-  assert.deepEqual(leesCommando(''), { soort: 'status' })
+  assert.deepEqual(leesCommando(''), { soort: 'dashboard' })
+  assert.deepEqual(leesCommando('status'), { soort: 'status' })
   assert.deepEqual(leesCommando('O3'), { soort: 'niveau', niveau: 'O3' })
   assert.deepEqual(leesCommando('uit'), { soort: 'uit' })
   assert.deepEqual(leesCommando('bestand ./CLAUDE.md'), { soort: 'bestand', pad: './CLAUDE.md' })
@@ -155,4 +156,38 @@ test('antwoord van het model: omringend codeblok gaat weg', () => {
 
 test('diff toont weggehaalde en nieuwe regels', () => {
   assert.equal(diff('a\nb\n', 'a\nc\n'), '- b\n+ c')
+})
+
+// ---------- grafiek ----------
+
+import { kort, lijn, staven, tekstBalk } from '../lib/grafiek.mjs'
+
+test('getallen kort', () => {
+  assert.equal(kort(999), '999')
+  assert.equal(kort(1234), '1,2k')
+  assert.equal(kort(45806), '46k')
+})
+
+test('lijn: geldige svg met gemiddelde, null bij te weinig punten', () => {
+  assert.equal(lijn([5]), null)
+  const svg = lijn([100, 300, 200])
+  assert.match(svg, /^<svg [^>]*viewBox="0 0 520 120"/)
+  assert.match(svg, /⌀ 200/)
+  assert.match(svg, /<\/svg>$/)
+  assert.doesNotMatch(svg, /NaN/)
+})
+
+test('staven: label en waarde, tekst ge-escaped, lege rijen overgeslagen', () => {
+  assert.equal(staven([{ label: 'O2', waarde: 0 }]), null)
+  const svg = staven([{ label: 'O2', waarde: 300, nadruk: true }, { label: '<uit>', waarde: 600, tekst: '600 · 3×' }])
+  assert.match(svg, />O2</)
+  assert.match(svg, /&lt;uit&gt;/)
+  assert.match(svg, /600 · 3×/)
+  assert.doesNotMatch(svg, /NaN/)
+})
+
+test('tekstbalk', () => {
+  assert.equal(tekstBalk(5, 10, 10), '█████░░░░░')
+  assert.equal(tekstBalk(0, 0, 4), '░░░░')
+  assert.equal(tekstBalk(20, 10, 4), '████')
 })

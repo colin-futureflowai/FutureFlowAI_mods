@@ -13,8 +13,24 @@ export type MinifyTeller = {
   uitvoerNa: number
 }
 
+/** Eén ingekorte tooluitvoer, voor de lijst in het dashboard. */
+export type MinifyInkorting = {
+  tool: string
+  voor: number
+  na: number
+  pad: string
+  t: number
+}
+
 declare module 'claude-code' {
   interface PluginState {
-    minify: { niveau: MinifyNiveau | null; teller: MinifyTeller | null }
+    minify: {
+      niveau: MinifyNiveau | null
+      teller: MinifyTeller | null
+      /** Output-tokens per beurt van deze sessie, de laatste 60. */
+      reeks: number[] | null
+      /** De laatste 8 inkortingen, nieuwste eerst. */
+      recent: MinifyInkorting[] | null
+    }
   }
 }

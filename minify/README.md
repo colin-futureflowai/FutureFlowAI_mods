@@ -15,6 +15,7 @@ Makes Claude Code spend fewer tokens, on what it says and on what it reads, with
 - **Long tool output shrunk.** Bash output and MCP tool results (e.g. Playwright page snapshots) longer than a few thousand characters are cut down before the model reads them: ANSI colours and progress bars removed, repeated lines collapsed, the start and end kept, plus every line that looks like an error. Large JSON becomes its structure. The full output is saved under `~/.claude/minify/uitvoer/` (or stays where Claude Code already saved very large output) and the model gets the path, so nothing is lost. For output too large for Claude Code to show inline, minify shrinks the whole file instead of letting the model see only the first 2 KB, so errors at the end are not missed. A failed command's shortened output reaches the model as a withheld result that says the command did run. `Read`, `Edit` and `Grep` are never touched.
 - **Memory files shrunk.** `/minify bestand CLAUDE.md` asks Claude Haiku for a shorter version, checks that every heading, code block, inline code span and URL survived, and shows you a diff. Nothing changes until you run `/minify toepassen`; the original goes to `~/.claude/minify/backups/` and `/minify herstel <path>` puts it back. Only `.md` and `.txt`; files that look like secrets and Obsidian `vault/` notes are refused. The file is sent to the model provider.
 - **Measured.** The status line shows the level, average output tokens per turn and how much tool output was cut. `/minify stats` compares your own turns per level.
+- **Dashboard.** `/minify` opens a pane: level buttons (O1/O2/O3/off), cards for output per turn, output cut and tokens not read, a chart of output tokens per turn, average output per level across sessions, and the latest shrunk outputs. Charts are SVG in the desktop app and text bars in the terminal; it redraws after every turn.
 
 If the mod fails, everything passes through unchanged; you get one notice and the reason in `~/.claude/minify-mod.log`.
 
@@ -22,7 +23,8 @@ If the mod fails, everything passes through unchanged; you get one notice and th
 
 | Command | |
 | --- | --- |
-| `/minify` | Status: level, whether the rules reached Claude, counts for this session |
+| `/minify` | Dashboard |
+| `/minify status` | Same as text: level, whether the rules reached Claude, counts for this session |
 | `/minify O1` · `O2` · `O3` | Level for this session |
 | `/minify uit` (or say "doe normaal") | Off for this session |
 | `/minify standaard O3` | Level for new sessions (`standaard uit` to start off) |

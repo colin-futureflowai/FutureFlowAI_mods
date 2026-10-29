@@ -3,7 +3,7 @@
   "author": {
     "name": "FutureFlowAI"
   },
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Makes Claude Code answer tersely (levels O1-O3) and shrinks long tool output and memory files, to spend fewer tokens. Based on Caveman by Julius Brussee",
   "license": "Apache-2.0",
   "types": "./types/index.d.ts"

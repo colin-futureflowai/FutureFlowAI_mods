@@ -92,7 +92,8 @@ Minder tokens: Claude antwoordt kort (`/minify O1|O2|O3|uit`, standaard `O2`, st
 - Uitvoer inkorten in `tool.call` op Bash en `mcp__*` (niet Read/Edit/Grep): na `next(e)` een nieuw `{ result }` zonder `ref` teruggeven, anders gebruikt core zijn eigen berichten. Een hook kan **geen** `isError`-resultaat teruggeven (core valideert het als gewoon resultaat → uitvoer kwijt); een ingekorte fout gaat als `{ deny }` ná uitvoering. Bij `persistedOutputPath` (uitvoer > ~30 KB, model ziet anders alleen de eerste 2 KB) leest minify dat bestand en kort het hele ding in. Origineel naar `~/.claude/minify/uitvoer/<sessie>/`.
 - `tsc` op minify: de engine zet `claude-code-mcp` terug in `.claude-plugin/types/tsconfig.json` (TS2589); type-check met een eigen tsconfig die alleen `claude-code` en `claude-code-tools` noemt.
 - `/minify bestand` gebruikt `$.model.complete` (Haiku) en `controleer()`: koppen, codeblokken, inline code en URL's moeten blijven, anders wordt niets overschreven. Weigert `vault/`, geheimen en alles behalve `.md`/`.txt`. Backups in `~/.claude/minify/backups/`.
-- Meting per niveau in `$.store` (`perNiveau`), per sessie in `$.state` (`minify.teller`). Geen A/B-test: dat staat ook bij `/minify stats`.
+- Meting per niveau in `$.store` (`perNiveau`), per sessie in `$.state` (`minify.teller`, `reeks`, `recent`). Geen A/B-test: dat staat ook bij `/minify stats`.
+- Dashboard: `/minify` opent pane `minify`; SVG uit `lib/grafiek.mjs`. Valkuil: `'Svg' in $.ui.resolve(e)` is ook in de terminal `true` (de tabel antwoordt op elke sleutel); kijk naar `e.surface !== 'terminal'`, anders tekent de terminal een lege doos.
 - Testen: `node --test minify/tests/*.test.mjs` (pure lib en `regels.sh` met `MINIFY_HOME`) en `claude plugin test minify` (hooks met nep-`$`).
 
 ### futureflow-skills
