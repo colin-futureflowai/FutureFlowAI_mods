@@ -14,6 +14,7 @@ FutureFlowAI_mods/
 │   └── skills/<skill-naam>/SKILL.md  ← één map per skill (+ eventuele scripts/referenties)
 ├── content-skills/                   ← skills-plugin, overgenomen van Ootto (MIT)
 ├── agent-slots/                      ← mod + losse CLI (bin/agent-slot.mjs), gedeelde lib/ en node-tests
+├── minify/                           ← mod (korte antwoorden, uitvoer inkorten), pure lib/ en node-tests
 └── voice-chat/                       ← één mod
     ├── .claude-plugin/plugin.json    ← naam, versie, beschrijving
     ├── hooks/hooks.json              ← { "modules": ["./register.tsx"] }
@@ -45,6 +46,7 @@ claude plugin validate <mod>
 claude plugin test <mod>
 node --check <mod>/bridge/*.mjs
 node --test agent-slots/tests/*.test.mjs   # CLI en commando-herkenning van agent-slots
+node --test minify/tests/*.test.mjs        # regels, uitvoer inkorten en bestandscontrole van minify
 ```
 
 Types voor de editor legt Claude Code zelf in `<mod>/.claude-plugin/types/` zodra de mod geladen is (gitignored); `tsc -p <mod>` type-checkt dan.
@@ -59,6 +61,7 @@ Vast installeren (alle sessies):
 claude plugin marketplace add /pad/naar/FutureFlowAI_mods
 claude plugin install voice-chat@futureflowai-mods
 claude plugin install agent-slots@futureflowai-mods
+claude plugin install minify@futureflowai-mods
 claude plugin install futureflow-skills@futureflowai-mods
 claude plugin install content-skills@futureflowai-mods
 ```
@@ -81,6 +84,16 @@ Houdt agents tegen voordat ze zoveel dev-servers, tests, browsers of sessies sta
 - In `*.test.ts` alle `on(...)`-mocks registreren vóór de eerste `$`-aanroep (ook niet in een lus erna).
 - Geheimen: alles wat agent-slots bewaart of toont gaat door `maskSecrets` (lib én CLI, gelijk gehouden door een test). Nieuwe velden met commando- of taaktekst toevoegen aan `MASKED_FIELDS` in de CLI.
 - Testen: `node --test agent-slots/tests/*.test.mjs` (CLI met echte processen, `AGENT_SLOT_HOME` en `AGENT_SLOT_FAKE_FREE`) en `claude plugin test agent-slots` (hook-logica met nep-CLI).
+
+### minify
+Minder tokens: Claude antwoordt kort (`/minify O1|O2|O3|uit`, standaard `O2`, staat standaard aan) en lange tooluitvoer en geheugenbestanden worden ingekort. Ontwerp: `minify/DESIGN.md`.
+- Gebaseerd op [Caveman](https://github.com/JuliusBrussee/caveman) (Apache-2.0, commit `9b68f7e`, 25-10-2026). Regels vertaald en aangepast in `lib/regels.mjs` en `lib/bestand.mjs`; code is eigen werk. `LICENSE` (Apache) en `NOTICE` blijven staan. "Caveman" is een merk: niet als naam gebruiken.
+- Korte antwoorden via command hooks in `hooks/hooks.json` (naast `modules`), zoals caveman: `bin/regels.sh start|prompt|subagent` (gewone `sh`). De mod-hooks `prompt.compose`/`prompt.section` werken níet: de ingebouwde `cc-plugin-sec-default` slaat ze voor zelf geïnstalleerde plugins altijd over. De mod schrijft teksten naar `~/.claude/minify/regels/` en het niveau per sessie naar `niveau/<sessie>`; het script leest, `lib/regels.mjs` is de enige bron. `/minify` toont of de regels meegingen (`gemeld/<sessie>`).
+- Uitvoer inkorten in `tool.call` op Bash en `mcp__*` (niet Read/Edit/Grep): na `next(e)` een nieuw `{ result }` zonder `ref` teruggeven, anders gebruikt core zijn eigen berichten. Een hook kan **geen** `isError`-resultaat teruggeven (core valideert het als gewoon resultaat → uitvoer kwijt); een ingekorte fout gaat als `{ deny }` ná uitvoering. Bij `persistedOutputPath` (uitvoer > ~30 KB, model ziet anders alleen de eerste 2 KB) leest minify dat bestand en kort het hele ding in. Origineel naar `~/.claude/minify/uitvoer/<sessie>/`.
+- `tsc` op minify: de engine zet `claude-code-mcp` terug in `.claude-plugin/types/tsconfig.json` (TS2589); type-check met een eigen tsconfig die alleen `claude-code` en `claude-code-tools` noemt.
+- `/minify bestand` gebruikt `$.model.complete` (Haiku) en `controleer()`: koppen, codeblokken, inline code en URL's moeten blijven, anders wordt niets overschreven. Weigert `vault/`, geheimen en alles behalve `.md`/`.txt`. Backups in `~/.claude/minify/backups/`.
+- Meting per niveau in `$.store` (`perNiveau`), per sessie in `$.state` (`minify.teller`). Geen A/B-test: dat staat ook bij `/minify stats`.
+- Testen: `node --test minify/tests/*.test.mjs` (pure lib en `regels.sh` met `MINIFY_HOME`) en `claude plugin test minify` (hooks met nep-`$`).
 
 ### futureflow-skills
 Bundel skills van FutureFlowAI. Claude Code vindt elke `skills/<naam>/SKILL.md` vanzelf; er hoeft niets in `plugin.json` bij.
