@@ -1,0 +1,14 @@
+minify
+Copyright 2026 FutureFlowAI
+
+This plugin is based on Caveman (https://github.com/JuliusBrussee/caveman),
+commit 9b68f7e (25 October 2026), licensed under the Apache License 2.0:
+
+  Caveman
+  Copyright 2026 Julius Brussee
+
+The answer rules in lib/regels.mjs are translated and adapted from Caveman's
+skills/caveman, skills/ultracave and src/rules/caveman-activate.md. The file
+compression rules in lib/bestand.mjs are adapted from skills/caveman-compress.
+The code itself is new. "Caveman" is a trademark of Julius Brussee; this
+plugin is not affiliated with or endorsed by Caveman.

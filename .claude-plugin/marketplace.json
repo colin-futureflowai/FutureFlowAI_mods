@@ -24,6 +24,11 @@
       "name": "agent-slots",
       "source": "./agent-slots",
       "description": "Keeps agents from starting more dev servers, test runs, browsers and sessions than your machine's memory can handle"
+    },
+    {
+      "name": "minify",
+      "source": "./minify",
+      "description": "Makes Claude Code answer tersely (levels O1-O3) and shrinks long tool output and memory files, to spend fewer tokens"
     }
   ]
 }
