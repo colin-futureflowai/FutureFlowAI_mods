@@ -42,6 +42,8 @@ claude plugin marketplace add colin-futureflowai/FutureFlowAI_mods
 claude plugin install minify@futureflowai-mods
 ```
 
+Requires a Claude Code version with mod support; tested with 2.1.308. Older versions refuse to install it with `Unrecognized key: "types"`. Check with `claude --version` and update with `npm i -g @anthropic-ai/claude-code@latest` (or update the desktop app). If `claude --version` still shows an old version, an older install earlier on your `PATH` (for example under `~/.nvm`) is shadowing the new one.
+
 ## Credits
 
 Based on [Caveman](https://github.com/JuliusBrussee/caveman) by Julius Brussee (Apache-2.0). The answer and compression rules are translated and adapted from it; the code is new. "Caveman" is a trademark of Julius Brussee and this plugin is not affiliated with it. See [NOTICE](NOTICE) and [LICENSE](LICENSE).
