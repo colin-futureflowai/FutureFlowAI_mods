@@ -91,8 +91,11 @@ test('toestemming wordt beoordeeld op het originele commando', async ($, on) => 
     return { decision: e.input.command === 'pnpm dev' ? 'allow' : 'ask' }
   })
   // Eerst laat de mod zelf het commando inpakken; dat ingepakte commando krijgt het oordeel van het origineel.
+  // $.tool.call vraagt zelf ook al tool.check (zoals een sessie doet): ook daar mag alleen het origineel langskomen.
   await $.tool.call({ tool: 'Bash', command: 'pnpm dev' } as any)
   const wrapped = cmdOf(f)!
+  expect(seen.every(c => c === 'pnpm dev')).toBe(true)
+  seen.length = 0
   const verdict = await $.tool.check({ tool: 'Bash', input: { command: wrapped } })
   expect(seen).toEqual(['pnpm dev'])
   expect(verdict.decision).toBe('allow')
