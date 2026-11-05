@@ -7,7 +7,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-const CLI = fileURLToPath(new URL('../bin/agent-slot.mjs', import.meta.url))
+const CLI = fileURLToPath(new URL('../cli/agent-slot.mjs', import.meta.url))
 let home
 
 beforeEach(() => {
@@ -216,7 +216,7 @@ Overflow-Base: main" && git push -q origin HEAD`)
 
 test('masker: CLI en lib maskeren hetzelfde, log en status bevatten geen geheimen', async () => {
   const { maskSecrets: libMask } = await import('../lib/classify.mjs')
-  const { maskSecrets: cliMask } = await import('../bin/agent-slot.mjs')
+  const { maskSecrets: cliMask } = await import('../cli/agent-slot.mjs')
   for (const s of ['A_KEY=geheim pnpm dev', 'PORT=1 next dev', 'x --password hunter2', 'https://u:p@h/x', 'Bearer abcdefghijkl', 'echo sk-abcdefghijklmnopqrstu']) {
     assert.equal(cliMask(s), libMask(s), s)
   }

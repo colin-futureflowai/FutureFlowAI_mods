@@ -113,7 +113,7 @@ async function session($: Engine) {
 }
 
 // De CLI in de plugin zelf: bestaat altijd, ook als de kopie voor de shim nog niet gemaakt is.
-const cliPath = ($: Engine) => `${$.plugin.root}/bin/agent-slot.mjs`
+const cliPath = ($: Engine) => `${$.plugin.root}/cli/agent-slot.mjs`
 
 // Draait de CLI. De desktop-app heeft een kaal PATH en argv[0] wordt daarop gezocht,
 // dus `node` via /usr/bin/env met een PATH waar Homebrew vooraan staat.

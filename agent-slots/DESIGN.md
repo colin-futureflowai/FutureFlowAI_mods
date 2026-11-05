@@ -4,7 +4,7 @@ Doel: Claude Code (en andere agents) mogen niet zoveel zware dingen tegelijk sta
 
 ## Delen
 
-1. **`bin/agent-slot.mjs`** (Node, geen dependencies) — alle state en logica. Werkt op macOS, Linux en Windows.
+1. **`cli/agent-slot.mjs`** (Node, geen dependencies; niet in `bin/`, want claude.ai weigert plugins met een `bin/`-map) — alle state en logica. Werkt op macOS, Linux en Windows.
 2. **`hooks/register.tsx`** — de mod: onderschept tool-aanroepen in Claude Code en gebruikt de CLI.
 3. **Shim op het PATH** — `agent-slot install` zet `agent-slot` in `~/.local/bin` (Windows: `agent-slot.cmd`) en kopieert de CLI naar `~/.claude/agent-slots/bin/`, zodat de shim niet afhangt van de plugin-versie.
 
