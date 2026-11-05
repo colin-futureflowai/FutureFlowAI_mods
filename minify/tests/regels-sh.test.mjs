@@ -7,7 +7,7 @@ import { join } from 'node:path'
 
 import { herinnering, regelsVoor, subagentRegel } from '../lib/regels.mjs'
 
-const SCRIPT = new URL('../bin/regels.sh', import.meta.url).pathname
+const SCRIPT = new URL('../scripts/regels.sh', import.meta.url).pathname
 
 // Een nep-~/.claude/minify met de bestanden die de mod schrijft.
 function thuis({ niveau, standaard } = {}) {

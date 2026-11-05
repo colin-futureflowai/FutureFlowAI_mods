@@ -53,9 +53,9 @@ De volledige regels kosten zo'n 1.000 tokens, één keer per sessie (en na een n
 ## Onderdelen van de mod
 
 1. **Korte antwoorden — command hooks, zoals caveman.** Eerst geprobeerd via de mod-hooks `prompt.compose` en `prompt.section`, maar de ingebouwde plugin `cc-plugin-sec-default` (prepend-laag, naam begint met het gereserveerde `cc-plugin-`, dus niet door een beheerder ingesteld) slaat die hooks van zelf geïnstalleerde plugins altijd over (live test 29-10-2026: 0× gedraaid). Daarom nu de gewone command hooks in `hooks/hooks.json`, naast de module:
-   - `SessionStart` → `bin/regels.sh start`: de volledige regels van het niveau.
-   - `UserPromptSubmit` → `bin/regels.sh prompt`: elke beurt een korte herinnering (~80 tokens), na een niveauwissel de volledige regels opnieuw.
-   - `SubagentStart` → `bin/regels.sh subagent`: één regel over een kort eindrapport (JSON `additionalContext`).
+   - `SessionStart` → `scripts/regels.sh start`: de volledige regels van het niveau.
+   - `UserPromptSubmit` → `scripts/regels.sh prompt`: elke beurt een korte herinnering (~80 tokens), na een niveauwissel de volledige regels opnieuw.
+   - `SubagentStart` → `scripts/regels.sh subagent`: één regel over een kort eindrapport (JSON `additionalContext`).
    - Het script is gewone `sh` (kaal PATH van de desktop-app). De mod schrijft de teksten bij elke start naar `~/.claude/minify/regels/` (uit `lib/regels.mjs`, de enige bron) en per sessie het niveau naar `~/.claude/minify/niveau/<sessie>`; het script schrijft in `gemeld/<sessie>` welk niveau het laatst volledig meeging. Geen niveaubestand: `standaard`, anders O2.
    - De regels komen zo als context in het gesprek, niet in de systeemprompt. Iets zwakker, daarom de herinnering bij elke beurt.
 2. **Tooluitvoer inkorten — `tool.call` op Bash en `mcp__*`.** Na `next(e)`: is de uitvoer langer dan de drempel (Bash-stdout 6.000, stderr 3.000, MCP 8.000 tekens), dan:

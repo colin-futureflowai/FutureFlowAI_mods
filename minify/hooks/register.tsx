@@ -67,7 +67,7 @@ async function niveau($: Engine): Promise<MinifyNiveau> {
   return s
 }
 
-// De korte antwoorden gaan via command hooks (bin/regels.sh), zoals bij caveman: de hooks
+// De korte antwoorden gaan via command hooks (scripts/regels.sh), zoals bij caveman: de hooks
 // prompt.compose en prompt.section van mods slaat cc-plugin-sec-default over. Het script leest
 // het niveau per sessie en de teksten uit deze bestanden.
 async function schrijfNiveau($: Engine, n: MinifyNiveau) {
@@ -211,7 +211,7 @@ const HULP = `minify — kort antwoorden en lange uitvoer inkorten.
 /minify bestand <pad>   CLAUDE.md of todo inkorten (voorstel; daarna /minify toepassen)
 /minify herstel <pad>   origineel terugzetten`
 
-// Welk niveau het script (bin/regels.sh) deze sessie het laatst volledig meegaf, of ''.
+// Welk niveau het script (scripts/regels.sh) deze sessie het laatst volledig meegaf, of ''.
 async function gemeldNiveau($: Engine) {
   const pad = `${await map($)}/gemeld/${await $.session.id()}`
   return (await $.fs.exists(pad)) ? (await $.fs.read(pad)).trim() : ''
