@@ -44,7 +44,7 @@ Herkenning: het commando wordt in stukken geknipt op `&&`, `||`, `;` en `|`; per
 
 **Weigering** noemt wie het slot heeft (sessie, map, commando), sinds wanneer, en de volgende stap: `agent-slot wait <soort>` (blokkeert tot er plek is, max. 9 minuten) of over 60 s opnieuw proberen.
 
-**Ontsnapping:** `AGENT_SLOT_BYPASS=1` in de omgeving van de sessie zet alles uit. Getypte `!`-commando's van de gebruiker gaan niet via de tool-aanroepen van het model en worden niet geraakt.
+**Uitzetten:** het vinkje *agent-slots aan* in het dashboard (`Button` key `enabled`, sneltoets `a`) of `agent-slot config set enabled off` zet `enabled: false` in `config.json`: machinebreed uit, voor alle sessies en de CLI. `check` antwoordt dan `{ ok: true, disabled: true }`, `acquire` en `run` maken geen lockbestand, de mod pakt niets in. **Ontsnapping voor één sessie:** `AGENT_SLOT_BYPASS=1` in de omgeving van de sessie zet alles uit. Getypte `!`-commando's van de gebruiker gaan niet via de tool-aanroepen van het model en worden niet geraakt.
 
 ## CLI
 

@@ -33,7 +33,7 @@ export type OverflowJob = {
 
 export type SlotsSnapshot = {
   memory: SlotsMemory
-  config: { limits: Record<string, number>; floorPercent: number; criticalPercent: number; cloudOverflow?: boolean }
+  config: { limits: Record<string, number>; floorPercent: number; criticalPercent: number; cloudOverflow?: boolean; enabled?: boolean }
   slots: SlotsHolder[]
   refusals: SlotsEvent[]
   overflow?: OverflowJob[]

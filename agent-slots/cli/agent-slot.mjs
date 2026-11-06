@@ -35,6 +35,8 @@ const DEFAULTS = {
   waitTimeoutSeconds: 540,
   // Aan: weigeringen voor taken (tests, builds, subagents, sessies) noemen ook uitbesteden aan een cloud-worker.
   cloudOverflow: false,
+  // Uit: niets wordt tegengehouden of ingepakt, op deze hele machine (alle sessies en de CLI).
+  enabled: true,
 }
 
 // ---------- config, log ----------
@@ -260,6 +262,7 @@ function withOverflow(result, kind, cfg) {
 
 export function check(kind, opts = {}) {
   const cfg = config()
+  if (cfg.enabled === false) return { ok: true, disabled: true, message: 'agent-slots staat uit' }
   return withOverflow(checkRaw(kind, opts, cfg), kind, cfg)
 }
 
@@ -305,6 +308,8 @@ function tryAcquire(kind, data) {
 
 function acquire(kind, data, { session } = {}) {
   const c = check(kind, { session })
+  // Uit: doorlaten zonder slot (geen lockbestand, dus ook niets om vrij te geven).
+  if (c.disabled) return c
   if (c.reuse) return { ok: true, file: c.lock.file, reuse: true }
   if (!c.ok) return c
   const file = tryAcquire(kind, data)
@@ -448,7 +453,8 @@ function cmdStatus(opts) {
   const refusals = readLog().filter(e => e.event === 'refuse').slice(-5)
   const unknown = readLog().filter(e => e.event === 'unknown-heavy').slice(-5)
   if (opts.json) { out({ memory: mem, config: cfg, slots: alive.map(({ file, ...l }) => maskEntry(l)), refusals, unknown, overflow: readJobs().slice(-8) }); return 0 }
-  const lines = [`Geheugen: ${mem.freePercent}% vrij van ${mem.totalGB} GB (grens ${cfg.floorPercent}%, kritiek ${cfg.criticalPercent}%)`, '']
+  const lines = cfg.enabled === false ? ['agent-slots staat UIT: niets wordt tegengehouden. Weer aan: agent-slot config set enabled on', ''] : []
+  lines.push(`Geheugen: ${mem.freePercent}% vrij van ${mem.totalGB} GB (grens ${cfg.floorPercent}%, kritiek ${cfg.criticalPercent}%)`, '')
   for (const [kind, limit] of Object.entries(cfg.limits)) {
     const held = alive.filter(l => l.kind === kind)
     lines.push(`${kind}: ${held.length}/${limit}`)
@@ -505,7 +511,7 @@ function cmdInstall(opts) {
 }
 
 // Instellingen lezen of één waarde zetten in config.json (gedeeld door alle sessies).
-const SETTABLE = { cloudOverflow: 'bool', floorPercent: 'number', criticalPercent: 'number', browserIdleMinutes: 'number' }
+const SETTABLE = { enabled: 'bool', cloudOverflow: 'bool', floorPercent: 'number', criticalPercent: 'number', browserIdleMinutes: 'number' }
 // ---------- cloud-overflow: taken die in een cloud-sessie lopen ----------
 //
 // Een cloud-sessie kan niet terugpraten. Het terugkanaal is git: de worker pusht naar
@@ -669,6 +675,7 @@ export async function main(argv) {
   agent-slot status [--json]
   agent-slot kill-idle
   agent-slot install --shim        zet agent-slot op je PATH (~/.local/bin)
+  agent-slot config set enabled on|off
   agent-slot config set cloudOverflow on|off
   agent-slot overflow brief --task "<taak>" [--base <branch>]   opdracht voor een cloud-worker
   agent-slot overflow add --branch overflow/<naam> --base <branch> --task "<taak>" [--session <id>]

@@ -184,6 +184,25 @@ test('dashboard: het overflow-vinkje zet de instelling om, op terminal en deskto
   }
 })
 
+test('uitgezet: zwaar commando gaat ongewijzigd door, zonder inpakken', async ($, on) => {
+  const f = fake(on, { 'check dev': { ok: true, disabled: true } })
+  await $.tool.call({ tool: 'Bash', command: 'pnpm dev', run_in_background: true } as any)
+  expect(f.ran[0]!.command).toBe('pnpm dev')
+})
+
+test('dashboard: de aan/uit-knop zet agent-slots uit en weer aan', async ($, on) => {
+  const f = fake(on, { status: { ...STATUS, config: { ...STATUS.config, enabled: false } } })
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('ui.panes', () => ({ value: [{ id: 'agent-slots', title: 'agent-slots', isShown: true, isFocused: false, isPlaced: true }] }))
+  await $.command.run({ origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 }, command: 'agent-slots', args: '' } as any)
+  const ui = await $.ui.mount({ plugin: 'agent-slots', surface: 'desktop', component: 'Pane', requestId: 'agent-slots', props: {} } as any)
+  expect(await ui.find({ type: 'Text', text: /Uit: niets wordt tegengehouden/ })).toBeDefined()
+  f.calls.length = 0
+  await ui.press({ key: 'enabled' })
+  expect(f.calls.some(c => c.slice(2).join(' ') === 'config set enabled on')).toBe(true)
+  await ui.unmount()
+})
+
 test('rapportbericht: branch, rapport en de volgende stap uit de skill', async () => {
   const msg = reportMessage({ id: 'x', repo: '/r', branch: 'overflow/20261019-yarn-foreach', base: 'main', task: 'yarn workspaces foreach herkennen', started: '', status: 'done', commit: 'b9ed698', report: 'Gedaan\n- iets' })
   expect(msg).toContain('[agent-slots] Cloud-worker klaar: overflow/20261019-yarn-foreach')
@@ -208,12 +227,12 @@ test('watcher: een rapport wordt één keer ingestuurd, ook als insturen wacht e
   on('env.get', ($: any, e: { name: string }) => ({ value: ({ HOME: '/home/t', PATH: '/usr/bin' } as Record<string, string>)[e.name] }))
   on('session.id', () => ({ value: 'sessie-1' }))
   on('ui.panes', () => ({ value: [] }))
-  on('command.register', () => ({ value: undefined }))
+  on('command.register', () => ({ value: undefined }) as any)
   on('ui.toast', () => ({ value: undefined }))
   on('fs.write', () => ({ value: undefined }))
   on('session.start', ($: any, e: any) => e)
-  on('process.run', ($: any, e: { argv: string[] }) => {
-    const argv = e.argv.slice(e.argv.findIndex(a => a.endsWith('agent-slot.mjs')) + 1)
+  on('process.run', ($: any, e: any) => {
+    const argv = e.argv.slice(e.argv.findIndex((a: string) => a.endsWith('agent-slot.mjs')) + 1)
     calls.push(argv.slice(0, 2).join(' '))
     if (argv[0] === 'overflow' && argv[1] === 'delivered') delivered = true
     const answer = argv[0] === 'overflow' && argv[1] === 'check' ? { ok: true, running: 0, finished: delivered ? [] : [job] } : { ok: true }

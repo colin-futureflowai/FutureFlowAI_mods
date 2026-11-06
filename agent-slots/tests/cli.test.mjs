@@ -166,6 +166,25 @@ test('install zet de CLI op een vaste plek', () => {
   assert.ok(fs.existsSync(path.join(home, 'bin', 'agent-slot.mjs')))
 })
 
+test('uitzetten: niets tegengehouden, run draait zonder slot, browser zonder lock', () => {
+  assert.equal(json(['check', 'dev'], { AGENT_SLOT_FAKE_FREE: '5' }).ok, false, 'aan: geweigerd bij krap geheugen')
+  assert.deepEqual(json(['config', 'set', 'enabled', 'off']), { ok: true, enabled: false })
+  try {
+    const c = json(['check', 'dev'], { AGENT_SLOT_FAKE_FREE: '5' })
+    assert.equal(c.ok, true)
+    assert.equal(c.disabled, true)
+    const r = cli(['run', 'test', '--', 'sh', '-c', 'echo draait'], { AGENT_SLOT_FAKE_FREE: '5' })
+    assert.equal(r.status, 0)
+    assert.match(r.stdout, /draait/)
+    assert.equal(json(['acquire', 'browser', '--session', 's-uit']).ok, true)
+    assert.equal(locks().length, 0, 'geen lockbestanden als agent-slots uit staat')
+    assert.match(cli(['status']).stdout, /agent-slots staat UIT/)
+  } finally {
+    json(['config', 'set', 'enabled', 'on'])
+  }
+  assert.equal(json(['check', 'dev'], { AGENT_SLOT_FAKE_FREE: '5' }).ok, false, 'weer aan: weer geweigerd')
+})
+
 test('cloud-overflow: aan te zetten, uitweg alleen bij taken en niet bij een dev-server', () => {
   assert.equal(json(['check', 'test'], { AGENT_SLOT_FAKE_FREE: '5' }).overflow, undefined, 'standaard uit')
   assert.deepEqual(json(['config', 'set', 'cloudOverflow', 'on']), { ok: true, cloudOverflow: true })

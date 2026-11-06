@@ -12,7 +12,7 @@ const SESSION_TOOLS = new Set(['Workflow', 'mcp__ccd_session__start_session'])
 const isBrowserTool = (tool: string) => tool.startsWith('mcp__') && /playwright/i.test(tool)
 const isBrowserClose = (tool: string) => /browser_close$/.test(tool)
 
-type Check = { ok: boolean; reuse?: boolean; reason?: string; message?: string; memory?: { freePercent: number } }
+type Check = { ok: boolean; disabled?: boolean; reuse?: boolean; reason?: string; message?: string; memory?: { freePercent: number } }
 
 let sessionId: string | undefined
 
@@ -213,6 +213,8 @@ export const register: Register = on => {
 
     const id = await session($)
     const check = await cliJson($, ['check', c.kind, '--session', id])
+    // Uitgezet in het dashboard (of met `agent-slot config set enabled off`): niet inpakken.
+    if (check.disabled) return next(e)
     if (!check.ok) {
       await log($, 'refuse', { kind: c.kind, tool: 'Bash', command: c.segment, reason: check.reason, memory: check.memory?.freePercent })
       return { deny: `agent-slots: ${check.message ?? 'geen slot vrij'}` }
@@ -274,8 +276,28 @@ export const register: Register = on => {
     const tone = free < config.criticalPercent ? 'error' : free < config.floorPercent ? 'warning' : free < config.floorPercent + 15 ? 'warning' : 'success'
     const state = free < config.criticalPercent ? 'kritiek' : free < config.floorPercent ? 'krap: nieuwe zware taken worden geweigerd' : 'ok'
 
+    const isOff = config.enabled === false
+
     return (
       <Box flexDirection="column" gap={1}>
+        <Box flexDirection="column">
+          <Button
+            key="enabled"
+            hotkey="a"
+            onPress={async () => {
+              await cli($, ['config', 'set', 'enabled', isOff ? 'on' : 'off'])
+              await refresh($)
+            }}
+          >
+            {isOff ? '☐' : '☑'} agent-slots aan
+          </Button>
+          <Text color={isOff ? 'warning' : undefined} dimColor={!isOff}>
+            {isOff
+              ? 'Uit: niets wordt tegengehouden of ingepakt, in alle sessies op deze computer. Slots en geheugen hieronder zijn alleen ter info.'
+              : 'Aan: zware commando\'s, browsers en sessies wachten als er geen slot of geheugen vrij is.'}
+          </Text>
+        </Box>
+
         <Box flexDirection="column">
           <Text bold>Geheugen</Text>
           <Text>

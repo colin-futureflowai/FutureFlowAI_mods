@@ -16,7 +16,7 @@ Keeps Claude Code (and other coding agents) from starting more dev servers, test
 
 If the mod itself fails (for example `node` can't be found), it lets everything through, shows a notice once, and writes the reason to `~/.claude/agent-slots-mod.log`.
 
-Commands you type yourself with `!` are not affected. To switch it off for a session, start Claude Code with `AGENT_SLOT_BYPASS=1`.
+Commands you type yourself with `!` are not affected. To switch it off, untick *agent-slots aan* in the dashboard (or run `agent-slot config set enabled off`): nothing is refused or wrapped any more, in every session on this machine and for the CLI, until you switch it back on. To switch it off for a single session only, start Claude Code with `AGENT_SLOT_BYPASS=1`.
 
 ## Install
 
