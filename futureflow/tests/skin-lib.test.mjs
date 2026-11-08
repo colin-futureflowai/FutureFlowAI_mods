@@ -102,3 +102,8 @@ test('alles wat getoond wordt is schoon', () => {
   assert.equal(diffRegels('x', vies)[1].tekst, 'ab')
   assert.equal(wijzigRegels({ structuredPatch: [{ oldStart: 1, newStart: 1, lines: ['+' + vies] }] })[0].tekst, 'ab')
 })
+
+test('ook sleutels en mcp-namen zijn schoon', () => {
+  assert.deepEqual(invoerVelden({ 'a\u001b]0;x\u0007b': 'v' }), [['ab', 'v']])
+  assert.equal(toolLabel('mcp__s\u001b[31m__t\u0007'), 's:t')
+})

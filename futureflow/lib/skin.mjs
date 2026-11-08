@@ -215,13 +215,13 @@ export function invoerVelden(invoer) {
   if (typeof invoer !== 'object' || invoer === null) return []
   return Object.entries(invoer).map(([k, v]) => {
     const t = schoonTekst(typeof v === 'string' ? v : JSON.stringify(v) ?? String(v))
-    return [k, t.length > MAX_RESULTAAT ? `${t.slice(0, MAX_RESULTAAT)}…` : t]
+    return [schoonTekst(k), t.length > MAX_RESULTAAT ? `${t.slice(0, MAX_RESULTAAT)}…` : t]
   })
 }
 
 // mcp__server__tool leest als server:tool.
 export function toolLabel(tool) {
-  if (typeof tool !== 'string' || !tool.startsWith('mcp__')) return String(tool)
+  if (typeof tool !== 'string' || !tool.startsWith('mcp__')) return schoonTekst(tool)
   const [, server = '', ...naam] = tool.split('__')
-  return `${server}:${naam.join('__')}`
+  return schoonTekst(`${server}:${naam.join('__')}`)
 }

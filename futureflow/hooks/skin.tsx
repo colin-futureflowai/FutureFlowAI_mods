@@ -45,6 +45,13 @@ async function tik($: Engine): Promise<void> {
   await update($, tikAtom, t => t + 1)
 }
 
+// Stopt de tikker van de spinner. Zonder `$`: minify (turn.complete) en slots (session.end)
+// roepen dit aan, want die hebben de ene ongematchte handler voor die events.
+export function stopTikker(): void {
+  tikker?.cancel()
+  tikker = undefined
+}
+
 function startTikker($: Engine, nu: number): void {
   laatsteSpinner = nu
   tikker?.cancel()

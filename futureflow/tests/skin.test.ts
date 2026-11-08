@@ -12,6 +12,7 @@ function fake(on: any, opties: Opties = {}) {
   const toasts: string[] = []
   const clock = mock.clock(on, { now: 10_000 })
   on('turn.start', ($: any, e: { turnId: string }) => ({ turnId: e.turnId }))
+  on('turn.complete', () => ({ text: '' }))
   on('env.get', ($: any, e: { name: string }) => ({ value: e.name === 'HOME' ? '/home/t' : undefined }))
   on('fs.write', () => ({ value: undefined }))
   on('store.get', ($: any, e: { key: string }) => ({ value: e.key === 'stijl' ? opties.stijl : undefined }))
@@ -204,4 +205,16 @@ test('spinner en beurtduur in groen', async ($, on) => {
   const dt = (await d.find({ type: 'Text', text: /Gebakken for 1m 4s/ })) as any
   expect(dt?.props.color).toBe('#32a029')
   await d.unmount()
+})
+
+test('na turn.complete stopt de tikker: de spinner tekent niet meer opnieuw', async ($, on) => {
+  const f = fake(on)
+  await $.turn.start({ text: 'go', turnId: 't1' } as any)
+  const s = await $.ui.mount(SPINNER('terminal'))
+  expect(await s.find({ type: 'Text', text: /\(0s\)/ })).toBeDefined()
+  await $.turn.complete({ turnId: 't1', durationMs: 10, answer: '', isAborted: false } as any)
+  await f.clock.advance(2000)
+  expect(await s.find({ type: 'Text', text: /\(0s\)/ })).toBeDefined()
+  expect(await s.find({ type: 'Text', text: /\(2s\)/ })).toBeUndefined()
+  await s.unmount()
 })
