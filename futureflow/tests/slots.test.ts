@@ -1,5 +1,6 @@
 import { expect, mock, test } from 'claude-code/testing'
 
+import { vergeetOud } from '../hooks/ctx'
 import { unwrapCommand } from '../lib/classify.mjs'
 import { reportMessage } from '../lib/report.mjs'
 
@@ -261,11 +262,66 @@ test('watcher: een rapport wordt één keer ingestuurd, ook als insturen wacht e
 })
 
 test('pakt niets in als agent-slots nog aan staat', async ($, on) => {
+  vergeetOud()
   const f = fake(on)
   on('fs.read', ($: any, e: { path: string }) => ({
     value: e.path.endsWith('installed_plugins.json') ? JSON.stringify({ plugins: { 'agent-slots@futureflowai-mods': [{}] } }) : '',
   }))
   await $.tool.call({ tool: 'Bash', command: 'npm run dev' } as any)
   expect(f.ran[0]!.command).toBe('npm run dev')
+  expect(f.calls.length).toBe(0)
+})
+
+// Oude plugin aanwezig: nep-omgeving met installed_plugins.json en tellers voor wat futureflow zou doen.
+function oudAanwezig(on: any) {
+  const f = fake(on)
+  const registered: unknown[] = []
+  const opened: unknown[] = []
+  on('fs.read', ($: any, e: { path: string }) => ({
+    value: e.path.endsWith('installed_plugins.json') ? JSON.stringify({ plugins: { 'agent-slots@futureflowai-mods': [{}] } }) : '',
+  }))
+  on('command.register', ($: any, e: unknown) => {
+    registered.push(e)
+    return { value: undefined } as any
+  })
+  on('ui.panes', () => ({ value: [] }))
+  on('ui.open', () => {
+    opened.push(1)
+    return { value: { isPlaced: true } } as any
+  })
+  on('ui.toast', () => ({ value: undefined }))
+  on('fs.write', () => ({ value: undefined }))
+  on('session.start', ($: any, e: any) => e)
+  return { ...f, registered, opened }
+}
+
+test('oude plugin aan: session.start registreert /agent-slots niet en roept de CLI niet aan', async ($, on) => {
+  vergeetOud()
+  const f = oudAanwezig(on)
+  await $.session.start({ cwd: '/r', surface: 'terminal', isInteractive: true } as any)
+  expect(f.registered.length).toBe(0)
+  expect(f.calls.length).toBe(0)
+})
+
+test('oude plugin aan: tool.check op Bash gaat ongewijzigd door', async ($, on) => {
+  vergeetOud()
+  oudAanwezig(on)
+  const seen: unknown[] = []
+  on('tool.check', ($: any, e: any) => {
+    seen.push(e.input)
+    return { decision: 'allow' } as any
+  })
+  const input = { command: "'node' '/x/agent-slot.mjs' run dev --session 's' -- sh -c 'npm run dev'" }
+  await $.tool.check({ tool: 'Bash', input } as any)
+  expect(seen.length).toBe(1)
+  expect((seen[0] as { command: string }).command).toBe(input.command)
+})
+
+test('oude plugin aan: command.run agent-slots gaat door, futureflow opent geen paneel', async ($, on) => {
+  vergeetOud()
+  const f = oudAanwezig(on)
+  on('command.run', ($: any, e: any) => ({ text: 'oude plugin' }) as any)
+  await $.command.run({ origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 }, command: 'agent-slots', args: '' } as any)
+  expect(f.opened.length).toBe(0)
   expect(f.calls.length).toBe(0)
 })

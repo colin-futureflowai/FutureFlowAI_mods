@@ -40,6 +40,11 @@ export async function log($: Engine, regel: string): Promise<void> {
   if (dir) await $.fs.write(`${dir}/mod.log`, notes.slice(-50).join('\n') + '\n').catch(() => undefined)
 }
 
+// Alleen voor tests: vergeet wat oud() las.
+export function vergeetOud(): void {
+  gelezen = undefined
+}
+
 export function oud($: Engine): Promise<OudePlugins> {
   return (gelezen ??= (async () => {
     const home = (await $.env.get('HOME')) ?? (await $.env.get('USERPROFILE'))

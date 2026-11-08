@@ -177,7 +177,8 @@ export async function startSlots($: Engine): Promise<void> {
 }
 
 export const registerSlots = (on: Parameters<Register>[0]): void => {
-  on('command.run', { command: 'agent-slots' }, async ($, e) => {
+  on('command.run', { command: 'agent-slots' }, async ($, e, next) => {
+    if ((await oud($)).slots) return next(e)
     const arg = (e.args ?? '').trim()
     if (!arg || arg === 'dashboard') {
       const opened = await $.ui.open({ id: PANE, title: 'agent-slots' })
@@ -271,7 +272,8 @@ export const registerSlots = (on: Parameters<Register>[0]): void => {
     return next(e)
   })
 
-  on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
+  on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e, next) => {
+    if ((await oud($)).slots) return next(e)
     const { Box, Text, Button } = $.ui.resolve(e)
     const snap = await read($, snapshot)
     if (!snap) return <Text dimColor>Laden…</Text>
