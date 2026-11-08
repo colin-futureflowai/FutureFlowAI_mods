@@ -66,7 +66,8 @@ export const registerDashboard = (on: Parameters<Register>[0]): void => {
     return r
   })
 
-  on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
+  on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e, next) => {
+    try {
     const el = $.ui.resolve(e)
     const { Box, Text, Button } = el
     const tab = (await read($, tabAtom)) ?? 'overzicht'
@@ -109,5 +110,9 @@ export const registerDashboard = (on: Parameters<Register>[0]): void => {
         {inhoud}
       </Box>
     )
+    } catch (err) {
+      failOpen($, err)
+      return next(e)
+    }
   })
 }

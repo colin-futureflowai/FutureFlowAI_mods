@@ -69,6 +69,11 @@ async function niveau($: Engine): Promise<MinifyNiveau> {
   return s
 }
 
+// Voor tekenen: een render schrijft niets, dus het niveau lezen zonder het te zetten.
+async function niveauLezen($: Engine): Promise<MinifyNiveau> {
+  return (await read($, niveauAtom)) ?? (await standaard($))
+}
+
 // De korte antwoorden gaan via command hooks (scripts/regels.sh), zoals bij caveman: de hooks
 // prompt.compose en prompt.section van mods slaat cc-plugin-sec-default over. Het script leest
 // het niveau per sessie en de teksten uit deze bestanden.
@@ -391,7 +396,7 @@ export async function minifyTab($: Engine, e: any) {
     if ((await oud($)).minify) return <Text dimColor>De oude minify-plugin staat nog aan en beheert dit onderdeel.</Text>
     // Alleen de terminal tekent geen Svg. Niet `'Svg' in el` gebruiken: de tabel antwoordt daar ook in de terminal ja.
     const Svg = e.surface !== 'terminal' && 'Svg' in el ? el.Svg : undefined
-    const n = await niveau($)
+    const n = await niveauLezen($)
     const t = (await read($, tellerAtom)) ?? LEGE_TELLER
     const reeks = (await read($, reeksAtom)) ?? []
     const recent = (await read($, recentAtom)) ?? []

@@ -4,7 +4,7 @@ import type { EngineInterface as Engine, Register } from 'claude-code'
 import type { OverflowJob, SlotsHolder, SlotsSnapshot } from '../types'
 
 import { failOpen, log, oud } from './ctx'
-import { openDashboard } from './paneel'
+import { openDashboard, PANE } from './paneel'
 
 import { classify, hasShellBackground, maskSecrets, unwrapCommand, wrapCommand } from '../lib/classify.mjs'
 import { reportMessage } from '../lib/report.mjs'
@@ -64,7 +64,6 @@ function startOverflowWatch($: Engine) {
 
 // ---------- dashboard ----------
 
-const PANE = 'futureflow'
 const snapshot = atom({ plugin: 'futureflow', key: 'slots.snapshot' } as const, null as SlotsSnapshot | null)
 let ticker: { cancel: () => void } | undefined
 

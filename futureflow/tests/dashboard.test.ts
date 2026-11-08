@@ -2,6 +2,8 @@ import { expect, mock, test } from 'claude-code/testing'
 
 const CLI = { stdout: JSON.stringify({ memory: { freePercent: 40, totalGB: 16 }, config: { limits: { dev: 2 }, floorPercent: 25, criticalPercent: 10 }, slots: [], refusals: [] }) + '\n' }
 
+const WRITES: string[] = []
+
 // Nep-omgeving: geen oude plugins, neppe CLI, en een ui.open die we kunnen afluisteren.
 function fake(on: any) {
   const opened: Array<{ id: string; title?: string }> = []
@@ -10,7 +12,7 @@ function fake(on: any) {
   on('store.get', () => ({ value: undefined }))
   on('store.set', () => ({ value: undefined }))
   on('ui.status', () => ({ value: undefined }))
-  on('fs.write', () => ({ value: undefined }))
+  on('fs.write', ($: any, e: { path: string }) => { WRITES.push(e.path); return { value: undefined } })
   on('fs.exists', () => ({ value: false }))
   on('session.start', ($: any, e: any) => e)
   on('command.register', () => ({ value: undefined }) as any)
@@ -109,4 +111,35 @@ test('desktop tekent het woordmerk', async ($, on) => {
   const ui = await $.ui.mount(PANE('desktop'))
   expect(await ui.find({ type: 'Svg', alt: 'FutureFlowAI' } as any)).toBeDefined()
   await ui.unmount()
+})
+
+test('een tab waarvan het tekenen faalt valt terug op next, met één toast', async ($, on) => {
+  const toasts: string[] = []
+  CLI.stdout = JSON.stringify({ config: {}, slots: [], refusals: [] }) + '\n' // zonder memory: slotsTab gooit
+  fake(on)
+  on('ui.toast', ($: any, e: { text: string }) => { toasts.push(e.text); return { value: undefined } })
+  let viaNext = 0
+  on('ui.render', () => { viaNext++; throw new Error('terugval') })
+  await $.session.start(START)
+  await run($, 'futureflow', 'slots')
+  try {
+    const ui = await $.ui.mount(PANE('desktop'))
+    await ui.unmount()
+  } catch {
+    // zonder tekenaar onder de plugins mag mounten falen
+  }
+  expect(viaNext).toBeGreaterThan(0)
+  expect(toasts.length).toBe(1)
+})
+
+test('de minify-tab tekent zonder session.start en schrijft niets', async ($, on) => {
+  const f = fake(on)
+  on('fs.read', () => ({ value: '' }))
+  await run($, 'futureflow', 'minify')
+  WRITES.length = 0
+  const ui = await $.ui.mount(PANE('desktop'))
+  expect(await ui.find({ type: 'Text', text: /^Uitvoer ingekort$/ })).toBeDefined()
+  await ui.unmount()
+  expect(WRITES).toEqual([])
+  expect(f.opened.length).toBe(1)
 })
