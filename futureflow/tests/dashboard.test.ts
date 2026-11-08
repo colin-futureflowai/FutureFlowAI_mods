@@ -40,7 +40,7 @@ test('/futureflow opent het paneel op overzicht', async ($, on) => {
   expect(f.opened[0]!.id).toBe('futureflow')
   expect(f.opened[0]!.title).toBe('FutureFlowAI')
   const ui = await $.ui.mount(PANE('desktop'))
-  expect(await ui.find({ type: 'Text', text: /Komt in de volgende stap/ })).toBeDefined()
+  expect(await ui.find({ type: 'Svg', alt: /Tokens bespaard \(in\)/ })).toBeDefined()
   await ui.unmount()
 })
 
@@ -142,4 +142,15 @@ test('de minify-tab tekent zonder session.start en schrijft niets', async ($, on
   await ui.unmount()
   expect(WRITES).toEqual([])
   expect(f.opened.length).toBe(1)
+})
+
+test('overzicht zonder gegevens crasht niet', async ($, on) => {
+  fake(on)
+  const ui = await $.ui.mount(PANE('terminal'))
+  expect(await ui.find({ type: 'Text', text: /Contextvenster/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /nog geen gegevens/ })).toBeDefined()
+  await ui.unmount()
+  const ui2 = await $.ui.mount(PANE('desktop'))
+  expect(await ui2.find({ type: 'Svg' })).toBeDefined()
+  await ui2.unmount()
 })

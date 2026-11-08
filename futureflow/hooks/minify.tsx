@@ -70,7 +70,7 @@ async function niveau($: Engine): Promise<MinifyNiveau> {
 }
 
 // Voor tekenen: een render schrijft niets, dus het niveau lezen zonder het te zetten.
-async function niveauLezen($: Engine): Promise<MinifyNiveau> {
+export async function niveauLezen($: Engine): Promise<MinifyNiveau> {
   return (await read($, niveauAtom)) ?? (await standaard($))
 }
 
