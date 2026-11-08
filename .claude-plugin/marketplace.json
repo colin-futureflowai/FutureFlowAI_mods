@@ -29,6 +29,11 @@
       "name": "minify",
       "source": "./minify",
       "description": "Makes Claude Code answer tersely (levels O1-O3) and shrinks long tool output and memory files, to spend fewer tokens"
+    },
+    {
+      "name": "futureflow",
+      "source": "./futureflow",
+      "description": "FutureFlowAI's all-in-one mod: fewer tokens in and out, a Mac that doesn't freeze, a branded look and progress you can see"
     }
   ]
 }

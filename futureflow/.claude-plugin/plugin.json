@@ -1,0 +1,10 @@
+{
+  "name": "futureflow",
+  "author": {
+    "name": "FutureFlowAI"
+  },
+  "version": "0.1.0",
+  "description": "FutureFlowAI's all-in-one mod: fewer tokens in and out, a Mac that doesn't freeze, a branded look and progress you can see",
+  "license": "MIT",
+  "types": "./types/index.d.ts"
+}
