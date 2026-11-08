@@ -188,3 +188,23 @@ Commit-hashes vastleggen bij overnemen, zoals bij content-skills.
 - Terugval voor de bron van de stappen, als de check in de desktop negatief is.
 - Prijstabel en de formule voor de schatting (volg cache-tax).
 - Iconen en exacte kleuren van de donkere variant, binnen de huisstijl.
+
+## Bevindingen vooraf
+
+Uitgezocht op 8-11-2026 met een wegwerp-mod (`/tmp/ff-spike`, logt op `tool.call`), Claude Code in de terminal (`claude -p --plugin-dir`).
+
+**Takenlijst in de terminal.** De tools zijn `TaskCreate` en `TaskUpdate` (één taak per aanroep, geen hele lijst in één keer). `TodoWrite` kwam niet voorbij. Ze staan niet standaard aan in `claude -p`: zonder `CLAUDE_CODE_ENABLE_TODO_TOOLS=true` heeft de sessie geen takenlijst-tool (ook niet met `CLAUDE_CODE_ENABLE_TASKS`). De mod ziet de aanroepen wel via `tool.call`; de argumenten staan daar plat op `e` (naast `e.tool`), niet in `e.input`. Echte voorbeelden:
+
+```
+TaskCreate {"subject":"a","description":"Stap a"}
+TaskUpdate {"taskId":"1","status":"completed"}
+```
+
+- Titel = `subject`, uitleg = `description`; `taskId` is een tellende string (`"1"`, `"2"`, …), toegekend in volgorde van aanmaken.
+- Status zit alleen in `TaskUpdate.status` (gezien: `completed`; verwacht ook `pending` en `in_progress`, niet gelogd).
+- Een lijst is dus de optelsom van `TaskCreate`-aanroepen met daarna statuswijzigingen; de mod moet die zelf bijhouden.
+- Open: de interactieve terminal en de desktop kunnen `TodoWrite` of `mcp__ccd_turn__update_plan` gebruiken; dat is niet gecontroleerd.
+
+**Login in de desktop (al vastgesteld in een Code-tab-sessie).** De omgeving bevat `CLAUDE_CODE_SDK_HAS_HOST_AUTH_REFRESH`, `ANTHROPIC_BASE_URL`, `CLAUDE_CODE_ACCOUNT_UUID` en `CLAUDE_CODE_ORGANIZATION_UUID`: de desktop-app regelt de login zelf. De Keychain-item `Claude Code-credentials` (acct = macOS-gebruiker) bestaat. Werkhypothese: wisselen via de Keychain werkt niet in de desktop.
+
+**Nog open (Taak 5):** de desktopcheck van de takenlijst-tools (`/tmp/ff-spike` blijft staan voor een symlink in `~/.claude/dev-mods/<sessie-id>/`) en de login-check (tweede account via `/login`, daarna in een open Code-tab `echo $CLAUDE_CODE_USER_EMAIL`).
