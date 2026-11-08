@@ -4,6 +4,7 @@ import type { EngineInterface as Engine, Register } from 'claude-code'
 import type { MinifyInkorting, MinifyNiveau, MinifyTeller } from '../types'
 
 import { failOpen, log, oud } from './ctx'
+import { openDashboard } from './paneel'
 
 import { herinnering, isUitVerzoek, leesCommando, NIVEAUS, regelsVoor, STANDAARD, subagentRegel } from '../lib/regels.mjs'
 import { inkorten, voetregel } from '../lib/uitvoer.mjs'
@@ -11,7 +12,6 @@ import { kort, lijn, staven, tekstBalk } from '../lib/grafiek.mjs'
 import { controleer, diff, opdracht, tokens, uitAntwoord, weigerReden } from '../lib/bestand.mjs'
 
 const MODEL_BESTAND = 'claude-haiku-5-5'
-const PANE = 'minify'
 
 const niveauAtom = atom({ plugin: 'futureflow', key: 'minify.niveau' } as const, null as MinifyNiveau | null)
 const tellerAtom = atom({ plugin: 'futureflow', key: 'minify.teller' } as const, null as MinifyTeller | null)
@@ -354,8 +354,8 @@ export const registerMinify = (on: Parameters<Register>[0]): void => {
     const c = leesCommando(e.args)
     switch (c.soort) {
       case 'dashboard': {
-        const opened = await $.ui.open({ id: PANE, title: 'minify' })
-        return { text: opened.isPlaced ? 'Dashboard van minify geopend.' : 'Dashboard klaargezet; het verschijnt zodra er ruimte is. Tekstversie: /minify status' }
+        await openDashboard($, 'minify')
+        return { text: 'Dashboard geopend op de tab Minify. Tekstversie: /minify status' }
       }
       case 'status':
         return { text: await statusTekst($) }
@@ -381,13 +381,14 @@ export const registerMinify = (on: Parameters<Register>[0]): void => {
         return { text: HULP }
     }
   })
+}
 
-  // ---------- dashboard ----------
-  // Leest de atoms, dus elke beurt en elke inkorting tekent het opnieuw. Svg op desktop, tekstbalken in de terminal.
-  on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e, next) => {
-    if ((await oud($)).minify) return next(e)
+// Inhoud van de tab Minify in het dashboard (was het losse paneel minify).
+// Leest de atoms, dus elke beurt en elke inkorting tekent het opnieuw. Svg op desktop, tekstbalken in de terminal.
+export async function minifyTab($: Engine, e: any) {
     const el = $.ui.resolve(e)
     const { Box, Text, Button } = el
+    if ((await oud($)).minify) return <Text dimColor>De oude minify-plugin staat nog aan en beheert dit onderdeel.</Text>
     // Alleen de terminal tekent geen Svg. Niet `'Svg' in el` gebruiken: de tabel antwoordt daar ook in de terminal ja.
     const Svg = e.surface !== 'terminal' && 'Svg' in el ? el.Svg : undefined
     const n = await niveau($)
@@ -480,5 +481,4 @@ export const registerMinify = (on: Parameters<Register>[0]): void => {
         <Text dimColor size="footnote">/minify status · /minify stats · /minify bestand {'<pad>'} · originelen in ~/.claude/minify/uitvoer/</Text>
       </Box>
     )
-  })
 }

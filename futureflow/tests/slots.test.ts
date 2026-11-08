@@ -153,13 +153,13 @@ const STATUS = {
 test('dashboard: /agent-slots opent het paneel met geheugen, slots en weigeringen', async ($, on) => {
   const f = fake(on, { status: STATUS })
   on('ui.open', () => ({ value: { isPlaced: true } }))
-  on('ui.panes', () => ({ value: [{ id: 'agent-slots', title: 'agent-slots', isShown: true, isFocused: false, isPlaced: true }] }))
+  on('ui.panes', () => ({ value: [{ id: 'futureflow', title: 'FutureFlowAI', isShown: true, isFocused: false, isPlaced: true }] }))
   const ran = await $.command.run({ origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 }, command: 'agent-slots', args: '' } as any)
   expect(ran.text).toContain('Dashboard')
   expect(f.calls.some(c => c[2] === 'status' && c[3] === '--json')).toBe(true)
 
   for (const surface of ['terminal', 'desktop'] as const) {
-    const ui = await $.ui.mount({ plugin: 'futureflow', surface, component: 'Pane', requestId: 'agent-slots', props: {} } as any)
+    const ui = await $.ui.mount({ plugin: 'futureflow', surface, component: 'Pane', requestId: 'futureflow', props: {} } as any)
     expect(await ui.find({ type: 'Text', text: /31% vrij van 16 GB/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /1\/2/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /~\/orca\/workspaces\/a · pnpm dev/ })).toBeDefined()
@@ -178,11 +178,11 @@ test('/agent-slots status geeft de tekstversie', async ($, on) => {
 test('dashboard: het overflow-vinkje zet de instelling om, op terminal en desktop', async ($, on) => {
   const f = fake(on, { status: { ...STATUS, config: { ...STATUS.config, cloudOverflow: false } } })
   on('ui.open', () => ({ value: { isPlaced: true } }))
-  on('ui.panes', () => ({ value: [{ id: 'agent-slots', title: 'agent-slots', isShown: true, isFocused: false, isPlaced: true }] }))
+  on('ui.panes', () => ({ value: [{ id: 'futureflow', title: 'FutureFlowAI', isShown: true, isFocused: false, isPlaced: true }] }))
   await $.command.run({ origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 }, command: 'agent-slots', args: '' } as any)
   for (const surface of ['terminal', 'desktop'] as const) {
     f.calls.length = 0
-    const ui = await $.ui.mount({ plugin: 'futureflow', surface, component: 'Pane', requestId: 'agent-slots', props: {} } as any)
+    const ui = await $.ui.mount({ plugin: 'futureflow', surface, component: 'Pane', requestId: 'futureflow', props: {} } as any)
     expect(await ui.find({ type: 'Text', text: /Uit: bij een weigering wacht de agent/ })).toBeDefined()
     await ui.press({ key: 'overflow' })
     expect(f.calls.some(c => c.slice(2).join(' ') === 'config set cloudOverflow on')).toBe(true)
@@ -199,9 +199,9 @@ test('uitgezet: zwaar commando gaat ongewijzigd door, zonder inpakken', async ($
 test('dashboard: de aan/uit-knop zet agent-slots uit en weer aan', async ($, on) => {
   const f = fake(on, { status: { ...STATUS, config: { ...STATUS.config, enabled: false } } })
   on('ui.open', () => ({ value: { isPlaced: true } }))
-  on('ui.panes', () => ({ value: [{ id: 'agent-slots', title: 'agent-slots', isShown: true, isFocused: false, isPlaced: true }] }))
+  on('ui.panes', () => ({ value: [{ id: 'futureflow', title: 'FutureFlowAI', isShown: true, isFocused: false, isPlaced: true }] }))
   await $.command.run({ origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 }, command: 'agent-slots', args: '' } as any)
-  const ui = await $.ui.mount({ plugin: 'futureflow', surface: 'desktop', component: 'Pane', requestId: 'agent-slots', props: {} } as any)
+  const ui = await $.ui.mount({ plugin: 'futureflow', surface: 'desktop', component: 'Pane', requestId: 'futureflow', props: {} } as any)
   expect(await ui.find({ type: 'Text', text: /Uit: niets wordt tegengehouden/ })).toBeDefined()
   f.calls.length = 0
   await ui.press({ key: 'enabled' })

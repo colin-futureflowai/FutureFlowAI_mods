@@ -1,6 +1,7 @@
 import type { Register } from 'claude-code'
 
 import { failOpen, oud, stateDir, vergeetOud } from './ctx'
+import { registerDashboard, startDashboard } from './dashboard'
 import { registerMinify, startMinify } from './minify'
 import { registerSlots, startSlots } from './slots'
 
@@ -9,6 +10,7 @@ const MARKETPLACE = 'futureflowai-mods'
 export const register: Register = (on, options) => {
   registerSlots(on)
   registerMinify(on)
+  registerDashboard(on)
 
   // Schrijft welke oude plugins aanwezig zijn naar <state>/oud, voor regels.sh.
   on('session.start', async ($, e, next) => {
@@ -25,6 +27,7 @@ export const register: Register = (on, options) => {
     }
     await startSlots($)
     await startMinify($)
+    await startDashboard($)
     return next(e)
   }).catch((($: any, e: any, next: any) => {
     if (next.error.kind !== 're-entry') failOpen($, next.error.message ?? next.error.kind)

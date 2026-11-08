@@ -34,6 +34,7 @@ function fake(on: any, begin: Record<string, string> = {}) {
     return { value: undefined } as any
   })
   on('ui.panes', () => ({ value: [] }))
+  on('ui.open', () => ({ value: { isPlaced: true } }))
   on('session.start', ($: any, e: any) => e)
   // Slots pakt Bash-commando's in (tenzij agent-slots in oud staat); een neppe CLI die alles toestaat.
   on('process.run', () => ({ value: { exitCode: 0, stdout: '{"ok":true}\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
@@ -175,8 +176,8 @@ test('heel grote uitvoer die Claude Code zelf wegschreef: het hele bestand wordt
 const PANE = {
   plugin: 'futureflow',
   component: 'Pane',
-  requestId: 'minify',
-  props: { title: 'minify', isFocused: false, bodyColumns: 80, placement: 'dock', scroll: { offset: 0, bodyRows: 40 }, view: {} },
+  requestId: 'futureflow',
+  props: { title: 'FutureFlowAI', isFocused: false, bodyColumns: 80, placement: 'dock', scroll: { offset: 0, bodyRows: 40 }, view: {} },
 } as const
 
 test('dashboard: kaarten, grafiek op desktop, tekst in de terminal, niveauknop werkt', async ($, on) => {
@@ -188,6 +189,7 @@ test('dashboard: kaarten, grafiek op desktop, tekst in de terminal, niveauknop w
     await $.turn.complete({ answer: 'x', durationMs: 1, isAborted: false, reason: 'answer', turnId: `t${i}`, usage: { ...usage, output_tokens: out } } as any)
   await $.tool.call({ tool: 'Bash', command: 'pnpm test' } as any)
 
+  await minify($, '')
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ ...PANE, surface })
     expect((await ui.find({ type: 'Text', text: /^Uitvoer ingekort$/ }))?.text).toBe('Uitvoer ingekort')
@@ -216,7 +218,8 @@ test('neemt standaard uit het oude bestand over', async ($, on) => {
     '/home/t/.claude/minify/standaard': 'O1',
   })
   await $.session.start(geen)
-  expect(registered.length).toBe(1)
+  // /futureflow (dashboard) registreert ook; het gaat hier om /minify.
+  expect(registered.filter(r => (r as { name: string }).name === 'minify').length).toBe(1)
   expect(files.get('/home/t/.claude/minify/niveau/sessie-1')).toBe('O1')
   expect(files.get('/home/t/.claude/minify/standaard')).toBe('O1')
   expect(store.get('minify.standaard')).toBeUndefined()
@@ -252,7 +255,7 @@ test('kort niets in als oude minify aan staat', async ($, on) => {
 test('oude minify aan: session.start registreert /minify niet en schrijft geen regels', async ($, on) => {
   const { files, registered } = fake(on, { '/home/t/.claude/plugins/installed_plugins.json': installed(S, M) })
   await $.session.start(geen)
-  expect(registered.length).toBe(0)
+  expect(registered.filter(r => (r as { name: string }).name === 'minify').length).toBe(0)
   expect([...files.keys()].some(p => p.startsWith('/home/t/.claude/minify/'))).toBe(false)
 })
 

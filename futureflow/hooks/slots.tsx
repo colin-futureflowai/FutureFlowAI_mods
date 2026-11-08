@@ -4,6 +4,7 @@ import type { EngineInterface as Engine, Register } from 'claude-code'
 import type { OverflowJob, SlotsHolder, SlotsSnapshot } from '../types'
 
 import { failOpen, log, oud } from './ctx'
+import { openDashboard } from './paneel'
 
 import { classify, hasShellBackground, maskSecrets, unwrapCommand, wrapCommand } from '../lib/classify.mjs'
 import { reportMessage } from '../lib/report.mjs'
@@ -63,7 +64,7 @@ function startOverflowWatch($: Engine) {
 
 // ---------- dashboard ----------
 
-const PANE = 'agent-slots'
+const PANE = 'futureflow'
 const snapshot = atom({ plugin: 'futureflow', key: 'slots.snapshot' } as const, null as SlotsSnapshot | null)
 let ticker: { cancel: () => void } | undefined
 
@@ -78,7 +79,7 @@ async function refresh($: Engine) {
 }
 
 // Ververst elke 3 s zolang het paneel open staat; stopt vanzelf als het dicht is.
-async function startDashboard($: Engine) {
+export async function startSlotsTicker($: Engine) {
   await refresh($)
   ticker?.cancel()
   ticker = $.clock.every(3000, () => {
@@ -167,7 +168,7 @@ export async function startSlots($: Engine): Promise<void> {
     await $.command.register({ name: 'agent-slots', description: 'Dashboard met slots en geheugen; of: status, kill-idle, install (agent-slot op je PATH)' })
     startOverflowWatch($)
     // Na een herlaad staat het paneel misschien nog open: dan weer verversen.
-    if ((await $.ui.panes()).some(p => p.id === PANE)) await startDashboard($)
+    if ((await $.ui.panes()).some(p => p.id === PANE)) await startSlotsTicker($)
     // Houdt de vaste kopie van de CLI gelijk aan deze versie van de mod.
     await note($, `geladen vanuit ${$.plugin.root}`)
     await cli($, ['install', '--quiet']).then(r => note($, `install: exit ${r.exitCode} ${r.stderr.trim()}`), err => warn($, err))
@@ -181,9 +182,9 @@ export const registerSlots = (on: Parameters<Register>[0]): void => {
     if ((await oud($)).slots) return next(e)
     const arg = (e.args ?? '').trim()
     if (!arg || arg === 'dashboard') {
-      const opened = await $.ui.open({ id: PANE, title: 'agent-slots' })
-      await startDashboard($)
-      return { text: opened.isPlaced ? 'Dashboard van agent-slots geopend.' : 'Dashboard klaargezet; het verschijnt zodra er ruimte is. Tekst-versie: /agent-slots status' }
+      await openDashboard($, 'slots')
+      await startSlotsTicker($)
+      return { text: 'Dashboard geopend op de tab Slots. Tekst-versie: /agent-slots status' }
     }
     const args = arg === 'install' ? ['install', '--shim'] : arg === 'kill-idle' ? ['kill-idle'] : ['status']
     const r = await cli($, args)
@@ -271,10 +272,12 @@ export const registerSlots = (on: Parameters<Register>[0]): void => {
     if (sessionId) await cli($, ['release-session', '--session', sessionId]).catch(() => undefined)
     return next(e)
   })
+}
 
-  on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e, next) => {
-    if ((await oud($)).slots) return next(e)
+// Inhoud van de tab Slots in het dashboard (was het losse paneel agent-slots).
+export async function slotsTab($: Engine, e: any) {
     const { Box, Text, Button } = $.ui.resolve(e)
+    if ((await oud($)).slots) return <Text dimColor>De oude agent-slots-plugin staat nog aan en beheert dit onderdeel.</Text>
     const snap = await read($, snapshot)
     if (!snap) return <Text dimColor>Laden…</Text>
 
@@ -381,5 +384,4 @@ export const registerSlots = (on: Parameters<Register>[0]): void => {
         </Text>
       </Box>
     )
-  })
 }

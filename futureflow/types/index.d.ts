@@ -41,6 +41,8 @@ export type SlotsSnapshot = {
   error?: string
 }
 
+export type DashboardTab = 'overzicht' | 'slots' | 'minify' | 'stijl'
+
 export type MinifyNiveau = 'O1' | 'O2' | 'O3' | 'uit'
 
 export type MinifyTeller = {
@@ -67,6 +69,9 @@ declare module 'claude-code' {
   interface PluginState {
     futureflow: {
       'slots.snapshot': SlotsSnapshot | null
+      'dashboard.tab': DashboardTab | null
+      /** Laatst gezette waarde van Claude Code's thema, om de kop opnieuw te tekenen. */
+      'dashboard.theme': string | null
       'minify.niveau': MinifyNiveau | null
       'minify.teller': MinifyTeller | null
       /** Output-tokens per beurt van deze sessie, de laatste 60. */
