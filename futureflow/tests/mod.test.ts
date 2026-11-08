@@ -4,7 +4,7 @@ const S = 'agent-slots@futureflowai-mods'
 const M = 'minify@futureflowai-mods'
 
 // Nep-omgeving: bestanden in een Map; alle on(...)-mocks vóór de eerste $-aanroep.
-function fake(on: any, files: Record<string, string>, env: Record<string, string> = {}) {
+function fake(on: any, files: Record<string, string>, env: Record<string, string> = {}, dirs: Record<string, string[]> = {}) {
   const written = new Map<string, string>()
   const toasts: string[] = []
   const vars: Record<string, string> = { HOME: '/home/t', ...env }
@@ -17,6 +17,11 @@ function fake(on: any, files: Record<string, string>, env: Record<string, string
   on('ui.toast', ($: any, e: { text: string }) => {
     toasts.push(e.text)
     return { value: undefined }
+  })
+  // fs.list: alleen mappen uit `dirs` bestaan (naam eindigend op `/` = submap); andere paden falen zoals een ontbrekende map.
+  on('fs.list', ($: any, e: { path: string }) => {
+    if (!(e.path in dirs)) throw new Error('ENOENT')
+    return { value: dirs[e.path].map(naam => ({ name: naam, kind: 'dir', size: 0, mtimeMs: 0 })) }
   })
   on('session.start', ($: any, e: any) => e)
   // Het onderdeel Slots start mee in session.start (tenzij de oude plugin aan staat): neppe CLI en paneel.
@@ -61,4 +66,22 @@ test('FUTUREFLOW_HOME bepaalt waar oud komt; uitgeschakelde plugin telt niet mee
   expect(f.written.get('/tmp/ff/oud')).toBe('slots')
   expect(f.toasts[0]).toContain(`claude plugin uninstall ${S}`)
   expect(f.toasts[0]).not.toContain(M)
+})
+
+test('oud herkent een gesynchroniseerde kopie onder plugins/synced, tenzij uitgeschakeld', async ($, on) => {
+  const dirs = {
+    '/home/t/.claude/plugins/synced': ['acc1', 'acc2'],
+    '/home/t/.claude/plugins/synced/acc1': ['minify~g2', 'andere'],
+    '/home/t/.claude/plugins/synced/acc2': ['agent-slots'],
+  }
+  const f = fake(on, {}, {}, dirs)
+  await $.session.start({ cwd: '/r', surface: 'terminal', isInteractive: true } as any)
+  expect(f.written.get('/home/t/.claude/futureflow/oud')).toBe('slots,minify')
+})
+
+test('oud: een uitgeschakelde of ontbrekende synced kopie telt niet mee', async ($, on) => {
+  const dirs = { '/home/t/.claude/plugins/synced': ['acc1'], '/home/t/.claude/plugins/synced/acc1': ['minify', 'agent-slots'] }
+  const f = fake(on, { '/home/t/.claude/settings.json': JSON.stringify({ enabledPlugins: { 'minify@synced': false } }) }, {}, dirs)
+  await $.session.start({ cwd: '/r', surface: 'terminal', isInteractive: true } as any)
+  expect(f.written.get('/home/t/.claude/futureflow/oud')).toBe('slots')
 })

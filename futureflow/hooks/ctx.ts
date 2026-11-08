@@ -45,13 +45,35 @@ export function vergeetOud(): void {
   gelezen = undefined
 }
 
+// Namen van de mappen onder ~/.claude/plugins/synced/<account>/ (door claude.ai gesynchroniseerde plugins).
+// Ontbreekt een map of faalt list, dan telt die als leeg.
+async function syncedNamen($: Engine, home: string): Promise<string[]> {
+  const wortel = `${home}/.claude/plugins/synced`
+  try {
+    const accounts = await $.fs.list(wortel)
+    const namen: string[] = []
+    for (const account of accounts) {
+      if (account.kind === 'file') continue
+      try {
+        for (const plugin of await $.fs.list(`${wortel}/${account.name}`)) namen.push(plugin.name)
+      } catch {
+        // deze account-map is onleesbaar: overslaan
+      }
+    }
+    return namen
+  } catch {
+    return []
+  }
+}
+
 export function oud($: Engine): Promise<OudePlugins> {
   return (gelezen ??= (async () => {
     const home = (await $.env.get('HOME')) ?? (await $.env.get('USERPROFILE'))
     if (!home) return { slots: false, minify: false }
     const installed = await leesJson($, `${home}/.claude/plugins/installed_plugins.json`)
     const settings = await leesJson($, `${home}/.claude/settings.json`)
-    return oudePlugins(installed, settings)
+    const synced = await syncedNamen($, home)
+    return oudePlugins(installed, settings, synced)
   })())
 }
 

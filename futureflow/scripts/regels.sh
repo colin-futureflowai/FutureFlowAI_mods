@@ -22,11 +22,19 @@ if [ -e "$ff/oud" ]; then
 else
   # De mod schreef `oud` nog niet (eerste sessie ooit, SessionStart komt eerder): zelf beslissen.
   # Oude minify telt als aanwezig als hij geinstalleerd is en niet op `false` staat in settings.json.
+  # Ook de door claude.ai gesynchroniseerde kopie (map minify of minify~* onder plugins/synced/<account>/,
+  # niet in installed_plugins.json) telt, tenzij "minify@synced" op `false` staat.
+  settings=$(tr '\n' ' ' < "$HOME/.claude/settings.json" 2>/dev/null)
+  uit() { printf '%s' "$settings" | grep -Eq "$1[[:space:]]*:[[:space:]]*false"; }
   oudnaam='"minify@futureflowai-mods"'
-  if grep -q "$oudnaam" "$HOME/.claude/plugins/installed_plugins.json" 2>/dev/null &&
-    ! tr '\n' ' ' < "$HOME/.claude/settings.json" 2>/dev/null | grep -Eq "$oudnaam[[:space:]]*:[[:space:]]*false"; then
+  if grep -q "$oudnaam" "$HOME/.claude/plugins/installed_plugins.json" 2>/dev/null && ! uit "$oudnaam"; then
     exit 0
   fi
+  for kopie in "$HOME"/.claude/plugins/synced/*/minify "$HOME"/.claude/plugins/synced/*/minify~*; do
+    if [ -e "$kopie" ] && ! uit '"minify@synced"'; then
+      exit 0
+    fi
+  done
 fi
 
 # session_id uit de JSON op stdin; alleen veilige tekens, het wordt een bestandsnaam.

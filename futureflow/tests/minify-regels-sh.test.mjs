@@ -124,3 +124,26 @@ test('met leeg oud-bestand telt installed_plugins.json niet mee -> praat', () =>
   const ff = futureflowThuis('')
   assert.match(draai(thuis({ niveau: 'O2' }), 'start', 's1', { HOME: home, FUTUREFLOW_HOME: ff }), /# minify -O2/)
 })
+
+// Gesynchroniseerde kopie van minify (claude.ai): map onder plugins/synced/<account>/, niet in installed_plugins.json.
+function syncedHome(map, settings) {
+  const home = nepHome({ settings })
+  mkdirSync(join(home, '.claude', 'plugins', 'synced', 'acc1', map), { recursive: true })
+  return home
+}
+
+test('zonder oud-bestand: synced minify-map, niet uitgezet -> zwijgt', () => {
+  assert.equal(zonderOud(syncedHome('minify')), '')
+  assert.equal(zonderOud(syncedHome('minify~g2')), '')
+  assert.equal(zonderOud(syncedHome('minify', JSON.stringify({ enabledPlugins: { 'minify@synced': true } }))), '')
+})
+
+test('zonder oud-bestand: synced minify uitgezet in settings -> praat', () => {
+  assert.match(zonderOud(syncedHome('minify', '{ "enabledPlugins": { "minify@synced": false } }')), /# minify -O2/)
+  assert.match(zonderOud(syncedHome('minify~g2', '{\n "enabledPlugins": {\n "minify@synced" :\n   false\n }\n}')), /# minify -O2/)
+})
+
+test('zonder oud-bestand: map minifyx of andere synced plugin telt niet -> praat', () => {
+  assert.match(zonderOud(syncedHome('minifyx')), /# minify -O2/)
+  assert.match(zonderOud(syncedHome('agent-slots')), /# minify -O2/)
+})
