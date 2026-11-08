@@ -1,10 +1,13 @@
 import type { Register } from 'claude-code'
 
 import { failOpen, oud, stateDir } from './ctx'
+import { registerSlots, startSlots } from './slots'
 
 const MARKETPLACE = 'futureflowai-mods'
 
 export const register: Register = (on, options) => {
+  registerSlots(on)
+
   // Schrijft welke oude plugins aanwezig zijn naar <state>/oud, voor regels.sh.
   on('session.start', async ($, e, next) => {
     const gevonden = await oud($)
@@ -17,6 +20,7 @@ export const register: Register = (on, options) => {
         `futureflow: agent-slots en/of minify staan nog aan. futureflow laat die onderdelen over aan de oude plugin tot je ze verwijdert: claude plugin uninstall ${namen.join(' ')}`,
       )
     }
+    await startSlots($)
     return next(e)
   }).catch((($: any, e: any, next: any) => {
     if (next.error.kind !== 're-entry') failOpen($, next.error.message ?? next.error.kind)

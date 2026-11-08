@@ -1,0 +1,252 @@
+// node --test futureflow/tests/slots-
+import { test, beforeEach } from 'node:test'
+import assert from 'node:assert/strict'
+import { spawn, spawnSync } from 'node:child_process'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const CLI = fileURLToPath(new URL('../cli/agent-slot.mjs', import.meta.url))
+let home
+
+beforeEach(() => {
+  home = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-slot-test-'))
+})
+
+const env = (extra = {}) => ({ ...process.env, AGENT_SLOT_HOME: home, AGENT_SLOT_FAKE_FREE: '60', ...extra })
+const cli = (args, extra) => spawnSync(process.execPath, [CLI, ...args], { env: env(extra), encoding: 'utf8' })
+const json = (args, extra) => JSON.parse(cli(args, extra).stdout)
+const locks = () => { try { return fs.readdirSync(path.join(home, 'locks')).filter(f => f.endsWith('.json')) } catch { return [] } }
+const writeConfig = c => fs.writeFileSync(path.join(home, 'config.json'), JSON.stringify(c))
+const sleep = ms => new Promise(r => setTimeout(r, ms))
+const waitFor = async (fn, ms = 5000) => { const end = Date.now() + ms; while (Date.now() < end) { if (fn()) return true; await sleep(50) } return false }
+
+// Start `agent-slot run` op de achtergrond met een commando dat blijft lopen.
+function startRun(kind, extra = {}, cmd = ['sh', '-c', 'cd . && sleep 30'], label = 'sleep 30') {
+  return spawn(process.execPath, [CLI, 'run', kind, '--wait', '0', '--label', label, '--', ...cmd], { env: env(extra), stdio: 'ignore' })
+}
+
+test('run houdt het slot vast zolang het proces leeft en geeft het daarna vrij', () => {
+  const r = cli(['run', 'test', '--', 'sh', '-c', 'exit 3'])
+  assert.equal(r.status, 3, 'exitcode van het kind wordt doorgegeven')
+  assert.deepEqual(locks(), [])
+  const log = fs.readFileSync(path.join(home, 'log.jsonl'), 'utf8')
+  assert.match(log, /"event":"acquire"/)
+  assert.match(log, /"event":"release"/)
+})
+
+test('limiet bereikt: weigering noemt de houder en de volgende stap', async () => {
+  writeConfig({ limits: { dev: 1 } })
+  const a = startRun('dev')
+  assert.ok(await waitFor(() => locks().length === 1))
+  const c = json(['check', 'dev'])
+  assert.equal(c.ok, false)
+  assert.equal(c.reason, 'slots')
+  assert.match(c.message, /agent-slot(\.mjs')? wait dev/)
+  assert.match(c.message, /sleep 30/)
+  const r = cli(['run', 'dev', '--wait', '0', '--', 'sh', '-c', 'true'])
+  assert.equal(r.status, 75)
+  assert.match(r.stderr, /geweigerd/)
+  a.kill('SIGTERM')
+  assert.ok(await waitFor(() => locks().length === 0), 'slot vrij na kill')
+  assert.equal(json(['check', 'dev']).ok, true)
+})
+
+test('kill van het kind maakt het slot direct vrij', async () => {
+  const a = startRun('dev')
+  assert.ok(await waitFor(() => locks().length === 1))
+  const lock = JSON.parse(fs.readFileSync(path.join(home, 'locks', locks()[0]), 'utf8'))
+  assert.ok(await waitFor(() => { try { return !!JSON.parse(fs.readFileSync(path.join(home, 'locks', locks()[0]), 'utf8')).childPid } catch { return false } }))
+  const { childPid } = JSON.parse(fs.readFileSync(path.join(home, 'locks', locks()[0]), 'utf8'))
+  process.kill(childPid, 'SIGTERM')
+  assert.ok(await waitFor(() => locks().length === 0))
+  assert.ok(lock.pidStart, 'starttijd van het proces is vastgelegd')
+  a.kill()
+})
+
+test('slot van een dood proces wordt opgeruimd (na crash of herstart)', () => {
+  fs.mkdirSync(path.join(home, 'locks'), { recursive: true })
+  const dead = spawnSync('sh', ['-c', 'echo $$']).stdout.toString().trim()
+  fs.writeFileSync(path.join(home, 'locks', 'dev-1.json'), JSON.stringify({ kind: 'dev', pid: Number(dead), pidStart: 'x', since: new Date().toISOString() }))
+  assert.equal(json(['check', 'dev']).ok, true)
+  assert.deepEqual(locks(), [])
+  assert.match(fs.readFileSync(path.join(home, 'log.jsonl'), 'utf8'), /"event":"reap".*process-dead/)
+})
+
+test('hergebruikte PID met andere starttijd telt niet als levend', () => {
+  writeConfig({ limits: { dev: 1 } })
+  fs.mkdirSync(path.join(home, 'locks'), { recursive: true })
+  // Ons eigen proces leeft, maar met een andere starttijd dan in het slot staat.
+  fs.writeFileSync(path.join(home, 'locks', 'dev-1.json'), JSON.stringify({ kind: 'dev', pid: process.pid, pidStart: 'Mon Jan  1 00:00:00 2001', since: new Date().toISOString() }))
+  assert.equal(json(['check', 'dev']).ok, true)
+  assert.deepEqual(locks(), [])
+})
+
+test('browser-slot hoort bij een sessie en verloopt na stilte', async () => {
+  const a = json(['acquire', 'browser', '--session', 'sessie-a'])
+  assert.equal(a.ok, true)
+  assert.equal(json(['acquire', 'browser', '--session', 'sessie-a']).reuse, true, 'zelfde sessie mag door')
+  const b = json(['acquire', 'browser', '--session', 'sessie-b'])
+  assert.equal(b.ok, false)
+  assert.match(b.message, /sessie sessie-a/)
+  assert.match(b.message, /agent-slot(\.mjs')? wait browser/)
+  writeConfig({ browserIdleMinutes: 0.002 }) // ~120 ms
+  await sleep(250)
+  assert.equal(json(['acquire', 'browser', '--session', 'sessie-b']).ok, true, 'na stilte vrij')
+  cli(['release-session', '--session', 'sessie-b'])
+  assert.deepEqual(locks(), [])
+})
+
+test('te weinig geheugen: geweigerd met uitleg', () => {
+  const c = json(['check', 'dev'], { AGENT_SLOT_FAKE_FREE: '12' })
+  assert.equal(c.ok, false)
+  assert.equal(c.reason, 'memory')
+  assert.match(c.message, /12% vrij/)
+  assert.equal(json(['check', 'agent', '--gate', 'critical'], { AGENT_SLOT_FAKE_FREE: '12' }).ok, true, 'subagents pas bij kritiek')
+  const crit = json(['check', 'agent', '--gate', 'critical'], { AGENT_SLOT_FAKE_FREE: '8' })
+  assert.equal(crit.ok, false)
+  assert.match(crit.message, /agent-slot(\.mjs')? wait agent --gate critical`/)
+  assert.match(c.message, /agent-slot(\.mjs')? status` laat zien/)
+})
+
+test('wait geeft vrij zodra er plek is', async () => {
+  writeConfig({ limits: { test: 1 } })
+  const a = startRun('test', {}, ['sh', '-c', 'sleep 1'])
+  assert.ok(await waitFor(() => locks().length === 1))
+  const t0 = Date.now()
+  const r = cli(['wait', 'test', '--timeout', '10'])
+  assert.equal(r.status, 0)
+  assert.ok(Date.now() - t0 >= 300, 'heeft echt gewacht')
+  a.kill()
+})
+
+test('status toont slots, geheugen en weigeringen: nieuwste eerst, in lokale tijd', () => {
+  cli(['log', 'refuse', JSON.stringify({ kind: 'dev', reason: 'slots', command: 'oud-commando' })])
+  cli(['log', 'refuse', JSON.stringify({ kind: 'test', reason: 'slots', command: 'nieuw-commando' })])
+  const s = cli(['status']).stdout
+  assert.match(s, /Geheugen: 60% vrij/)
+  assert.match(s, /dev: 0\/2/)
+  assert.ok(s.indexOf('nieuw-commando') < s.indexOf('oud-commando'), 'nieuwste bovenaan')
+  const local = new Date().toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' })
+  assert.match(s, new RegExp(local.replace(':', ':')), 'lokale tijd')
+  assert.doesNotMatch(s, /\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/, 'geen UTC-stempel')
+})
+
+test('log: pakken en vrijgeven onder hetzelfde proces-id, met kind erbij', () => {
+  cli(['run', 'test', '--label', 'pnpm test', '--', 'sh', '-c', 'true'])
+  const ev = fs.readFileSync(path.join(home, 'log.jsonl'), 'utf8').trim().split('\n').map(l => JSON.parse(l))
+  const acq = ev.find(e => e.event === 'acquire')
+  const rel = ev.find(e => e.event === 'release')
+  assert.equal(acq.pid, rel.pid)
+  assert.ok(rel.childPid, 'childPid staat erbij')
+  assert.equal(rel.command, 'pnpm test', 'label in plaats van het hele commando')
+})
+
+test('browser: vrijgeven wordt gelogd met de tool die het deed', () => {
+  json(['acquire', 'browser', '--session', 's1', '--tool', 'mcp__x_playwright__browser_navigate'])
+  json(['release', 'browser', '--session', 's1', '--tool', 'mcp__x_playwright__browser_close'])
+  const rel = fs.readFileSync(path.join(home, 'log.jsonl'), 'utf8').trim().split('\n').map(l => JSON.parse(l)).find(e => e.event === 'release')
+  assert.equal(rel.tool, 'mcp__x_playwright__browser_close')
+  assert.equal(rel.command, 'Playwright MCP-browser')
+})
+
+test('weigermelding gebruikt het korte commando als agent-slot op het PATH staat', () => {
+  const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-slot-bin-'))
+  fs.writeFileSync(path.join(bin, 'agent-slot'), '#!/bin/sh\n', { mode: 0o755 })
+  const c = json(['check', 'dev'], { AGENT_SLOT_FAKE_FREE: '5', PATH: `${bin}${path.delimiter}${process.env.PATH}` })
+  assert.match(c.message, /`agent-slot wait dev`/)
+  const d = json(['check', 'dev'], { AGENT_SLOT_FAKE_FREE: '5', PATH: '/usr/bin:/bin' })
+  assert.match(d.message, /`node '[^']+agent-slot\.mjs' wait dev`/)
+})
+
+test('install zet de CLI op een vaste plek', () => {
+  const r = cli(['install'])
+  assert.equal(r.status, 0)
+  assert.ok(fs.existsSync(path.join(home, 'bin', 'agent-slot.mjs')))
+})
+
+test('uitzetten: niets tegengehouden, run draait zonder slot, browser zonder lock', () => {
+  assert.equal(json(['check', 'dev'], { AGENT_SLOT_FAKE_FREE: '5' }).ok, false, 'aan: geweigerd bij krap geheugen')
+  assert.deepEqual(json(['config', 'set', 'enabled', 'off']), { ok: true, enabled: false })
+  try {
+    const c = json(['check', 'dev'], { AGENT_SLOT_FAKE_FREE: '5' })
+    assert.equal(c.ok, true)
+    assert.equal(c.disabled, true)
+    const r = cli(['run', 'test', '--', 'sh', '-c', 'echo draait'], { AGENT_SLOT_FAKE_FREE: '5' })
+    assert.equal(r.status, 0)
+    assert.match(r.stdout, /draait/)
+    assert.equal(json(['acquire', 'browser', '--session', 's-uit']).ok, true)
+    assert.equal(locks().length, 0, 'geen lockbestanden als agent-slots uit staat')
+    assert.match(cli(['status']).stdout, /agent-slots staat UIT/)
+  } finally {
+    json(['config', 'set', 'enabled', 'on'])
+  }
+  assert.equal(json(['check', 'dev'], { AGENT_SLOT_FAKE_FREE: '5' }).ok, false, 'weer aan: weer geweigerd')
+})
+
+test('cloud-overflow: aan te zetten, uitweg alleen bij taken en niet bij een dev-server', () => {
+  assert.equal(json(['check', 'test'], { AGENT_SLOT_FAKE_FREE: '5' }).overflow, undefined, 'standaard uit')
+  assert.deepEqual(json(['config', 'set', 'cloudOverflow', 'on']), { ok: true, cloudOverflow: true })
+  const t = json(['check', 'test'], { AGENT_SLOT_FAKE_FREE: '5' })
+  assert.equal(t.overflow, true)
+  assert.match(t.message, /futureflow:cloud-worker/)
+  assert.match(t.message, /leg het voor aan de gebruiker/)
+  assert.equal(json(['check', 'dev'], { AGENT_SLOT_FAKE_FREE: '5' }).overflow, undefined, 'dev-server blijft lokaal')
+  assert.equal(json(['config']).cloudOverflow, true)
+  json(['config', 'set', 'cloudOverflow', 'off'])
+  assert.equal(json(['config']).cloudOverflow, false)
+  assert.equal(cli(['config', 'set', 'onzin', '1']).status, 2)
+})
+
+test('overflow: brief, add en check vinden het rapport via de git-remote', () => {
+  const sh = (cwd, cmd) => spawnSync('sh', ['-c', cmd], { cwd, encoding: 'utf8', env: { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' } })
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-slot-git-'))
+  const origin = path.join(root, 'origin.git')
+  const local = path.join(root, 'local')
+  const worker = path.join(root, 'worker')
+  sh(root, `git init -q --bare -b main ${origin} && git clone -q ${origin} ${local} && cd ${local} && git commit -q --allow-empty -m init && git push -q origin HEAD:main`)
+
+  const b = cli(['overflow', 'brief', '--task', 'Maak de tests groen', '--base', 'main', '--branch', 'overflow/20261019-tests', '--repo', local]).stdout
+  assert.match(b, /Agent-Slots-Overflow: cloud-worker/)
+  assert.match(b, /overflow: rapport 20261019-tests/)
+
+  const add = json(['overflow', 'add', '--repo', local, '--branch', 'overflow/20261019-tests', '--base', 'main', '--task', 'Maak de tests groen', '--session', 's1'])
+  assert.equal(add.ok, true)
+  assert.deepEqual(json(['overflow', 'check', '--session', 's1']).finished, [], 'nog geen branch')
+
+  sh(root, `git clone -q ${origin} ${worker} && cd ${worker} && git switch -q -c overflow/20261019-tests && git commit -q --allow-empty -m "fix: tests" -m "Agent-Slots-Overflow: cloud-worker" && git push -q origin HEAD`)
+  assert.deepEqual(json(['overflow', 'check', '--session', 's1']).finished, [], 'nog geen rapport')
+  assert.equal(json(['overflow', 'list']).jobs[0].progress, 'fix: tests')
+
+  sh(worker, `git commit -q --allow-empty -m "overflow: rapport 20261019-tests" -m "Gedaan
+- tests groen" -m "Agent-Slots-Overflow: cloud-worker
+Overflow-Base: main" && git push -q origin HEAD`)
+  const done = json(['overflow', 'check', '--session', 's1']).finished
+  assert.equal(done.length, 1)
+  assert.match(done[0].report, /tests groen/)
+  assert.doesNotMatch(done[0].report, /Agent-Slots-Overflow/, 'trailers eruit')
+  assert.deepEqual(json(['overflow', 'check', '--session', 'andere-sessie']).finished, [], 'alleen voor de starter')
+
+  json(['overflow', 'delivered', done[0].id])
+  assert.deepEqual(json(['overflow', 'check', '--session', 's1']).finished, [], 'na afleveren niet nog eens')
+  assert.equal(json(['status', '--json']).overflow[0].status, 'done')
+})
+
+test('masker: CLI en lib maskeren hetzelfde, log en status bevatten geen geheimen', async () => {
+  const { maskSecrets: libMask } = await import('../lib/classify.mjs')
+  const { maskSecrets: cliMask } = await import('../cli/agent-slot.mjs')
+  for (const s of ['A_KEY=geheim pnpm dev', 'PORT=1 next dev', 'x --password hunter2', 'https://u:p@h/x', 'Bearer abcdefghijkl', 'echo sk-abcdefghijklmnopqrstu']) {
+    assert.equal(cliMask(s), libMask(s), s)
+  }
+  cli(['log', 'refuse', JSON.stringify({ kind: 'dev', command: 'DB_PASSWORD=hunter2 pnpm dev' })])
+  cli(['run', 'test', '--', 'sh', '-c', 'API_TOKEN=abc123 true'])
+  const raw = fs.readFileSync(path.join(home, 'log.jsonl'), 'utf8')
+  assert.doesNotMatch(raw, /hunter2|abc123/)
+  assert.match(raw, /DB_PASSWORD=\*\*\*/)
+
+  fs.appendFileSync(path.join(home, 'log.jsonl'), JSON.stringify({ t: new Date().toISOString(), event: 'refuse', command: 'OUD_GEHEIM=zichtbaar pnpm dev' }) + '\n')
+  assert.doesNotMatch(cli(['status']).stdout, /zichtbaar/, 'status maskeert ook oude regels')
+  cli(['scrub-log'])
+  assert.doesNotMatch(fs.readFileSync(path.join(home, 'log.jsonl'), 'utf8'), /zichtbaar/, 'scrub-log schoont het bestand op')
+})

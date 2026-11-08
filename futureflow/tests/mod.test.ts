@@ -19,6 +19,10 @@ function fake(on: any, files: Record<string, string>, env: Record<string, string
     return { value: undefined }
   })
   on('session.start', ($: any, e: any) => e)
+  // Het onderdeel Slots start mee in session.start (tenzij de oude plugin aan staat): neppe CLI en paneel.
+  on('command.register', () => ({ value: undefined }) as any)
+  on('ui.panes', () => ({ value: [] }))
+  on('process.run', () => ({ value: { exitCode: 0, stdout: '{}\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
   return { written, toasts }
 }
 
