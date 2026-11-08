@@ -1,6 +1,5 @@
 import { expect, mock, test } from 'claude-code/testing'
 
-import { vergeetOud } from '../hooks/ctx'
 import { unwrapCommand } from '../lib/classify.mjs'
 import { reportMessage } from '../lib/report.mjs'
 
@@ -262,7 +261,6 @@ test('watcher: een rapport wordt één keer ingestuurd, ook als insturen wacht e
 })
 
 test('pakt niets in als agent-slots nog aan staat', async ($, on) => {
-  vergeetOud()
   const f = fake(on)
   on('fs.read', ($: any, e: { path: string }) => ({
     value: e.path.endsWith('installed_plugins.json') ? JSON.stringify({ plugins: { 'agent-slots@futureflowai-mods': [{}] } }) : '',
@@ -296,32 +294,45 @@ function oudAanwezig(on: any) {
 }
 
 test('oude plugin aan: session.start registreert /agent-slots niet en roept de CLI niet aan', async ($, on) => {
-  vergeetOud()
   const f = oudAanwezig(on)
   await $.session.start({ cwd: '/r', surface: 'terminal', isInteractive: true } as any)
   expect(f.registered.length).toBe(0)
   expect(f.calls.length).toBe(0)
 })
 
-test('oude plugin aan: tool.check op Bash gaat ongewijzigd door', async ($, on) => {
-  vergeetOud()
-  oudAanwezig(on)
-  const seen: unknown[] = []
+test('oude plugin aan: tool.check pakt een eigen ingepakt commando niet meer uit', async ($, on) => {
+  const f = fake(on)
+  let oudNu = false
+  on('command.register', () => ({ value: undefined }) as any)
+  on('ui.panes', () => ({ value: [] }))
+  on('ui.toast', () => ({ value: undefined }))
+  on('fs.write', () => ({ value: undefined }))
+  on('session.start', ($: any, e: any) => e)
+  on('fs.read', ($: any, e: { path: string }) => ({
+    value: oudNu && e.path.endsWith('installed_plugins.json') ? JSON.stringify({ plugins: { 'agent-slots@futureflowai-mods': [{}] } }) : '',
+  }))
+  const seen: string[] = []
   on('tool.check', ($: any, e: any) => {
-    seen.push(e.input)
+    seen.push(e.input.command)
     return { decision: 'allow' } as any
   })
-  const input = { command: "'node' '/x/agent-slot.mjs' run dev --session 's' -- sh -c 'npm run dev'" }
-  await $.tool.check({ tool: 'Bash', input } as any)
-  expect(seen.length).toBe(1)
-  expect((seen[0] as { command: string }).command).toBe(input.command)
+  // Oude plugin afwezig: futureflow pakt het commando zelf in, dus het staat in `produced`.
+  await $.tool.call({ tool: 'Bash', command: 'pnpm dev' } as any)
+  const wrapped = cmdOf(f)!
+  expect(wrapped).not.toBe('pnpm dev')
+  // Nu staat de oude plugin ineens wel aan: tool.check mag niets uitpakken.
+  oudNu = true
+  await $.session.start({ cwd: '/r', surface: 'terminal', isInteractive: true } as any)
+  seen.length = 0
+  await $.tool.check({ tool: 'Bash', input: { command: wrapped } })
+  expect(seen).toEqual([wrapped])
 })
 
 test('oude plugin aan: command.run agent-slots gaat door, futureflow opent geen paneel', async ($, on) => {
-  vergeetOud()
   const f = oudAanwezig(on)
   on('command.run', ($: any, e: any) => ({ text: 'oude plugin' }) as any)
-  await $.command.run({ origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 }, command: 'agent-slots', args: '' } as any)
+  const ran = await $.command.run({ origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 }, command: 'agent-slots', args: '' } as any)
+  expect((ran as any).text).toBe('oude plugin')
   expect(f.opened.length).toBe(0)
   expect(f.calls.length).toBe(0)
 })

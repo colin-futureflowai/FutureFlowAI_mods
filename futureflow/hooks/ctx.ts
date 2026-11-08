@@ -40,7 +40,7 @@ export async function log($: Engine, regel: string): Promise<void> {
   if (dir) await $.fs.write(`${dir}/mod.log`, notes.slice(-50).join('\n') + '\n').catch(() => undefined)
 }
 
-// Alleen voor tests: vergeet wat oud() las.
+// Vergeet wat oud() las; register.tsx doet dit bij elke session.start, zodat de cache niet over sessies verouderd.
 export function vergeetOud(): void {
   gelezen = undefined
 }

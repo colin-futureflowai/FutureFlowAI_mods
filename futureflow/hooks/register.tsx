@@ -1,6 +1,6 @@
 import type { Register } from 'claude-code'
 
-import { failOpen, oud, stateDir } from './ctx'
+import { failOpen, oud, stateDir, vergeetOud } from './ctx'
 import { registerSlots, startSlots } from './slots'
 
 const MARKETPLACE = 'futureflowai-mods'
@@ -10,6 +10,7 @@ export const register: Register = (on, options) => {
 
   // Schrijft welke oude plugins aanwezig zijn naar <state>/oud, voor regels.sh.
   on('session.start', async ($, e, next) => {
+    vergeetOud()
     const gevonden = await oud($)
     const aanwezig = [gevonden.slots && 'slots', gevonden.minify && 'minify'].filter(Boolean) as string[]
     const dir = await stateDir($)
