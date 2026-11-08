@@ -43,6 +43,20 @@ export type SlotsSnapshot = {
 
 export type DashboardTab = 'overzicht' | 'slots' | 'minify' | 'stijl'
 
+/** Instellingen van de FFAI-skin, in `$.store` onder `stijl`. */
+export type Stijl = {
+  aan: boolean
+  modus: 'auto' | 'licht' | 'donker'
+  /** Tool-regels met icoon en tijd. */
+  regels: boolean
+  /** Diff-kaart onder Edit/Write/MultiEdit. */
+  diff: boolean
+  /** Shell-kaart onder Bash. */
+  shell: boolean
+  /** Spinner en beurtduur in groen. */
+  spinner: boolean
+}
+
 export type MinifyNiveau = 'O1' | 'O2' | 'O3' | 'uit'
 
 export type MinifyTeller = {
@@ -70,8 +84,16 @@ declare module 'claude-code' {
     futureflow: {
       'slots.snapshot': SlotsSnapshot | null
       'dashboard.tab': DashboardTab | null
-      /** Laatst gezette waarde van Claude Code's thema, om de kop opnieuw te tekenen. */
-      'dashboard.theme': string | null
+      /** Laatst gezette waarde van Claude Code's thema, om skin en dashboard opnieuw te tekenen. */
+      'skin.theme': string | null
+      /** Stijl zoals laatst gezet in deze sessie (spiegel van de store, zodat tekenaars opnieuw tekenen). */
+      'skin.stijl': Stijl | null
+      /** Per tool-aanroep (id = tool_use_id): duur in ms, -1 zolang onbekend. */
+      'skin.duur': number
+      /** Per Bash-aanroep: het commando, voor de kop van de shell-kaart. */
+      'skin.commando': string
+      /** Per tool-regel: opengeklapt met ▸. */
+      'skin.open': boolean
       'minify.niveau': MinifyNiveau | null
       'minify.teller': MinifyTeller | null
       /** Output-tokens per beurt van deze sessie, de laatste 60. */
