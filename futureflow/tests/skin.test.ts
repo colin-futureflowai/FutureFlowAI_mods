@@ -10,7 +10,8 @@ type Opties = { stijl?: unknown; theme?: string }
 function fake(on: any, opties: Opties = {}) {
   const stock = { n: 0 }
   const toasts: string[] = []
-  mock.clock(on)
+  const clock = mock.clock(on, { now: 10_000 })
+  on('turn.start', ($: any, e: { turnId: string }) => ({ turnId: e.turnId }))
   on('env.get', ($: any, e: { name: string }) => ({ value: e.name === 'HOME' ? '/home/t' : undefined }))
   on('fs.write', () => ({ value: undefined }))
   on('store.get', ($: any, e: { key: string }) => ({ value: e.key === 'stijl' ? opties.stijl : undefined }))
@@ -26,7 +27,7 @@ function fake(on: any, opties: Opties = {}) {
     stock.n++
     return STOCK
   })
-  return { stock, toasts }
+  return { stock, toasts, clock }
 }
 
 type Surface = 'terminal' | 'desktop'
@@ -158,8 +159,43 @@ test('licht thema gebruikt inkt #3D3D3D', async ($, on) => {
   await ui.unmount()
 })
 
+const SPINNER = (surface: Surface) =>
+  ({ ...SITE, surface, component: 'Spinner', requestId: `s-${surface}`, props: { word: 'Bakken', message: null, suffix: '…', mode: 'thinking' } }) as any
+
+test('spinner: desktop via next, terminal met verstreken tijd in groen', async ($, on) => {
+  const f = fake(on)
+  await $.turn.start({ text: 'go', turnId: 't1' } as any)
+  await f.clock.advance(12_000)
+  const d = await $.ui.mount(SPINNER('desktop'))
+  expect(f.stock.n).toBe(1)
+  await d.unmount()
+  const s = await $.ui.mount(SPINNER('terminal'))
+  const st = (await s.find({ type: 'Text', text: /Bakken… \(12s\)/ })) as any
+  expect(st?.props.color).toBe('#32a029')
+  expect(f.stock.n).toBe(1)
+  await s.unmount()
+})
+
+test('spinner zonder bekende starttijd: Claude Code eigen weergave', async ($, on) => {
+  const f = fake(on)
+  const s = await $.ui.mount(SPINNER('terminal'))
+  expect(f.stock.n).toBe(1)
+  await s.unmount()
+})
+
+test('▸ op een Bash-regel toont de volledige uitvoer', async ($, on) => {
+  fake(on)
+  const stdout = Array.from({ length: 30 }, (_, i) => `regel ${i}`).join('\n')
+  const ui = await $.ui.mount(toolUse('Bash', { command: 'seq' }, 'terminal', { output: { stdout, stderr: 'oeps', interrupted: false } }))
+  await ui.press({ key: 'open' })
+  expect(await ui.find({ type: 'Text', text: /regel 20\b/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /oeps/ })).toBeDefined()
+  await ui.unmount()
+})
+
 test('spinner en beurtduur in groen', async ($, on) => {
   fake(on)
+  await $.turn.start({ text: 'go', turnId: 't1' } as any)
   const s = await $.ui.mount({ ...SITE, surface: 'terminal', component: 'Spinner', requestId: 's', props: { word: 'Bakken', message: null, suffix: '…', mode: 'thinking' } } as any)
   const st = (await s.find({ type: 'Text', text: /Bakken…/ })) as any
   expect(st?.props.color).toBe('#32a029')

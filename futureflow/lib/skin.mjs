@@ -3,6 +3,15 @@
 // Vorm van de tool-uitvoer (structuredPatch, stdout/stderr, "Exit code N") gelezen uit
 // claude-skins (MIT, hellosverre, commit cf0d39f); de code is eigen werk.
 
+// Alle escape-reeksen (CSI, OSC, DCS/PM/APC/SOS, losse ESC) en C0/C1-stuurtekens behalve \n en \t.
+// Alles wat de skin toont gaat hierdoor: tooluitvoer kan de terminal anders besturen.
+const ESCAPES = /\u001b(?:\[[0-?]*[ -\/]*[@-~]|\][^\u0007\u001b]*(?:\u0007|\u001b\\)|[PX^_][^\u001b]*\u001b\\|.)/g
+const STUURTEKENS = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g
+
+export function schoonTekst(t) {
+  return String(t ?? '').replace(/\r\n/g, '\n').replace(ESCAPES, '').replace(STUURTEKENS, '')
+}
+
 const ICONEN = {
   Read: 'R',
   Write: 'E', Edit: 'E', MultiEdit: 'E', NotebookEdit: 'E',
@@ -44,8 +53,8 @@ function kap(regels, max) {
 
 // Regel-diff (LCS). '-' draagt het oude regelnummer, ' ' en '+' het nieuwe.
 export function diffRegels(oud, nieuw, max = 200) {
-  const a = String(oud ?? '').split('\n')
-  const b = String(nieuw ?? '').split('\n')
+  const a = schoonTekst(oud).split('\n')
+  const b = schoonTekst(nieuw).split('\n')
   // Gemeenschappelijk begin en eind eerst, dan de LCS alleen over het midden.
   let begin = 0
   while (begin < a.length && begin < b.length && a[begin] === b[begin]) begin++
@@ -105,7 +114,7 @@ export function wijzigRegels(uitvoer, max = 200) {
       for (const regel of Array.isArray(stuk?.lines) ? stuk.lines : []) {
         if (typeof regel !== 'string') continue
         const soort = regel[0] === '+' || regel[0] === '-' ? regel[0] : ' '
-        const tekst = regel[0] === '+' || regel[0] === '-' || regel[0] === ' ' ? regel.slice(1) : regel
+        const tekst = schoonTekst(regel[0] === '+' || regel[0] === '-' || regel[0] === ' ' ? regel.slice(1) : regel)
         if (soort === '-') uit.push({ soort, tekst, nr: o++ })
         else if (soort === '+') uit.push({ soort, tekst, nr: nw++ })
         else { uit.push({ soort, tekst, nr: nw++ }); o++ }
@@ -117,7 +126,7 @@ export function wijzigRegels(uitvoer, max = 200) {
     return diffRegels(uitvoer.oldString, uitvoer.newString, max)
   }
   if (uitvoer.type === 'create' && typeof uitvoer.content === 'string') {
-    return kap(uitvoer.content.split('\n').map((tekst, i) => ({ soort: '+', tekst, nr: i + 1 })), max)
+    return kap(schoonTekst(uitvoer.content).split('\n').map((tekst, i) => ({ soort: '+', tekst, nr: i + 1 })), max)
   }
   return null
 }
@@ -142,7 +151,7 @@ export function korteInvoer(tool, invoer) {
       default: return Object.values(v).map(tekstVan).find(t => t !== '') ?? ''
     }
   })()
-  const plat = ruw.replace(/\s+/g, ' ').trim()
+  const plat = schoonTekst(ruw).replace(/\s+/g, ' ').trim()
   return plat.length > MAX_KORT ? `${plat.slice(0, MAX_KORT - 1)}…` : plat
 }
 
@@ -153,12 +162,11 @@ export function inklappen(regels, kop = 8, staart = 4) {
 }
 
 const EXIT = /^\s*Exit code (-?\d+)[^\S\n]*\r?\n?/
-const ANSI = /\u001b\[[0-9;?]*[A-Za-z]/g
 
 // Uitvoer van Bash: stdout, stderr (zonder de regel "Exit code N") en de exitcode.
 // Een mislukte aanroep kan een tekst zijn in plaats van een record. null als het geen shell-uitvoer is.
 export function shellUitvoer(uitvoer, fout) {
-  const schoon = (t) => t.replace(ANSI, '').replace(/\r\n?/g, '\n').replace(/\n+$/, '')
+  const schoon = (t) => schoonTekst(t).replace(/\n+$/, '')
   if (typeof uitvoer === 'object' && uitvoer !== null && typeof uitvoer.stdout === 'string' && typeof uitvoer.stderr === 'string') {
     const m = EXIT.exec(uitvoer.stderr)
     return {
@@ -198,7 +206,7 @@ export function resultaatTekst(uitvoer) {
   else {
     try { t = JSON.stringify(uitvoer, null, 2) ?? '' } catch { t = String(uitvoer) }
   }
-  t = t.replace(ANSI, '').replace(/\r\n?/g, '\n')
+  t = schoonTekst(t)
   return t.length > MAX_RESULTAAT ? `${t.slice(0, MAX_RESULTAAT)}\n… ${t.length - MAX_RESULTAAT} tekens meer` : t
 }
 
@@ -206,7 +214,7 @@ export function resultaatTekst(uitvoer) {
 export function invoerVelden(invoer) {
   if (typeof invoer !== 'object' || invoer === null) return []
   return Object.entries(invoer).map(([k, v]) => {
-    const t = typeof v === 'string' ? v : JSON.stringify(v) ?? String(v)
+    const t = schoonTekst(typeof v === 'string' ? v : JSON.stringify(v) ?? String(v))
     return [k, t.length > MAX_RESULTAAT ? `${t.slice(0, MAX_RESULTAAT)}…` : t]
   })
 }

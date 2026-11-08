@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { beurtDuur, diffRegels, duurTekst, icoonVoor, invoerVelden, korteInvoer, resultaatTekst, telling, toolLabel, wijzigRegels } from '../lib/skin.mjs'
+import { beurtDuur, diffRegels, duurTekst, icoonVoor, invoerVelden, korteInvoer, resultaatTekst, schoonTekst, shellUitvoer, telling, toolLabel, wijzigRegels } from '../lib/skin.mjs'
 
 test('icoonVoor: bekende tools, mcp en onbekend', () => {
   assert.equal(icoonVoor('Read'), 'R')
@@ -81,4 +81,24 @@ test('resultaatTekst, invoerVelden en toolLabel', () => {
   assert.deepEqual(invoerVelden(undefined), [])
   assert.equal(toolLabel('mcp__github__search_code'), 'github:search_code')
   assert.equal(toolLabel('Bash'), 'Bash')
+})
+
+test('schoonTekst haalt escapes en stuurtekens weg, \\n en \\t blijven', () => {
+  assert.equal(schoonTekst('a\u001b]0;evil\u0007b'), 'ab')
+  assert.equal(schoonTekst('\u001b[31mrood\u001b[0m'), 'rood')
+  assert.equal(schoonTekst('x\u009b31my'), 'x31my')
+  assert.equal(schoonTekst('bel\u0007 cr\r!'), 'bel cr!')
+  assert.equal(schoonTekst('een\ntwee\tdrie'), 'een\ntwee\tdrie')
+  assert.equal(schoonTekst('\u001bP1;2q\u001b\\ok'), 'ok')
+})
+
+test('alles wat getoond wordt is schoon', () => {
+  const vies = 'a\u001b]0;evil\u0007b\u001b[2J'
+  assert.equal(korteInvoer('Bash', { command: vies }), 'ab')
+  assert.deepEqual(invoerVelden({ command: vies }), [['command', 'ab']])
+  assert.equal(resultaatTekst(vies), 'ab')
+  assert.equal(shellUitvoer({ stdout: vies, stderr: vies, interrupted: false }, false).stdout, 'ab')
+  assert.equal(shellUitvoer({ stdout: vies, stderr: vies, interrupted: false }, false).stderr, 'ab')
+  assert.equal(diffRegels('x', vies)[1].tekst, 'ab')
+  assert.equal(wijzigRegels({ structuredPatch: [{ oldStart: 1, newStart: 1, lines: ['+' + vies] }] })[0].tekst, 'ab')
 })

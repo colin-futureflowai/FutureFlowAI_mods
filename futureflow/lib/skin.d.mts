@@ -15,3 +15,4 @@ export function regelsVan(tekst: string): string[]
 export function resultaatTekst(uitvoer: unknown): string
 export function invoerVelden(invoer: unknown): Array<[string, string]>
 export function toolLabel(tool: string): string
+export function schoonTekst(t: unknown): string

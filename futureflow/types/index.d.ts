@@ -94,6 +94,10 @@ declare module 'claude-code' {
       'skin.commando': string
       /** Per tool-regel: opengeklapt met ▸. */
       'skin.open': boolean
+      /** Begin van de lopende beurt (clock-ms), 0 = onbekend. */
+      'skin.start': number
+      /** Telt elke seconde op zolang de spinner loopt, om hem opnieuw te tekenen. */
+      'skin.tik': number
       'minify.niveau': MinifyNiveau | null
       'minify.teller': MinifyTeller | null
       /** Output-tokens per beurt van deze sessie, de laatste 60. */

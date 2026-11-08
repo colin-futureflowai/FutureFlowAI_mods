@@ -11,9 +11,6 @@ import type { DiffRegel, Shell, ShellStatus } from '../lib/skin.mjs'
 // Een Svg mag niet groter zijn; daarboven tekent Claude Code zelf.
 export const MAX_SVG = 131072
 
-// Achtergrond van een verwijderde regel in de terminal (geen alfa daar).
-const roodZacht = (p: Palet) => (p.achtergrond === '#ffffff' ? '#fbe7e5' : '#3a1d1a')
-
 export type Regel = {
   icoon: string
   label: string
@@ -94,7 +91,7 @@ export function diffKaart(ui: any, desktop: boolean, p: Palet, pad: string, rege
         </Box>
       </Box>
       {regels.map((r, i) => (
-        <Text key={`d-${i}`} backgroundColor={r.soort === '+' ? p.groenZacht : r.soort === '-' ? roodZacht(p) : undefined}>
+        <Text key={`d-${i}`} backgroundColor={r.soort === '+' ? p.groenZacht : r.soort === '-' ? p.roodZacht : undefined}>
           <Text color={p.mut}>{` ${r.nr > 0 ? String(r.nr).padStart(breedte) : ' '.repeat(breedte)} `}</Text>
           <Text color={r.soort === '+' ? p.groen : r.soort === '-' ? p.rood : p.mut}>{`${r.soort} `}</Text>
           <Text color={r.nr === 0 ? p.mut : p.inkt}>{r.tekst === '' ? ' ' : r.tekst}</Text>

@@ -1,7 +1,7 @@
 export type Modus = 'licht' | 'donker'
 export type Palet = {
   groen: string; groenZacht: string; inkt: string; mut: string; lijn: string
-  achtergrond: string; vlak: string; rood: string; oranje: string
+  achtergrond: string; vlak: string; rood: string; roodZacht: string; oranje: string
 }
 export function modusVoor(theme: unknown): Modus
 export function palet(modus: Modus): Palet

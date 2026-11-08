@@ -23,16 +23,16 @@ test('palet: licht en donker kleuren', () => {
 })
 
 test('palet: alle sleutels per modus', () => {
-  const sleutels = ['groen', 'groenZacht', 'inkt', 'mut', 'lijn', 'achtergrond', 'vlak', 'rood', 'oranje']
+  const sleutels = ['groen', 'groenZacht', 'inkt', 'mut', 'lijn', 'achtergrond', 'vlak', 'rood', 'roodZacht', 'oranje']
   assert.deepEqual(Object.keys(palet('licht')).sort(), [...sleutels].sort())
   assert.deepEqual(Object.keys(palet('donker')).sort(), [...sleutels].sort())
   assert.deepEqual(palet('licht'), {
     groen: '#32a029', groenZacht: '#e8f5e6', inkt: '#3D3D3D', mut: '#7a807a', lijn: '#e3e6e3',
-    achtergrond: '#ffffff', vlak: '#f6f7f6', rood: '#d4483b', oranje: '#d99a1e',
+    achtergrond: '#ffffff', vlak: '#f6f7f6', rood: '#d4483b', roodZacht: '#fbe7e5', oranje: '#d99a1e',
   })
   assert.deepEqual(palet('donker'), {
     groen: '#32a029', groenZacht: '#16301a', inkt: '#e9ece9', mut: '#8d958d', lijn: '#2b302b',
-    achtergrond: '#121412', vlak: '#1b1e1b', rood: '#e5675b', oranje: '#e0a93a',
+    achtergrond: '#121412', vlak: '#1b1e1b', rood: '#e5675b', roodZacht: '#3a1d1a', oranje: '#e0a93a',
   })
 })
 

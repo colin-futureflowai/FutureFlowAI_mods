@@ -13,7 +13,7 @@ import { diffKaart, shellKaart, toolRegel } from './skin-kaarten'
 
 import { unwrapCommand } from '../lib/classify.mjs'
 import {
-  beurtDuur, duurTekst, icoonVoor, invoerVelden, korteInvoer, resultaatTekst, shellStatus, shellUitvoer, telling, toolLabel, wijzigRegels,
+  beurtDuur, duurTekst, icoonVoor, invoerVelden, korteInvoer, resultaatTekst, schoonTekst, shellStatus, shellUitvoer, telling, toolLabel, wijzigRegels,
 } from '../lib/skin.mjs'
 import { modusVoor, palet } from '../lib/thema.mjs'
 import type { Modus } from '../lib/thema.mjs'
@@ -27,6 +27,31 @@ const themaAtom = atom({ plugin: 'futureflow', key: 'skin.theme' } as const, nul
 const duurAtom = atom({ plugin: 'futureflow', key: 'skin.duur' } as const, -1)
 const commandoAtom = atom({ plugin: 'futureflow', key: 'skin.commando' } as const, '')
 const openAtom = atom({ plugin: 'futureflow', key: 'skin.open' } as const, false)
+// Begin van de lopende beurt (clock-ms, 0 = onbekend) en een tik per seconde voor de spinner.
+const startAtom = atom({ plugin: 'futureflow', key: 'skin.start' } as const, 0)
+const tikAtom = atom({ plugin: 'futureflow', key: 'skin.tik' } as const, 0)
+
+// De tikker loopt zolang de spinner getekend wordt; drie seconden zonder spinner en hij stopt.
+let tikker: { cancel(): void } | undefined
+let laatsteSpinner = 0
+
+async function tik($: Engine): Promise<void> {
+  const nu = await $.clock.now()
+  if (nu - laatsteSpinner > 3000) {
+    tikker?.cancel()
+    tikker = undefined
+    return
+  }
+  await update($, tikAtom, t => t + 1)
+}
+
+function startTikker($: Engine, nu: number): void {
+  laatsteSpinner = nu
+  tikker?.cancel()
+  tikker = $.clock.every(1000, () => {
+    void tik($).catch(() => undefined)
+  })
+}
 
 // Tools die een eigen regel krijgen. Agents, taken, plannen en vragen houden die van Claude Code:
 // die tonen live voortgang of dialogen.
@@ -90,7 +115,7 @@ export const registerSkin = (on: Parameters<Register>[0]): void => {
   })
 
   // Tijd per aanroep, en voor Bash het commando (zonder de slots-verpakking) voor de shell-kaart.
-  // Alleen meten, nooit tegenhouden: een fout hier kost alleen de tijd in de regel, en next(e) loopt één keer.
+  // Alleen meten, nooit tegenhouden: een fout hier kost alleen de tijd in de regel.
   on('tool.call', { tool: /^/ }, async ($, e, next) => {
     const id = { requestId: e.tool_use_id }
     let begin: number | undefined
@@ -126,7 +151,6 @@ export const registerSkin = (on: Parameters<Register>[0]): void => {
       const regels = EDITS.has(tool) && !isErrored ? wijzigRegels(output) : null
       const open = memberOf(openAtom, e)
       const isOpen = await read($, open)
-      const heeftKaart = (tool === 'Bash' && stijl.shell) || (EDITS.has(tool) && stijl.diff)
       return toolRegel($.ui.resolve(e), p, {
         icoon: icoonVoor(tool),
         label: toolLabel(tool),
@@ -136,8 +160,8 @@ export const registerSkin = (on: Parameters<Register>[0]): void => {
         tel: regels ? telling(regels) : undefined,
         open: isOpen,
         velden: isOpen ? invoerVelden(input) : [],
-        // Bash en Edit hebben hun kaart eronder al; daar alleen de invoer.
-        resultaat: isOpen && !heeftKaart ? resultaatTekst(output) : '',
+        // Volledig, ook bij Bash en Edit: de kaart eronder is ingeklapt (8 + 4) of een diff.
+        resultaat: isOpen ? resultaatTekst(output) : '',
         wissel: () => void update($, open, v => !v),
       })
     } catch (err) {
@@ -158,7 +182,7 @@ export const registerSkin = (on: Parameters<Register>[0]): void => {
         const pad = (output as { filePath?: unknown } | null)?.filePath
         if (!regels || typeof pad !== 'string') return next(e)
         const p = palet(await huidigeModus($))
-        return diffKaart($.ui.resolve(e), desktop, p, pad, regels, telling(regels)) ?? next(e)
+        return diffKaart($.ui.resolve(e), desktop, p, schoonTekst(pad), regels, telling(regels)) ?? next(e)
       }
       if (tool === 'Bash') {
         if (!stijl.shell) return next(e)
@@ -169,7 +193,7 @@ export const registerSkin = (on: Parameters<Register>[0]): void => {
         if (!sh) return next(e)
         const p = palet(await huidigeModus($))
         const commando = await read($, memberOf(commandoAtom, e))
-        return shellKaart($.ui.resolve(e), desktop, p, commando, sh, shellStatus(sh, isErrored)) ?? next(e)
+        return shellKaart($.ui.resolve(e), desktop, p, schoonTekst(commando), sh, shellStatus(sh, isErrored)) ?? next(e)
       }
       return next(e)
     } catch (err) {
@@ -178,13 +202,34 @@ export const registerSkin = (on: Parameters<Register>[0]): void => {
     }
   })
 
+  // Begin van een beurt van de hoofdsessie: voor de verstreken tijd in de spinner.
+  on('turn.start', async ($, e, next) => {
+    try {
+      if ((e as { agentId?: unknown }).agentId === undefined) {
+        const nu = await $.clock.now()
+        await update($, startAtom, () => nu)
+        startTikker($, nu)
+      }
+    } catch (err) {
+      void log($, `skin: beurtstart mislukt: ${String(err)}`).catch(() => undefined)
+    }
+    return next(e)
+  })
+
+  // Terminal: Claude Code's woord en de verstreken tijd, in groen. Desktop houdt zijn eigen
+  // geanimeerde rij (zoals claude-skins). Tokens staan niet in de props: die laten we weg.
   on('ui.render', { component: 'Spinner' }, async ($, e, next) => {
     try {
       const stijl = await leesStijl($)
-      if (!stijl.aan || !stijl.spinner) return next(e)
+      if (!stijl.aan || !stijl.spinner || e.surface !== 'terminal') return next(e)
+      await read($, tikAtom) // opnieuw tekenen bij elke tik
+      const start = await read($, startAtom)
+      if (!start) return next(e)
+      const nu = await $.clock.now()
+      laatsteSpinner = nu
       const p = palet(await huidigeModus($))
       const { Text } = $.ui.resolve(e)
-      return <Text color={p.groen}>{`✻ ${e.props.message ?? e.props.word}${e.props.suffix}`}</Text>
+      return <Text color={p.groen}>{`✻ ${e.props.message ?? e.props.word}${e.props.suffix} (${beurtDuur(nu - start)})`}</Text>
     } catch (err) {
       failOpen($, err)
       return next(e)
