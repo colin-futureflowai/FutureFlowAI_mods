@@ -22,6 +22,11 @@ function fake(on: any, files: Record<string, string>, env: Record<string, string
   // Het onderdeel Slots start mee in session.start (tenzij de oude plugin aan staat): neppe CLI en paneel.
   on('command.register', () => ({ value: undefined }) as any)
   on('ui.panes', () => ({ value: [] }))
+  // Het onderdeel Minify start ook mee (tenzij de oude plugin aan staat): neppe store, statusregel en sessie.
+  on('store.get', () => ({ value: undefined }))
+  on('store.set', () => ({ value: undefined }))
+  on('ui.status', () => ({ value: undefined }))
+  on('session.id', () => ({ value: 'sessie-1' }))
   on('process.run', () => ({ value: { exitCode: 0, stdout: '{}\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
   return { written, toasts }
 }

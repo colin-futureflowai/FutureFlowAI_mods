@@ -1,4 +1,4 @@
-// Contract van de state van futureflow (onderdeel Slots): de laatste momentopname voor het dashboard.
+// Contract van de state van futureflow: Slots (momentopname voor het dashboard) en Minify (niveau en tellers).
 
 export type SlotsMemory = { freePercent: number; totalGB: number; source: string }
 
@@ -41,8 +41,38 @@ export type SlotsSnapshot = {
   error?: string
 }
 
+export type MinifyNiveau = 'O1' | 'O2' | 'O3' | 'uit'
+
+export type MinifyTeller = {
+  /** Beurten van de hoofdsessie met een gemeten usage. */
+  beurten: number
+  /** Output-tokens van die beurten samen. */
+  output: number
+  /** Tooluitvoer die minify inkortte: aantal keer en tekens voor en na. */
+  ingekort: number
+  uitvoerVoor: number
+  uitvoerNa: number
+}
+
+/** Eén ingekorte tooluitvoer, voor de lijst in het dashboard. */
+export type MinifyInkorting = {
+  tool: string
+  voor: number
+  na: number
+  pad: string
+  t: number
+}
+
 declare module 'claude-code' {
   interface PluginState {
-    futureflow: { 'slots.snapshot': SlotsSnapshot | null }
+    futureflow: {
+      'slots.snapshot': SlotsSnapshot | null
+      'minify.niveau': MinifyNiveau | null
+      'minify.teller': MinifyTeller | null
+      /** Output-tokens per beurt van deze sessie, de laatste 60. */
+      'minify.reeks': number[] | null
+      /** De laatste 8 inkortingen, nieuwste eerst. */
+      'minify.recent': MinifyInkorting[] | null
+    }
   }
 }

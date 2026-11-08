@@ -13,6 +13,12 @@ function fake(on: any, cliAnswers: Record<string, Answer> = {}, env: Record<stri
   const vars: Record<string, string> = { HOME: '/home/t', PATH: '/usr/bin', ...env }
   on('env.get', ($: any, e: { name: string }) => ({ value: vars[e.name] }))
   on('session.id', () => ({ value: 'sessie-1' }))
+  // Het onderdeel Minify hoort bij dezelfde module en kijkt bij elke Bash-aanroep naar zijn niveau.
+  on('store.get', () => ({ value: undefined }))
+  on('store.set', () => ({ value: undefined }))
+  on('ui.status', () => ({ value: undefined }))
+  on('fs.write', () => ({ value: undefined }))
+  on('fs.exists', () => ({ value: false }))
   on('process.run', ($: any, e: { argv: string[] }) => {
     // Genormaliseerd naar ['node', cli, opdracht, …], wat er ook vóór node staat (/usr/bin/env).
     const argv = e.argv.slice(e.argv.findIndex(a => a.endsWith('agent-slot.mjs')) - 1)
@@ -288,7 +294,6 @@ function oudAanwezig(on: any) {
     return { value: { isPlaced: true } } as any
   })
   on('ui.toast', () => ({ value: undefined }))
-  on('fs.write', () => ({ value: undefined }))
   on('session.start', ($: any, e: any) => e)
   return { ...f, registered, opened }
 }
@@ -296,7 +301,8 @@ function oudAanwezig(on: any) {
 test('oude plugin aan: session.start registreert /agent-slots niet en roept de CLI niet aan', async ($, on) => {
   const f = oudAanwezig(on)
   await $.session.start({ cwd: '/r', surface: 'terminal', isInteractive: true } as any)
-  expect(f.registered.length).toBe(0)
+  // Minify mag /minify wel registreren; het gaat hier om /agent-slots.
+  expect(f.registered.filter(r => (r as { name: string }).name === 'agent-slots').length).toBe(0)
   expect(f.calls.length).toBe(0)
 })
 
@@ -306,7 +312,6 @@ test('oude plugin aan: tool.check pakt een eigen ingepakt commando niet meer uit
   on('command.register', () => ({ value: undefined }) as any)
   on('ui.panes', () => ({ value: [] }))
   on('ui.toast', () => ({ value: undefined }))
-  on('fs.write', () => ({ value: undefined }))
   on('session.start', ($: any, e: any) => e)
   on('fs.read', ($: any, e: { path: string }) => ({
     value: oudNu && e.path.endsWith('installed_plugins.json') ? JSON.stringify({ plugins: { 'agent-slots@futureflowai-mods': [{}] } }) : '',
