@@ -117,7 +117,11 @@ export const registerSkin = (on: Parameters<Register>[0]): void => {
   // Thema gewijzigd: binnen deze hook geeft $.config.list() nog de oude waarde, dus zelf onthouden.
   on('config.set', { key: 'theme' }, async ($, e, next) => {
     const r = await next(e)
-    if (r.deny === undefined && typeof e.value === 'string') await update($, themaAtom, () => e.value as string)
+    try {
+      if (r.deny === undefined && typeof e.value === 'string') await update($, themaAtom, () => e.value as string)
+    } catch (err) {
+      failOpen($, err)
+    }
     return r
   })
 
@@ -182,14 +186,16 @@ export const registerSkin = (on: Parameters<Register>[0]): void => {
       const { tool, output, isErrored } = e.props
       const stijl = await leesStijl($)
       if (!stijl.aan || e.props.isExpanded === true) return next(e)
-      const desktop = e.surface !== 'terminal'
+      const el = $.ui.resolve(e)
+      // Niet alleen op het vlak letten: de tabel antwoordt ook in de terminal op 'Svg'.
+      const desktop = e.surface !== 'terminal' && 'Svg' in el
       if (EDITS.has(tool)) {
         if (!stijl.diff || isErrored) return next(e)
         const regels = wijzigRegels(output)
         const pad = (output as { filePath?: unknown } | null)?.filePath
         if (!regels || typeof pad !== 'string') return next(e)
         const p = palet(await huidigeModus($))
-        return diffKaart($.ui.resolve(e), desktop, p, schoonTekst(pad), regels, telling(regels)) ?? next(e)
+        return diffKaart(el, desktop, p, schoonTekst(pad), regels, telling(regels)) ?? next(e)
       }
       if (tool === 'Bash') {
         if (!stijl.shell) return next(e)
@@ -200,7 +206,7 @@ export const registerSkin = (on: Parameters<Register>[0]): void => {
         if (!sh) return next(e)
         const p = palet(await huidigeModus($))
         const commando = await read($, memberOf(commandoAtom, e))
-        return shellKaart($.ui.resolve(e), desktop, p, schoonTekst(commando), sh, shellStatus(sh, isErrored)) ?? next(e)
+        return shellKaart(el, desktop, p, schoonTekst(commando), sh, shellStatus(sh, isErrored)) ?? next(e)
       }
       return next(e)
     } catch (err) {
@@ -236,7 +242,7 @@ export const registerSkin = (on: Parameters<Register>[0]): void => {
       laatsteSpinner = nu
       const p = palet(await huidigeModus($))
       const { Text } = $.ui.resolve(e)
-      return <Text color={p.groen}>{`✻ ${e.props.message ?? e.props.word}${e.props.suffix} (${beurtDuur(nu - start)})`}</Text>
+      return <Text color={p.groen}>{`✻ ${e.props.message ?? e.props.word}${e.props.suffix ?? ''} (${beurtDuur(nu - start)})`}</Text>
     } catch (err) {
       failOpen($, err)
       return next(e)

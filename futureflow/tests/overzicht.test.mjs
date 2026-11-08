@@ -47,3 +47,8 @@ test('vrij geheugen', () => {
   assert.equal(k.toon, 'oranje')
   assert.equal(kpis({ snapshot: { memory: { freePercent: 40, totalGB: 16 } } })[3].toon, 'groen')
 })
+
+test('kpi 1 zakt nooit onder 0 als de uitvoer na het inkorten groter is', () => {
+  const k = kpis({ teller: { ...TELLER, uitvoerVoor: 1000, uitvoerNa: 5000 } })[0]
+  assert.equal(k.waarde, '0')
+})

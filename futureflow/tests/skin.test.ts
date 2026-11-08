@@ -4,7 +4,7 @@ import { expect, mock, test } from 'claude-code/testing'
 // Claude Code's eigen weergave: wat onder de plugins tekent.
 const STOCK: RenderElement = { type: 'Text', props: {}, children: ['eigen weergave'] }
 
-type Opties = { stijl?: unknown; theme?: string }
+type Opties = { stijl?: unknown; theme?: string; stateKapot?: boolean }
 
 // Nep-omgeving; alle on(...)-mocks vóór de eerste $-aanroep.
 function fake(on: any, opties: Opties = {}) {
@@ -20,6 +20,8 @@ function fake(on: any, opties: Opties = {}) {
   on('config.list', () => ({
     value: opties.theme === undefined ? [] : [{ key: 'theme', label: 'Theme', kind: 'enum', value: opties.theme, provider: { kind: 'engine' }, isLocked: false }],
   }))
+  if (opties.stateKapot) on('state.set', () => { throw new Error('opslag stuk') })
+  on('config.set', ($: any, e: any) => e)
   on('ui.toast', ($: any, e: { text: string }) => {
     toasts.push(e.text)
     return { value: undefined }
@@ -216,5 +218,26 @@ test('na turn.complete stopt de tikker: de spinner tekent niet meer opnieuw', as
   await f.clock.advance(2000)
   expect(await s.find({ type: 'Text', text: /\(0s\)/ })).toBeDefined()
   expect(await s.find({ type: 'Text', text: /\(2s\)/ })).toBeUndefined()
+  await s.unmount()
+})
+
+test('config.set theme met kapotte opslag gooit niet en geeft het antwoord van next', async ($, on) => {
+  const f = fake(on, { stateKapot: true })
+  let r: any
+  try {
+    r = await $.config.set({ key: 'theme', value: 'dark' } as any)
+  } catch (err) {
+    throw new Error(`handler gooide: ${String(err)}`)
+  }
+  expect(r).toBeDefined()
+  expect(f.toasts.every(t => !t.includes('handler'))).toBe(true)
+})
+
+test('spinner zonder suffix tekent geen "undefined"', async ($, on) => {
+  fake(on)
+  await $.turn.start({ text: 'go', turnId: 't1' } as any)
+  const s = await $.ui.mount({ ...SPINNER('terminal'), props: { word: 'Bakken', message: null, mode: 'thinking' } })
+  expect(await s.find({ type: 'Text', text: /undefined/ })).toBeUndefined()
+  expect(await s.find({ type: 'Text', text: /Bakken/ })).toBeDefined()
   await s.unmount()
 })

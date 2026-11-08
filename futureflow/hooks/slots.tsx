@@ -87,7 +87,7 @@ export async function startSlotsTicker($: Engine) {
       const isUp = (await $.ui.panes()).some(p => p.id === PANE)
       if (!isUp) { ticker?.cancel(); ticker = undefined; return }
       await refresh($)
-    })()
+    })().catch(err => failOpen($, err))
   })
 }
 

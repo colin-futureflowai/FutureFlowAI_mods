@@ -6,25 +6,31 @@ const WRITES: string[] = []
 const STORED: Array<{ key: string; value: any }> = []
 
 // Nep-omgeving: geen oude plugins, neppe CLI, en een ui.open die we kunnen afluisteren.
-function fake(on: any) {
+function fake(on: any, o: { oud?: boolean; storeKapot?: boolean } = {}) {
+  const flags = { stuk: false, cliCalls: 0 }
+  const toasts: string[] = []
   const opened: Array<{ id: string; title?: string }> = []
   on('env.get', ($: any, e: { name: string }) => ({ value: e.name === 'HOME' ? '/home/t' : undefined }))
   on('session.id', () => ({ value: 'sessie-1' }))
   on('store.get', () => ({ value: undefined }))
-  on('store.set', ($: any, e: { key: string; value: any }) => { STORED.push({ key: e.key, value: e.value }); return { value: undefined } })
+  on('store.set', ($: any, e: { key: string; value: any }) => { if (o.storeKapot) throw new Error('schijf vol'); STORED.push({ key: e.key, value: e.value }); return { value: undefined } })
   on('ui.status', () => ({ value: undefined }))
+  on('ui.toast', ($: any, e: { text: string }) => { toasts.push(e.text); return { value: undefined } })
+  on('fs.read', ($: any, e: { path: string }) => ({
+    value: o.oud && e.path.endsWith('installed_plugins.json') ? JSON.stringify({ plugins: { 'agent-slots@futureflowai-mods': [{}] } }) : '',
+  }))
   on('fs.write', ($: any, e: { path: string }) => { WRITES.push(e.path); return { value: undefined } })
   on('fs.exists', () => ({ value: false }))
   on('session.start', ($: any, e: any) => e)
   on('command.register', () => ({ value: undefined }) as any)
-  on('ui.panes', () => ({ value: [] }))
+  on('ui.panes', () => { if (flags.stuk) throw new Error('panes stuk'); return { value: [] } })
   on('ui.open', ($: any, e: { id: string; title?: string }) => {
     opened.push(e)
     return { value: { isPlaced: true } }
   })
-  mock.clock(on)
-  on('process.run', () => ({ value: { exitCode: 0, stdout: CLI.stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
-  return { opened }
+  const clock = mock.clock(on)
+  on('process.run', () => { flags.cliCalls++; return { value: { exitCode: 0, stdout: CLI.stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } } })
+  return { opened, clock, flags, toasts }
 }
 
 const START = { cwd: '/r', surface: 'terminal', isInteractive: true } as any
@@ -115,10 +121,8 @@ test('desktop tekent het woordmerk', async ($, on) => {
 })
 
 test('een tab waarvan het tekenen faalt valt terug op next, met één toast', async ($, on) => {
-  const toasts: string[] = []
   CLI.stdout = JSON.stringify({ config: {}, slots: [], refusals: [] }) + '\n' // zonder memory: slotsTab gooit
-  fake(on)
-  on('ui.toast', ($: any, e: { text: string }) => { toasts.push(e.text); return { value: undefined } })
+  const { toasts } = fake(on)
   let viaNext = 0
   on('ui.render', () => { viaNext++; throw new Error('terugval') })
   await $.session.start(START)
@@ -135,7 +139,6 @@ test('een tab waarvan het tekenen faalt valt terug op next, met één toast', as
 
 test('de minify-tab tekent zonder session.start en schrijft niets', async ($, on) => {
   const f = fake(on)
-  on('fs.read', () => ({ value: '' }))
   await run($, 'futureflow', 'minify')
   WRITES.length = 0
   const ui = await $.ui.mount(PANE('desktop'))
@@ -223,4 +226,28 @@ test('stijl-tab tekent op desktop een voorbeeld als Svg', async ($, on) => {
   const ui = await $.ui.mount(PANE('desktop'))
   expect(await ui.find({ type: 'Svg', alt: /Wijziging in/ } as any)).toBeDefined()
   await ui.unmount()
+})
+
+test('/futureflow met oude agent-slots: geen agent-slot status-aanroep', async ($, on) => {
+  const f = fake(on, { oud: true })
+  await $.session.start(START)
+  f.flags.cliCalls = 0
+  const r = await run($, 'futureflow', 'slots')
+  expect(r.text).toContain('Dashboard geopend')
+  expect(f.flags.cliCalls).toBe(0)
+})
+
+test('/futureflow stijl met kapotte opslag gooit niet en geeft één regel', async ($, on) => {
+  fake(on, { storeKapot: true })
+  const r = await run($, 'futureflow', 'stijl uit')
+  expect(typeof r.text).toBe('string')
+  expect(r.text).not.toContain('Skin uit')
+})
+
+test('de slots-tikker faalt open als ui.panes gooit', async ($, on) => {
+  const f = fake(on)
+  await run($, 'futureflow', 'slots')
+  f.flags.stuk = true
+  await f.clock.advance(3000)
+  expect(f.toasts.length).toBe(1)
 })

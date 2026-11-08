@@ -3,7 +3,7 @@ import type { EngineInterface as Engine, Register } from 'claude-code'
 
 import type { DashboardTab, MinifyTeller, SlotsSnapshot } from '../types'
 
-import { failOpen } from './ctx'
+import { failOpen, oud } from './ctx'
 import { minifyTab, niveauLezen } from './minify'
 import { openDashboard, PANE, TABS } from './paneel'
 import { huidigeModus, leesStijl, zetStijl } from './skin'
@@ -181,16 +181,21 @@ async function stijlCommando($: Engine, keuze: string): Promise<{ text: string }
 
 export const registerDashboard = (on: Parameters<Register>[0]): void => {
   on('command.run', { command: 'futureflow' }, async ($, e) => {
-    const woorden = (e.args ?? '').trim().toLowerCase().split(/\s+/)
-    const woord = woorden[0] ?? ''
-    if (woord === 'stijl' && woorden[1]) return stijlCommando($, woorden[1])
-    if (woord && !(TABS as readonly string[]).includes(woord)) {
-      return { text: `Onbekende tab "${woord}". Gebruik: /futureflow ${TABS.join('|')}` }
+    try {
+      const woorden = (e.args ?? '').trim().toLowerCase().split(/\s+/)
+      const woord = woorden[0] ?? ''
+      if (woord === 'stijl' && woorden[1]) return await stijlCommando($, woorden[1])
+      if (woord && !(TABS as readonly string[]).includes(woord)) {
+        return { text: `Onbekende tab "${woord}". Gebruik: /futureflow ${TABS.join('|')}` }
+      }
+      const tab = (woord || undefined) as DashboardTab | undefined
+      await openDashboard($, tab)
+      if (!(await oud($)).slots) await startSlotsTicker($)
+      return { text: `Dashboard geopend${tab ? ` op de tab ${NAMEN[tab]}` : ''}.` }
+    } catch (err) {
+      failOpen($, err)
+      return { text: 'Dat lukte niet; de fout staat in het logboek van de mod.' }
     }
-    const tab = (woord || undefined) as DashboardTab | undefined
-    await openDashboard($, tab)
-    await startSlotsTicker($)
-    return { text: `Dashboard geopend${tab ? ` op de tab ${NAMEN[tab]}` : ''}.` }
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e, next) => {
@@ -227,7 +232,7 @@ export const registerDashboard = (on: Parameters<Register>[0]): void => {
                 hotkey={String(i + 1)}
                 onPress={async () => {
                   await update($, tabAtom, () => t)
-                  if (t === 'slots' || t === 'overzicht') await startSlotsTicker($)
+                  if ((t === 'slots' || t === 'overzicht') && !(await oud($)).slots) await startSlotsTicker($)
                 }}
               >
                 {t === tab ? <Text color={p.groen} bold>{NAMEN[t]}</Text> : NAMEN[t]}

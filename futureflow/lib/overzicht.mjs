@@ -11,7 +11,7 @@ const gemiddelde = (p) => p.output / p.beurten
 function bespaardIn(teller) {
   const titel = 'Tokens bespaard (in)'
   if (!teller) return GEEN(titel)
-  const tokens = Math.round((teller.uitvoerVoor - teller.uitvoerNa) / 4)
+  const tokens = Math.max(0, Math.round((teller.uitvoerVoor - teller.uitvoerNa) / 4))
   return { titel, waarde: kort(tokens), sub: `${teller.ingekort}× uitvoer ingekort`, toon: 'groen' }
 }
 
