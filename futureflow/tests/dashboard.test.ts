@@ -3,6 +3,7 @@ import { expect, mock, test } from 'claude-code/testing'
 const CLI = { stdout: JSON.stringify({ memory: { freePercent: 40, totalGB: 16 }, config: { limits: { dev: 2 }, floorPercent: 25, criticalPercent: 10 }, slots: [], refusals: [] }) + '\n' }
 
 const WRITES: string[] = []
+const STORED: Array<{ key: string; value: any }> = []
 
 // Nep-omgeving: geen oude plugins, neppe CLI, en een ui.open die we kunnen afluisteren.
 function fake(on: any) {
@@ -10,7 +11,7 @@ function fake(on: any) {
   on('env.get', ($: any, e: { name: string }) => ({ value: e.name === 'HOME' ? '/home/t' : undefined }))
   on('session.id', () => ({ value: 'sessie-1' }))
   on('store.get', () => ({ value: undefined }))
-  on('store.set', () => ({ value: undefined }))
+  on('store.set', ($: any, e: { key: string; value: any }) => { STORED.push({ key: e.key, value: e.value }); return { value: undefined } })
   on('ui.status', () => ({ value: undefined }))
   on('fs.write', ($: any, e: { path: string }) => { WRITES.push(e.path); return { value: undefined } })
   on('fs.exists', () => ({ value: false }))
@@ -153,4 +154,73 @@ test('overzicht zonder gegevens crasht niet', async ($, on) => {
   const ui2 = await $.ui.mount(PANE('desktop'))
   expect(await ui2.find({ type: 'Svg' })).toBeDefined()
   await ui2.unmount()
+})
+
+const laatsteStijl = () => STORED.filter(s => s.key === 'stijl').at(-1)?.value
+
+test('stijl uit zet aan op false', async ($, on) => {
+  fake(on)
+  STORED.length = 0
+  const r = await run($, 'futureflow', 'stijl uit')
+  expect(laatsteStijl().aan).toBe(false)
+  expect(r.text).toContain('uit')
+})
+
+test('stijl licht zet modus licht', async ($, on) => {
+  fake(on)
+  STORED.length = 0
+  const r = await run($, 'futureflow', 'stijl licht')
+  expect(laatsteStijl().modus).toBe('licht')
+  expect(r.text).toContain('licht')
+})
+
+test('stijl met onbekend woord geeft één regel uitleg en schrijft niets', async ($, on) => {
+  const f = fake(on)
+  STORED.length = 0
+  const r = await run($, 'futureflow', 'stijl paars')
+  expect(r.text).toContain('uit|aan|licht|donker|auto')
+  expect(STORED.length).toBe(0)
+  expect(f.opened.length).toBe(0)
+})
+
+test('kale /futureflow stijl opent de tab', async ($, on) => {
+  const f = fake(on)
+  await run($, 'futureflow', 'stijl')
+  expect(f.opened[0]!.id).toBe('futureflow')
+  const ui = await $.ui.mount(PANE('terminal'))
+  expect(await ui.find({ type: 'Text', text: /Uit = Claude Code's eigen weergave/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('vinkje diff uit schakelt alleen diff uit', async ($, on) => {
+  fake(on)
+  STORED.length = 0
+  await run($, 'futureflow', 'stijl')
+  const ui = await $.ui.mount(PANE('desktop'))
+  await ui.press({ key: 'stijl-diff' } as any)
+  const s = laatsteStijl()
+  expect(s.diff).toBe(false)
+  expect(s.aan).toBe(true)
+  expect(s.regels).toBe(true)
+  expect(s.shell).toBe(true)
+  expect(s.spinner).toBe(true)
+  expect(s.modus).toBe('auto')
+  await ui.unmount()
+})
+
+test('stijl-tab tekent op terminal zonder Svg', async ($, on) => {
+  fake(on)
+  await run($, 'futureflow', 'stijl')
+  const ui = await $.ui.mount(PANE('terminal'))
+  expect(JSON.stringify(await ui.drawn())).not.toContain('"type":"Svg"')
+  expect(await ui.find({ type: 'Text', text: /Groene spinner/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('stijl-tab tekent op desktop een voorbeeld als Svg', async ($, on) => {
+  fake(on)
+  await run($, 'futureflow', 'stijl')
+  const ui = await $.ui.mount(PANE('desktop'))
+  expect(await ui.find({ type: 'Svg', alt: /Wijziging in/ } as any)).toBeDefined()
+  await ui.unmount()
 })

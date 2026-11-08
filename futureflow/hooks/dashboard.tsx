@@ -6,11 +6,13 @@ import type { DashboardTab, MinifyTeller, SlotsSnapshot } from '../types'
 import { failOpen } from './ctx'
 import { minifyTab, niveauLezen } from './minify'
 import { openDashboard, PANE, TABS } from './paneel'
-import { huidigeModus } from './skin'
+import { huidigeModus, leesStijl, zetStijl } from './skin'
+import { diffKaart, toolRegel } from './skin-kaarten'
 import { slotsTab, startSlotsTicker } from './slots'
 
 import { kpis } from '../lib/overzicht.mjs'
 import type { Kpi } from '../lib/overzicht.mjs'
+import { icoonVoor } from '../lib/skin.mjs'
 import { balkTekst, palet, woordmerkSvg } from '../lib/thema.mjs'
 
 export { openDashboard }
@@ -101,9 +103,87 @@ async function overzichtTab($: Engine, e: any, p: ReturnType<typeof palet>) {
   )
 }
 
+const MODI = ['auto', 'licht', 'donker'] as const
+
+// Inhoud van de tab Stijl: skin aan/uit, thema, losse onderdelen en (desktop) een voorbeeld.
+// Tekent alleen; schrijven gebeurt in de onPress van de knoppen.
+async function stijlTab($: Engine, e: any, p: ReturnType<typeof palet>) {
+  const el = $.ui.resolve(e)
+  const { Box, Text, Button } = el
+  const desktop = e.surface !== 'terminal' && 'Svg' in el
+  const stijl = await leesStijl($)
+  const zet = (deel: Parameters<typeof zetStijl>[1]) => async () => {
+    await zetStijl($, deel)
+    $.ui.invalidate('ui.render')
+  }
+  const vinkje = (sleutel: 'regels' | 'diff' | 'shell' | 'spinner', naam: string) => (
+    <Button key={`stijl-${sleutel}`} onPress={zet({ [sleutel]: !stijl[sleutel] })}>
+      <Text>{`${stijl[sleutel] ? '☑' : '☐'} ${naam}`}</Text>
+    </Button>
+  )
+  const voorbeeld = desktop ? (
+    <Box flexDirection="column" gap={1}>
+      {toolRegel(el, p, {
+        icoon: icoonVoor('Edit'), label: 'Edit', kort: 'src/app.ts', fout: false, duur: '0,4s', tel: { plus: 1, min: 1 },
+        open: false, velden: [], resultaat: '', wissel: () => undefined,
+      })}
+      {diffKaart(el, true, p, 'src/app.ts', [
+        { soort: ' ', tekst: 'const naam = leesNaam()', nr: 11 },
+        { soort: '-', tekst: 'console.log(naam)', nr: 12 },
+        { soort: '+', tekst: 'toon(naam)', nr: 12 },
+      ], { plus: 1, min: 1 })}
+    </Box>
+  ) : ''
+  return (
+    <Box flexDirection="column" gap={1}>
+      <Box flexDirection="column">
+        <Button key="stijl-aan" hotkey="s" onPress={zet({ aan: !stijl.aan })}>
+          <Text>{`${stijl.aan ? '☑' : '☐'} Skin aan`}</Text>
+        </Button>
+        <Text dimColor>Uit = Claude Code's eigen weergave.</Text>
+      </Box>
+      <Box flexDirection="row" gap={2}>
+        <Text dimColor>Thema</Text>
+        {MODI.map(m => (
+          <Button key={`stijl-modus-${m}`} onPress={zet({ modus: m })}>
+            {m === stijl.modus ? <Text color={p.groen} bold>{m}</Text> : m}
+          </Button>
+        ))}
+      </Box>
+      <Box flexDirection="column">
+        {vinkje('regels', 'Tool-regels')}
+        {vinkje('diff', 'Diff-kaart')}
+        {vinkje('shell', 'Shell-kaart')}
+        {vinkje('spinner', 'Groene spinner')}
+      </Box>
+      {voorbeeld}
+    </Box>
+  )
+}
+
+const STIJL_HULP = 'Gebruik: /futureflow stijl uit|aan|licht|donker|auto'
+
+// Past de stijl aan vanuit een commando; één regel tekst terug.
+async function stijlCommando($: Engine, keuze: string): Promise<{ text: string } | null> {
+  const deel: Record<string, Parameters<typeof zetStijl>[1]> = {
+    uit: { aan: false },
+    aan: { aan: true },
+    licht: { modus: 'licht' },
+    donker: { modus: 'donker' },
+    auto: { modus: 'auto' },
+  }
+  const gekozen = deel[keuze]
+  if (!gekozen) return { text: `Onbekende stijl "${keuze}". ${STIJL_HULP}` }
+  await zetStijl($, gekozen)
+  $.ui.invalidate('ui.render')
+  return { text: keuze === 'uit' ? 'Skin uit: Claude Code\'s eigen weergave.' : keuze === 'aan' ? 'Skin aan.' : `Thema van de skin: ${keuze}.` }
+}
+
 export const registerDashboard = (on: Parameters<Register>[0]): void => {
   on('command.run', { command: 'futureflow' }, async ($, e) => {
-    const woord = (e.args ?? '').trim().split(/\s+/)[0]?.toLowerCase() ?? ''
+    const woorden = (e.args ?? '').trim().toLowerCase().split(/\s+/)
+    const woord = woorden[0] ?? ''
+    if (woord === 'stijl' && woorden[1]) return stijlCommando($, woorden[1])
     if (woord && !(TABS as readonly string[]).includes(woord)) {
       return { text: `Onbekende tab "${woord}". Gebruik: /futureflow ${TABS.join('|')}` }
     }
@@ -127,7 +207,7 @@ export const registerDashboard = (on: Parameters<Register>[0]): void => {
       tab === 'slots' ? await slotsTab($, e)
       : tab === 'minify' ? await minifyTab($, e)
       : tab === 'overzicht' ? await overzichtTab($, e, p)
-      : <Text dimColor>Komt in de volgende stap.</Text>
+      : await stijlTab($, e, p)
 
     return (
       <Box flexDirection="column" gap={1} padding={1}>
