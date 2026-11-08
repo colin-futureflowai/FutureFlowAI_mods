@@ -90,3 +90,37 @@ test('praat als alleen slots oud is', () => {
   const dir = thuis({ niveau: 'O2' })
   assert.match(draai(dir, 'start', 's1', { FUTUREFLOW_HOME: ff }), /# minify -O2/)
 })
+
+// Zonder `oud`-bestand (eerste sessie ooit) beslist het script zelf, uit installed_plugins.json en settings.json.
+const OUD = 'minify@futureflowai-mods'
+function nepHome({ installed, settings } = {}) {
+  const home = mkdtempSync(join(tmpdir(), 'home-'))
+  mkdirSync(join(home, '.claude', 'plugins'), { recursive: true })
+  if (installed) writeFileSync(join(home, '.claude', 'plugins', 'installed_plugins.json'), installed)
+  if (settings) writeFileSync(join(home, '.claude', 'settings.json'), settings)
+  return home
+}
+const zonderOud = (home) => draai(thuis({ niveau: 'O2' }), 'start', 's1', { HOME: home })
+
+test('zonder oud-bestand: oude minify geinstalleerd en niet uitgezet -> zwijgt', () => {
+  const home = nepHome({ installed: JSON.stringify({ plugins: { [OUD]: [{}] } }) })
+  assert.equal(zonderOud(home), '')
+  const mee = nepHome({ installed: JSON.stringify({ plugins: { [OUD]: [{}] } }), settings: JSON.stringify({ enabledPlugins: { [OUD]: true } }) })
+  assert.equal(zonderOud(mee), '')
+})
+
+test('zonder oud-bestand: oude minify uitgezet in settings -> praat', () => {
+  const installed = JSON.stringify({ plugins: { [OUD]: [{}] } })
+  assert.match(zonderOud(nepHome({ installed, settings: `{ "enabledPlugins": { "${OUD}": false } }` })), /# minify -O2/)
+  assert.match(zonderOud(nepHome({ installed, settings: `{\n "enabledPlugins": {\n "${OUD}" :\n   false\n }\n}` })), /# minify -O2/)
+})
+
+test('zonder oud-bestand en zonder installed_plugins.json -> praat', () => {
+  assert.match(zonderOud(nepHome()), /# minify -O2/)
+})
+
+test('met leeg oud-bestand telt installed_plugins.json niet mee -> praat', () => {
+  const home = nepHome({ installed: JSON.stringify({ plugins: { [OUD]: [{}] } }) })
+  const ff = futureflowThuis('')
+  assert.match(draai(thuis({ niveau: 'O2' }), 'start', 's1', { HOME: home, FUTUREFLOW_HOME: ff }), /# minify -O2/)
+})

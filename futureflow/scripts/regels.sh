@@ -17,7 +17,17 @@ invoer=$(cat)
 
 # Oude minify-plugin nog aan: die geeft de regels mee, wij zeggen niets.
 ff="${FUTUREFLOW_HOME:-$HOME/.claude/futureflow}"
-[ -s "$ff/oud" ] && grep -q minify "$ff/oud" && exit 0
+if [ -e "$ff/oud" ]; then
+  grep -q minify "$ff/oud" && exit 0
+else
+  # De mod schreef `oud` nog niet (eerste sessie ooit, SessionStart komt eerder): zelf beslissen.
+  # Oude minify telt als aanwezig als hij geinstalleerd is en niet op `false` staat in settings.json.
+  oudnaam='"minify@futureflowai-mods"'
+  if grep -q "$oudnaam" "$HOME/.claude/plugins/installed_plugins.json" 2>/dev/null &&
+    ! tr '\n' ' ' < "$HOME/.claude/settings.json" 2>/dev/null | grep -Eq "$oudnaam[[:space:]]*:[[:space:]]*false"; then
+    exit 0
+  fi
+fi
 
 # session_id uit de JSON op stdin; alleen veilige tekens, het wordt een bestandsnaam.
 sessie=$(printf '%s' "$invoer" | tr '\n' ' ' | sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([A-Za-z0-9_-]*\)".*/\1/p')
