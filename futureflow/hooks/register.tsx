@@ -5,6 +5,7 @@ import { registerDashboard, startDashboard } from './dashboard'
 import { registerMinify, startMinify } from './minify'
 import { registerSkins, startSkins } from './skins/register'
 import { registerSlots, startSlots } from './slots'
+import { registerVoortgang } from './voortgang'
 
 const MARKETPLACE = 'futureflowai-mods'
 
@@ -13,6 +14,7 @@ export const register: Register = (on, options) => {
   registerMinify(on)
   registerDashboard(on)
   registerSkins(on)
+  registerVoortgang(on)
 
   // Schrijft welke oude plugins aanwezig zijn naar <state>/oud, voor regels.sh.
   on('session.start', async ($, e, next) => {

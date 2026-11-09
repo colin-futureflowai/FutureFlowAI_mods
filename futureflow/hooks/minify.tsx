@@ -6,6 +6,7 @@ import type { MinifyInkorting, MinifyNiveau, MinifyTeller } from '../types'
 import { failOpen, log, oud } from './ctx'
 import { openDashboard } from './paneel'
 import { skinsTurnComplete } from './skins/register'
+import { onthoudOpdracht } from './voortgang'
 
 import { herinnering, isUitVerzoek, leesCommando, NIVEAUS, regelsVoor, STANDAARD, subagentRegel } from '../lib/regels.mjs'
 import { inkorten, voetregel } from '../lib/uitvoer.mjs'
@@ -271,6 +272,14 @@ export async function startMinify($: Engine): Promise<void> {
 export const registerMinify = (on: Parameters<Register>[0]): void => {
   // "doe normaal" en dergelijke zetten minify uit.
   on('prompt.submit', async ($, e, next) => {
+    // Voortgang: het doel van de balk komt uit de laatste getypte opdracht. Een fout daar raakt minify niet.
+    if (!e.command && !e.isMeta && typeof e.text === 'string') {
+      try {
+        await onthoudOpdracht($, e.text)
+      } catch (err) {
+        failOpen($, err)
+      }
+    }
     if ((await oud($)).minify) return next(e)
     if (!e.command && !e.isMeta && isUitVerzoek(e.text) && (await niveau($)) !== 'uit') {
       await zetNiveau($, 'uit')

@@ -65,6 +65,12 @@ export type MinifyInkorting = {
   t: number
 }
 
+/** Eén stap van de voortgangsbalk (zelfde vorm als in lib/voortgang.d.mts). */
+export type Stap = { id: string; titel: string; status: 'klaar' | 'bezig' | 'open' }
+
+/** De takenlijst van de voortgangsbalk: doel (uit de opdracht), stappen en begintijd (epoch ms). */
+export type Lijst = { doel: string; stappen: Stap[]; begin: number }
+
 declare module 'claude-code' {
   interface EngineInterface {
     // What the skin-code mod adds, when it is installed (absent, or a call throws, when it
@@ -111,6 +117,16 @@ declare module 'claude-code' {
       'minify.reeks': number[] | null
       /** De laatste 8 inkortingen, nieuwste eerst. */
       'minify.recent': MinifyInkorting[] | null
+      /** Takenlijst van de hoofdsessie voor de voortgangsbalk; null = geen balk. */
+      'voortgang.lijst': Lijst | null
+      /** Uitgeklapt (true) of ingeklapt; null = nog niet gezet, dan geldt de store `voortgang.open`. */
+      'voortgang.open': boolean | null
+      /** Wanneer de lijst 100% werd (epoch ms); 0 = niet af. De ✓-regel blijft 5 s staan. */
+      'voortgang.klaarSinds': number
+      /** Doel uit de laatste getypte opdracht (eerste regel, max 60 tekens). */
+      'voortgang.opdracht': string
+      /** Telt op als de ✓-regel moet verdwijnen, zodat de balk opnieuw tekent. */
+      'voortgang.tik': number
     }
   }
 }

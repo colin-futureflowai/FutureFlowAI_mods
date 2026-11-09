@@ -31,6 +31,8 @@ import { commandOf, errorLine, isQuiet, quietLabel } from './quiet'
 import { unwrapCommand } from '../../lib/classify.mjs'
 import { MAX_MARKDOWN, replySegments } from './reply'
 import { hyperlinksFrom, touchOf } from './links'
+// futureflow: de voortgangsbalk tekent in dezelfde balk boven de prompt.
+import { STANDAARD_KLEUREN, voortgangRij } from '../voortgang'
 
 const SETTINGS = 'skins-settings'
 const GALLERY = 'skins-gallery'
@@ -728,6 +730,24 @@ async function naAanroep($: EngineInterface, e: any, ran: any, startedAt: number
   }
 }
 
+// futureflow: kleuren voor de voortgangsrij uit de skin: `ok` als accent, `muted` en `fg`.
+function kleurenVan(look: Look): { accent: string; mut: string; fg: string } {
+  const { palette } = look.skin
+  return { accent: palette.ok, mut: palette.muted, fg: palette.fg }
+}
+
+// futureflow: alleen de voortgangsrij, boven wat Claude Code of een andere mod daar tekent.
+async function alleenVoortgang($: EngineInterface, e: any, next: any, voortgang: RenderElement) {
+  const theirs = await next(e)
+  const { Box } = $.ui.resolve(e)
+  return (
+    <Box flexDirection="column">
+      {voortgang}
+      {theirs}
+    </Box>
+  )
+}
+
 // futureflow: een fout in een skin-hook laat de gebeurtenis gewoon door (fail-open), zoals bij slots en minify.
 function laatDoor($: EngineInterface, e: any, next: any) {
   if (next.error?.kind !== 're-entry') $.ui.log(`skins: ${next.error?.message ?? next.error?.kind}`, { to: 'debug' })
@@ -1233,15 +1253,23 @@ export const registerSkins = (on: Parameters<Register>[0]): void => {
   // The band above the prompt: context and plan limits. Another mod's drawing there,
   // and a survey, keep their place.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+    // futureflow: een enquête houdt de balk; dan ook geen voortgangsrij.
+    if (e.props.hasSurvey) {
+      return next(e)
+    }
+
     const active = await activeSkin($)
     const usage = await read($, usageAtom)
     // Drawn from the clock so a countdown switched on shows at once; reading the atom
     // redraws the band when the minute tick changes one.
     const countdowns = active?.prefs.countdown === true ? (await read($, countdownsAtom), countdownsOf(usage, await $.clock.now())) : {}
     const meters = metersOf(usage, countdowns)
+    // futureflow: de voortgangsrij (null zonder takenlijst), in de kleuren van de skin of anders die van FutureFlowAI.
+    const voortgang = await voortgangRij($, e, active === null ? STANDAARD_KLEUREN : kleurenVan(lookOf($.ui.resolve(e), active, e.surface)))
 
-    if (active === null || !active.prefs.band || e.props.hasSurvey || meters.length === 0) {
-      return next(e)
+    if (active === null || !active.prefs.band || meters.length === 0) {
+      // futureflow: zonder verbruiksbalk staat alleen de voortgangsrij boven wat eronder tekent.
+      return voortgang === null ? next(e) : alleenVoortgang($, e, next, voortgang)
     }
 
     const plain = lookOf($.ui.resolve(e), active, e.surface)
@@ -1265,15 +1293,35 @@ export const registerSkins = (on: Parameters<Register>[0]): void => {
     }
     const look = { ...plain, ...(plain.svg === undefined ? {} : { isFirstDraw: await firstDraws($, e, active.prefs) }) }
 
+    const band = usageBand(look, meters, active.prefs.compact && !e.props.isWorking && !isCompacting, compact)
+
     return withSettle(
       $,
       e,
-      <Box flexDirection="column">
-        {usageBand(look, meters, active.prefs.compact && !e.props.isWorking && !isCompacting, compact)}
-        {theirs}
-      </Box>,
+      // futureflow: de voortgangsrij boven de verbruiksbalk; zonder lijst dezelfde boom als claude-skins.
+      voortgang === null ? (
+        <Box flexDirection="column">
+          {band}
+          {theirs}
+        </Box>
+      ) : (
+        <Box flexDirection="column">
+          {voortgang}
+          {band}
+          {theirs}
+        </Box>
+      ),
     )
-  })
+  }).catch((async ($: EngineInterface, e: any, next: any) => {
+    // futureflow: faalt de skin hier, dan tekent alleen de voortgangsrij, in de kleuren van FutureFlowAI.
+    if (next.error?.kind === 're-entry') {
+      return next(e)
+    }
+
+    $.ui.log(`skins: ${next.error?.message ?? next.error?.kind}`, { to: 'debug' })
+    const voortgang = e.props?.hasSurvey ? null : await voortgangRij($, e, STANDAARD_KLEUREN)
+    return voortgang === null ? next(e) : alleenVoortgang($, e, next, voortgang)
+  }) as any)
 
   // Claude Code's own dialog stays whole: the skin only adds a band above it.
   on('ui.render', { component: 'AskUserQuestion' }, async ($, e, next) => {

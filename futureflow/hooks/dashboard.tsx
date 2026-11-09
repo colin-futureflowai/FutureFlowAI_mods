@@ -8,6 +8,7 @@ import { minifyTab, niveauLezen } from './minify'
 import { openDashboard, PANE, TABS } from './paneel'
 import { openSkinSettings, setSkinPrefs, skinPrefs } from './skins/register'
 import { slotsTab, startSlotsTicker } from './slots'
+import { balkCommando, stappenRijen, voortgangLijst } from './voortgang'
 
 import { kpis } from '../lib/overzicht.mjs'
 import type { Kpi } from '../lib/overzicht.mjs'
@@ -67,6 +68,7 @@ async function overzichtTab($: Engine, e: any, p: ReturnType<typeof palet>) {
     context = null
   }
   const lijst = kpis({ teller, perNiveau, niveau, snapshot, context })
+  const voortgang = await voortgangLijst($)
   const kleur = (k: Kpi) => (k.toon === 'oranje' ? p.oranje : k.toon === 'mut' ? p.mut : p.groen)
   const snelkoppeling = (t: DashboardTab) => (
     <Button
@@ -94,6 +96,7 @@ async function overzichtTab($: Engine, e: any, p: ReturnType<typeof palet>) {
           ))}
         </Box>
       )}
+      {voortgang === null ? '' : stappenRijen(el, voortgang, { accent: p.groen, mut: p.mut, fg: p.inkt }, await $.clock.now())}
       <Box flexDirection="row" gap={2}>
         {(['slots', 'minify', 'stijl'] as const).map(snelkoppeling)}
       </Box>
@@ -177,6 +180,7 @@ export const registerDashboard = (on: Parameters<Register>[0]): void => {
       const woorden = (e.args ?? '').trim().toLowerCase().split(/\s+/)
       const woord = woorden[0] ?? ''
       if (woord === 'stijl' && woorden[1]) return await stijlCommando($, woorden[1])
+      if (woord === 'balk') return await balkCommando($)
       if (woord && !(TABS as readonly string[]).includes(woord)) {
         return { text: `Onbekende tab "${woord}". Gebruik: /futureflow ${TABS.join('|')}` }
       }
