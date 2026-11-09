@@ -171,6 +171,8 @@ declare module 'claude-code' {
       'api.toestand': ApiToestand | null
       /** Telt op na een actie in de tab API, zodat die opnieuw tekent (en het key-veld leeg wordt). */
       'api.versie': number
+      /** Takenlijst-tools in de terminal aan (env in settings.json); null = nog niet gelezen. */
+      'stijl.takenlijst': boolean | null
     }
   }
 }

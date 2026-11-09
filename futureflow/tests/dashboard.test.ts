@@ -6,8 +6,9 @@ const WRITES: string[] = []
 const STORED: Array<{ key: string; value: any }> = []
 
 // Nep-omgeving: geen oude plugins, neppe CLI, en een ui.open die we kunnen afluisteren.
-function fake(on: any, o: { oud?: boolean; storeKapot?: boolean } = {}) {
+function fake(on: any, o: { oud?: boolean; storeKapot?: boolean; takenFout?: boolean } = {}) {
   const flags = { stuk: false, cliCalls: 0 }
+  const taken = { aan: false, calls: [] as string[], env: [] as any[] }
   const toasts: string[] = []
   const opened: Array<{ id: string; title?: string }> = []
   on('env.get', ($: any, e: { name: string }) => ({ value: e.name === 'HOME' ? '/home/t' : undefined }))
@@ -29,8 +30,19 @@ function fake(on: any, o: { oud?: boolean; storeKapot?: boolean } = {}) {
     return { value: { isPlaced: true } }
   })
   const clock = mock.clock(on)
-  on('process.run', () => { flags.cliCalls++; return { value: { exitCode: 0, stdout: CLI.stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } } })
-  return { opened, clock, flags, toasts }
+  on('process.run', ($: any, e: { argv: string[]; init?: { env?: any } }) => {
+    const i = e.argv.indexOf('takenlijst')
+    if (i >= 0) {
+      const actie = e.argv[i + 1] ?? ''
+      taken.calls.push(actie)
+      taken.env.push(e.init?.env)
+      if (o.takenFout) return { value: { exitCode: 2, stdout: '', stderr: '[api] kapot\n', isStdoutTruncated: false, isStderrTruncated: false } }
+      if (actie === 'aan') taken.aan = true
+      if (actie === 'uit') taken.aan = false
+      return { value: { exitCode: 0, stdout: JSON.stringify({ aan: taken.aan }) + '\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    }
+    flags.cliCalls++; return { value: { exitCode: 0, stdout: CLI.stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } } })
+  return { opened, clock, flags, toasts, taken }
 }
 
 const START = { cwd: '/r', surface: 'terminal', isInteractive: true } as any
@@ -253,4 +265,29 @@ test('de slots-tikker faalt open als ui.panes gooit', async ($, on) => {
   f.flags.stuk = true
   await f.clock.advance(3000)
   expect(f.toasts.length).toBe(1)
+})
+
+test('stijl-tab: takenlijst-knop leest de stand één keer en zet hem via de CLI met vaste env', async ($, on) => {
+  const f = fake(on)
+  await run($, 'futureflow', 'stijl')
+  const ui = await $.ui.mount(PANE('terminal'))
+  expect(await ui.find({ type: 'Text', text: /Takenlijst in de terminal/ })).toBeDefined()
+  await ui.press({ key: 'stijl-takenlijst' } as any)
+  expect(f.taken.calls.filter(c => c === 'status').length).toBe(1)
+  expect(f.taken.calls).toContain('aan')
+  expect(f.taken.env.every(env => env?.SETTINGS_JSON === '' && env?.SECURITY_BIN === '/usr/bin/security')).toBe(true)
+  expect(f.toasts.some(t => t.includes('Takenlijst') && t.includes('aan'))).toBe(true)
+  await ui.press({ key: 'stijl-takenlijst' } as any)
+  expect(f.taken.calls).toContain('uit')
+  expect(f.taken.calls.filter(c => c === 'status').length).toBe(1)
+  await ui.unmount()
+})
+
+test('stijl-tab: een mislukte takenlijst-wissel geeft een toast en gooit niet', async ($, on) => {
+  const f = fake(on, { takenFout: true })
+  await run($, 'futureflow', 'stijl')
+  const ui = await $.ui.mount(PANE('terminal'))
+  await ui.press({ key: 'stijl-takenlijst' } as any)
+  expect(f.toasts.some(t => t.includes('Takenlijst niet omgezet'))).toBe(true)
+  await ui.unmount()
 })

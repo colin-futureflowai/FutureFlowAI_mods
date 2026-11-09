@@ -3,7 +3,7 @@ import type { EngineInterface as Engine, Register } from 'claude-code'
 
 import type { DashboardTab, MinifyTeller, SlotsSnapshot } from '../types'
 
-import { apiTab, verversApi } from './api'
+import { apiTab, takenlijstStand, verversApi, zetTakenlijst } from './api'
 import { connectorsTab, openConnectors } from './connectors'
 import { failOpen, oud } from './ctx'
 import { minifyTab, niveauLezen } from './minify'
@@ -137,6 +137,7 @@ async function stijlTab($: Engine, e: any, p: ReturnType<typeof palet>) {
   }
   const aan = prefs.skin !== 'off'
   const snel = SNEL.filter(n => names.includes(n))
+  const taken = await takenlijstStand($)
   return (
     <Box flexDirection="column" gap={1}>
       <Box flexDirection="column">
@@ -160,6 +161,12 @@ async function stijlTab($: Engine, e: any, p: ReturnType<typeof palet>) {
             <Text>{`${prefs[sleutel] ? '☑' : '☐'} ${naam}`}</Text>
           </Button>
         ))}
+      </Box>
+      <Box flexDirection="column">
+        <Button key="stijl-takenlijst" onPress={async () => { await zetTakenlijst($, !taken) }}>
+          <Text>{`${taken ? '☑' : '☐'} Takenlijst in de terminal (nodig voor de voortgangsbalk)`}</Text>
+        </Button>
+        <Text dimColor>Geldt voor nieuwe sessies. Zet CLAUDE_CODE_ENABLE_TODO_TOOLS in ~/.claude/settings.json.</Text>
       </Box>
       <Box flexDirection="row" gap={2}>
         <Button key="stijl-alles" hotkey="a" onPress={() => openSkinSettings($)}>

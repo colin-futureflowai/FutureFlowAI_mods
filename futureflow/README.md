@@ -33,6 +33,8 @@ Settings live in the plugin store under `skins.prefs`. What changed against upst
 
 When Claude works through a task list (TaskCreate/TaskUpdate, TodoWrite, or the desktop app's plan), a progress bar sits above the prompt, in the same band as the skin's usage meters: `▰▰▰▱▱ 60% ▸ 3/5 <current step>`. Press `v` (or `/futureflow balk`) to expand it to all steps with the goal from your last prompt. When every step is done, or the desktop app wraps up the turn, it shows a ✓ line for 5 seconds and disappears. Only the main session counts; subagents' lists don't show.
 
+An interactive terminal session has no task-list tool unless `CLAUDE_CODE_ENABLE_TODO_TOOLS=true` is set. The Style tab has a checkbox *Takenlijst in de terminal* that sets it for new sessions under `env` in `~/.claude/settings.json` (other settings and env entries stay; off removes only that entry).
+
 ## Connectors
 
 The Connectors tab shows how many tokens each MCP server's tools take in this session's context, and lets you turn a server off for this project from the next session on, the same list `/mcp` uses (`disabledMcpServers` in `~/.claude.json`). The project is the git root of the session's folder (a worktree is its own project), otherwise the folder itself.

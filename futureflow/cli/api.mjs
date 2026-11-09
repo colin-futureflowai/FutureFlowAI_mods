@@ -6,6 +6,7 @@
 //   api wis-key                 item uit de sleutelhanger               → JSON { gewist }
 //   api status                                                          → JSON { heeftKey, staart, modus, vreemdeHelper, fout? }
 //   api modus api|abonnement    zet of verwijdert alleen onze helper    → JSON { modus, gewijzigd }
+//   api takenlijst aan|uit|status  env.CLAUDE_CODE_ENABLE_TODO_TOOLS = "true" → JSON { aan } (aan/uit ook { gewijzigd })
 //
 // De key staat nooit in argv (ook niet van `security`: die krijgt de opdracht via stdin van
 // `security -i`) en nooit op stdout of stderr; alleen de laatste 4 tekens.
@@ -24,6 +25,7 @@ import { ACCOUNT, geldigeKey, HELPER, SERVICE } from '../lib/api.mjs'
 const BESTAND = process.env.SETTINGS_JSON || path.join(os.homedir(), '.claude', 'settings.json')
 const SECURITY = process.env.SECURITY_BIN || '/usr/bin/security'
 const POGINGEN = 3
+const TODO_VAR = 'CLAUDE_CODE_ENABLE_TODO_TOOLS'
 const NIET_GEVONDEN = 44
 
 class Fout extends Error {
@@ -179,6 +181,70 @@ function zetModus(naar) {
   throw new Fout(`${BESTAND} veranderde steeds tijdens het schrijven; niets gewijzigd, probeer het opnieuw`, 2)
 }
 
+const takenlijstAan = data => !!data?.env && typeof data.env === 'object' && data.env[TODO_VAR] === 'true'
+
+// Zet of haalt alleen env.CLAUDE_CODE_ENABLE_TODO_TOOLS weg; alle andere sleutels en env-regels blijven.
+function zetTakenlijst(naar) {
+  const doel = doelPad()
+  for (let poging = 1; poging <= POGINGEN; poging++) {
+    const gelezen = lees(doel)
+    if (takenlijstAan(gelezen?.data) === naar) return { aan: naar, gewijzigd: false }
+    if (!gelezen) {
+      // Geen settings.json (alleen bij aan): aanmaken, nooit over een intussen ontstaan bestand heen.
+      const tekst = JSON.stringify({ env: { [TODO_VAR]: 'true' } }, null, 2) + '\n'
+      fs.mkdirSync(path.dirname(doel), { recursive: true })
+      const tmp = path.join(path.dirname(doel), `.${path.basename(doel)}.futureflow-${process.pid}-${Date.now()}.tmp`)
+      try {
+        fs.writeFileSync(tmp, tekst, { mode: 0o600, flag: 'wx' })
+        fs.linkSync(tmp, doel)
+        fs.rmSync(tmp, { force: true })
+        return { aan: true, gewijzigd: true }
+      } catch (err) {
+        fs.rmSync(tmp, { force: true })
+        if (err.code === 'EEXIST') continue
+        throw new Fout(`${BESTAND} niet geschreven (${err.code ?? err.message}); niets gewijzigd`, 2)
+      }
+    }
+    const { tekst, data, stat } = gelezen
+    if (naar) {
+      if (!data.env || typeof data.env !== 'object' || Array.isArray(data.env)) {
+        if (data.env !== undefined) throw new Fout(`env in ${BESTAND} is geen object; niets gewijzigd`, 2)
+        data.env = {}
+      }
+      data.env[TODO_VAR] = 'true'
+    } else {
+      delete data.env[TODO_VAR]
+      if (Object.keys(data.env).length === 0) delete data.env
+    }
+    const mode = stat.mode & 0o777
+    const tmp = path.join(path.dirname(doel), `.${path.basename(doel)}.futureflow-${process.pid}-${Date.now()}.tmp`)
+    try {
+      fs.writeFileSync(tmp, opmaak(tekst, data), { mode, flag: 'wx' })
+      fs.chmodSync(tmp, mode)
+      let nu
+      try { nu = fs.statSync(doel) } catch { nu = undefined }
+      if (!nu || !zelfde(nu, stat)) {
+        fs.rmSync(tmp, { force: true })
+        if (!nu) throw new Fout(`${BESTAND} verdween tijdens het schrijven; niets gewijzigd`, 2)
+        continue
+      }
+      fs.renameSync(tmp, doel)
+    } catch (err) {
+      fs.rmSync(tmp, { force: true })
+      if (err instanceof Fout) throw err
+      throw new Fout(`${BESTAND} niet geschreven (${err.code ?? err.message}); niets gewijzigd`, 2)
+    }
+    return { aan: naar, gewijzigd: true }
+  }
+  throw new Fout(`${BESTAND} veranderde steeds tijdens het schrijven; niets gewijzigd, probeer het opnieuw`, 2)
+}
+
+function takenlijst(actie) {
+  if (actie === 'status') return { aan: takenlijstAan(lees(doelPad())?.data) }
+  if (actie !== 'aan' && actie !== 'uit') throw new Fout('kies: takenlijst aan|uit|status', 1)
+  return zetTakenlijst(actie === 'aan')
+}
+
 // Status zonder te falen op één onderdeel: een fout komt in `fout`.
 function status() {
   const uit = { heeftKey: false, staart: '', modus: 'abonnement', vreemdeHelper: false }
@@ -208,8 +274,9 @@ export function main(args) {
     else if (cmd === 'wis-key' && rest.length === 0) console.log(JSON.stringify(wisKey()))
     else if (cmd === 'status' && rest.length === 0) console.log(JSON.stringify(status()))
     else if (cmd === 'modus' && rest.length === 1) console.log(JSON.stringify(zetModus(rest[0])))
+    else if (cmd === 'takenlijst' && rest.length === 1) console.log(JSON.stringify(takenlijst(rest[0])))
     else {
-      console.error('Gebruik: api zet-key (key via stdin) | api wis-key | api status | api modus api|abonnement')
+      console.error('Gebruik: api zet-key (key via stdin) | api wis-key | api status | api modus api|abonnement | api takenlijst aan|uit|status')
       return 1
     }
     return 0

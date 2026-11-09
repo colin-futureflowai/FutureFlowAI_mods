@@ -54,6 +54,46 @@ async function cli($: Engine, args: string[], stdin?: string) {
   return $.process.run(['/usr/bin/env', 'node', cliPath($), ...args], { ...init, env: { ...CLI_ENV, PATH } })
 }
 
+// Takenlijst in de terminal (tab Stijl): env CLAUDE_CODE_ENABLE_TODO_TOOLS in settings.json via
+// `cli/api.mjs takenlijst`. null = nog niet gelezen; de stand wordt één keer gelezen en daarna
+// alleen bij een klik bijgewerkt, nooit per tekenbeurt.
+const takenAtom = atom({ plugin: 'futureflow', key: 'stijl.takenlijst' } as const, null as boolean | null)
+let takenLeest = false
+
+export async function takenlijstStand($: Engine): Promise<boolean> {
+  const stand = await read($, takenAtom)
+  if (stand !== null) return stand
+  if (!takenLeest) {
+    takenLeest = true
+    void (async () => {
+      let aan = false
+      try {
+        const r = await cli($, ['takenlijst', 'status'])
+        if (r.exitCode === 0) aan = JSON.parse(r.stdout.trim().split('\n').pop() ?? '{}').aan === true
+      } catch (err) {
+        failOpen($, err)
+      }
+      await update($, takenAtom, () => aan)
+    })().catch(err => failOpen($, err)).finally(() => { takenLeest = false })
+  }
+  return false
+}
+
+// Zet de takenlijst aan of uit en meldt het resultaat in één toast.
+export async function zetTakenlijst($: Engine, aan: boolean): Promise<void> {
+  try {
+    const r = await cli($, ['takenlijst', aan ? 'aan' : 'uit'])
+    if (r.exitCode !== 0) {
+      $.ui.toast(`Takenlijst niet omgezet: ${foutVan(r)}`)
+      return
+    }
+    await update($, takenAtom, () => aan)
+    $.ui.toast(aan ? 'Takenlijst in de terminal staat aan vanaf de volgende sessie.' : 'Takenlijst in de terminal staat uit vanaf de volgende sessie.')
+  } catch (err) {
+    failOpen($, err)
+  }
+}
+
 function foutVan(r: { exitCode: number; stderr: string }): string {
   return r.stderr.trim().replace(/^\[api\] /, '').slice(0, 200) || `exitcode ${r.exitCode}`
 }

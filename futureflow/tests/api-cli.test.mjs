@@ -181,3 +181,44 @@ test('foute argumenten: exit 1, niets geschreven', () => {
   assert.equal(cli(['onbekend']).status, 1)
   assert.equal(fs.readFileSync(bestand, 'utf8'), '{}')
 })
+
+test('takenlijst aan/uit/status: alleen die env-regel, andere sleutels en env-regels blijven', () => {
+  fs.writeFileSync(bestand, JSON.stringify({ ...BASIS(), env: { ANDERS: '1' } }, null, 2) + '\n')
+  assert.deepEqual(JSON.parse(cli(['takenlijst', 'status']).stdout), { aan: false })
+  const aan = cli(['takenlijst', 'aan'])
+  assert.equal(aan.status, 0, aan.stderr)
+  assert.deepEqual(lees(), { ...BASIS(), env: { ANDERS: '1', CLAUDE_CODE_ENABLE_TODO_TOOLS: 'true' } })
+  assert.deepEqual(JSON.parse(cli(['takenlijst', 'status']).stdout), { aan: true })
+  assert.equal(JSON.parse(cli(['takenlijst', 'aan']).stdout).gewijzigd, false)
+  const uit = cli(['takenlijst', 'uit'])
+  assert.equal(uit.status, 0, uit.stderr)
+  assert.deepEqual(lees(), { ...BASIS(), env: { ANDERS: '1' } })
+  assert.deepEqual(rest(), [])
+})
+
+test('takenlijst: env wordt aangemaakt, en verdwijnt weer als hij leeg raakt', () => {
+  fs.writeFileSync(bestand, JSON.stringify(BASIS(), null, 2) + '\n')
+  cli(['takenlijst', 'aan'])
+  assert.deepEqual(lees().env, { CLAUDE_CODE_ENABLE_TODO_TOOLS: 'true' })
+  cli(['takenlijst', 'uit'])
+  assert.deepEqual(lees(), BASIS())
+})
+
+test('takenlijst: ontbrekend bestand wordt aangemaakt; uit en status maken niets', () => {
+  assert.deepEqual(JSON.parse(cli(['takenlijst', 'status']).stdout), { aan: false })
+  assert.equal(cli(['takenlijst', 'uit']).status, 0)
+  assert.ok(!fs.existsSync(bestand))
+  assert.equal(cli(['takenlijst', 'aan']).status, 0)
+  assert.deepEqual(lees(), { env: { CLAUDE_CODE_ENABLE_TODO_TOOLS: 'true' } })
+})
+
+test('takenlijst: kapotte JSON geeft exit 2 en schrijft niets', () => {
+  fs.writeFileSync(bestand, '{ kapot')
+  for (const a of ['aan', 'uit', 'status']) {
+    const r = cli(['takenlijst', a])
+    assert.equal(r.status, 2)
+  }
+  assert.equal(fs.readFileSync(bestand, 'utf8'), '{ kapot')
+  assert.deepEqual(rest(), [])
+  assert.equal(cli(['takenlijst', 'misschien']).status, 1)
+})
