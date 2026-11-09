@@ -1,5 +1,6 @@
 // Takenlijst voor de voortgangsbalk, uit drie bronnen: TaskCreate/TaskUpdate, TodoWrite en
-// mcp__ccd_turn__update_plan. Pure functies, zonder Node-API's; de hooks-module gebruikt ze ook.
+// mcp__ccd_turn__update_plan; mcp__ccd_turn__wrap_up sluit de lijst af. Pure functies, zonder
+// Node-API's; de hooks-module gebruikt ze ook.
 // Onbekende of foute invoer laat de lijst ongewijzigd (zelfde object terug), nooit een fout.
 
 const STATUS = { completed: 'klaar', in_progress: 'bezig', pending: 'open' }
@@ -119,6 +120,11 @@ export function pasToe(lijst, tool, input, result, nu, opdracht) {
       }
       case 'mcp__ccd_turn__update_plan':
         return updatePlan(lijst, input, tijd, opdracht)
+      case 'mcp__ccd_turn__wrap_up':
+        // De desktop-app vinkt bij wrap_up de hele lijst af zonder update_plan: alles klaar.
+        return lijst === null || lijst.stappen.every((s) => s.status === 'klaar')
+          ? lijst
+          : { ...lijst, stappen: lijst.stappen.map((s) => ({ ...s, status: 'klaar' })) }
       default:
         return lijst
     }

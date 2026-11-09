@@ -2,7 +2,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { getal, perServer, procent, totalen } from '../lib/connectors.mjs'
+import { getal, perServer, procent, totalen, verdeel, wisselbaar } from '../lib/connectors.mjs'
 
 const T = (serverName, tokens, isLoaded = true) => ({ name: `mcp__${serverName}__t${tokens}`, serverName, tokens, isLoaded })
 
@@ -43,4 +43,25 @@ test('totalen, getal en procent', () => {
   assert.equal(procent(100, 200000), '<1%')
   assert.equal(procent(0, 200000), '0%')
   assert.equal(procent(5, 0), '0%')
+})
+
+test('wisselbaar: claude.ai, plugin: en eigen configuratie; app- en mod-servers niet', () => {
+  const eigen = ['n8n-mcp', 'kie-ai']
+  for (const s of ['claude.ai Gmail', 'plugin:context7:context7', 'n8n-mcp', 'kie-ai']) assert.equal(wisselbaar(s, eigen), true, s)
+  for (const s of ['ccd_session', 'ccd_turn', 'Claude_Browser', 'Claude_Code_iOS_Simulator', 'terminal', 'visualize', 'futureflow', 'plugin-authoring', 'mcp-registry', 'scheduled-tasks', '', undefined]) {
+    assert.equal(wisselbaar(s, eigen), false, String(s))
+  }
+  assert.equal(wisselbaar('n8n-mcp', undefined), false)
+})
+
+test('verdeel: knoppen voor wisselbare en uitgezette servers, de rest als één optelsom', () => {
+  const rijen = perServer(
+    [T('ccd_session', 900), T('ccd_turn', 100, false), T('Claude_Browser', 400), T('futureflow', 50), T('n8n-mcp', 300), T('claude.ai Gmail', 200)],
+    ['terminal'],
+  )
+  const { eigen, intern } = verdeel(rijen, ['n8n-mcp'])
+  assert.deepEqual(eigen.map(r => r.server), ['n8n-mcp', 'claude.ai Gmail', 'terminal'])
+  assert.deepEqual(intern, { servers: 4, tools: 4, tokens: 1450, inContext: 1350 })
+  // Het totaal blijft over alle rijen.
+  assert.deepEqual(totalen(rijen), { tokens: 1950, inContext: 1850 })
 })

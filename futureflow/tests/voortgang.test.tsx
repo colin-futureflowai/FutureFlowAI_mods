@@ -57,7 +57,7 @@ function fake(on: On, o: { skin?: string } = {}) {
   on('tool.call', ($: any, e: any) => {
     if (e.subject === 'Mislukt') return { isError: true, result: 'fout', text: 'fout' }
     if (e.tool === 'TaskCreate') return { result: { task: { id: String(++id), subject: e.subject } } }
-    if (e.tool === 'mcp__ccd_turn__update_plan') return { result: [{ type: 'text', text: 'ok' }] }
+    if (e.tool === 'mcp__ccd_turn__update_plan' || e.tool === 'mcp__ccd_turn__wrap_up') return { result: [{ type: 'text', text: 'ok' }] }
     return { result: { success: true, taskId: e.taskId ?? '', updatedFields: [] } }
   })
   return { clock, store, toasts }
@@ -183,6 +183,22 @@ test('bij 100% nog 5 s een ✓-regel, daarna geen rij', async ($, on) => {
   expect(await ui.find({ type: 'Text', text: /✓ Klusje: klaar/ })).toBeDefined()
   await clock.advance(1000)
   expect(await ui.find({ type: 'Text', text: /Klusje/ })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /FutureFlowAI/ })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('wrap_up zonder update_plan: 100%, 5 s een ✓-regel, daarna geen rij', async ($, on) => {
+  const { clock } = fake(on)
+  await $.prompt.submit({ text: 'Plan' } as any)
+  const items = ['Kijken', 'Bouwen', 'Testen'].map((content, i) => ({ content, status: i === 0 ? 'in_progress' : 'pending' }))
+  await $.tool.call({ tool: 'mcp__ccd_turn__update_plan', items, scope: 'first_task' } as any)
+  await $.tool.call({ tool: 'mcp__ccd_turn__update_plan', advance: true } as any)
+  await $.tool.call({ tool: 'mcp__ccd_turn__update_plan', advance: true } as any)
+  const ui = await $.ui.mount(BAND('terminal'))
+  expect(await ui.find({ type: 'Text', text: /▸ 3\/3 Testen/ })).toBeDefined()
+  await $.tool.call({ tool: 'mcp__ccd_turn__wrap_up', recap: 'Alles af.' } as any)
+  expect(await ui.find({ type: 'Text', text: /✓ Plan: klaar/ })).toBeDefined()
+  await clock.advance(5000)
   expect(await ui.find({ type: 'Text', text: /FutureFlowAI/ })).toBeUndefined()
   await ui.unmount()
 })

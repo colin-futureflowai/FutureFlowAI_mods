@@ -4,3 +4,8 @@ export function perServer(mcpTools: McpTool[] | null | undefined, uit: string[] 
 export function totalen(rijen: ServerRij[]): { tokens: number; inContext: number }
 export function getal(n: number): string
 export function procent(deel: number, geheel: number): string
+export function wisselbaar(server: unknown, geconfigureerd: string[] | null | undefined): boolean
+export function verdeel(
+  rijen: ServerRij[],
+  geconfigureerd: string[] | null | undefined,
+): { eigen: ServerRij[]; intern: { servers: number; tools: number; tokens: number; inContext: number } }

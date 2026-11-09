@@ -22,26 +22,46 @@ export function masker(s) {
 }
 
 // Geschatte prijzen in USD per miljoen tokens (input / output / cache lezen / cache schrijven 5 min),
-// stand 2026-11-09 volgens de prijspagina van Anthropic. Schattingen: de factuur kan afwijken.
+// per model-id. Bron: prijspagina op platform.claude.com, opgehaald 2026-11-09. Schattingen: de factuur
+// kan afwijken. Haiku 5.5 heeft twee prijzen: tot 100k tokens prompt, en daarboven (`lang`).
 export const PRIJZEN = {
-  opus: { input: 15, output: 75, cacheLezen: 1.5, cacheSchrijven: 18.75 },
-  sonnet: { input: 3, output: 15, cacheLezen: 0.3, cacheSchrijven: 3.75 },
-  haiku: { input: 1, output: 5, cacheLezen: 0.1, cacheSchrijven: 1.25 },
+  'opus-5.5': { input: 4, output: 20, cacheLezen: 0.2, cacheSchrijven: 5 },
+  'opus-5': { input: 5, output: 25, cacheLezen: 0.5, cacheSchrijven: 6.25 },
+  'opus-4.8': { input: 5, output: 25, cacheLezen: 0.5, cacheSchrijven: 6.25 },
+  'opus-4.7': { input: 5, output: 25, cacheLezen: 0.5, cacheSchrijven: 6.25 },
+  'opus-4.6': { input: 5, output: 25, cacheLezen: 0.5, cacheSchrijven: 6.25 },
+  'opus-4.5': { input: 5, output: 25, cacheLezen: 0.5, cacheSchrijven: 6.25 },
+  'sonnet-5.5': { input: 2, output: 10, cacheLezen: 0.1, cacheSchrijven: 2.5 },
+  'sonnet-5': { input: 2, output: 10, cacheLezen: 0.2, cacheSchrijven: 2.5 },
+  'sonnet-4.6': { input: 3, output: 15, cacheLezen: 0.3, cacheSchrijven: 3.75 },
+  'sonnet-4.5': { input: 3, output: 15, cacheLezen: 0.3, cacheSchrijven: 3.75 },
+  'haiku-5.5': {
+    input: 0.1, output: 0.5, cacheLezen: 0.01, cacheSchrijven: 0.125,
+    lang: { vanaf: 100_000, input: 0.5, output: 2.5, cacheLezen: 0.05, cacheSchrijven: 0.625 },
+  },
+  'haiku-4.5': { input: 1, output: 5, cacheLezen: 0.1, cacheSchrijven: 1.25 },
 }
+// Onbekend model: prijzen van Sonnet 5.5.
+export const ONBEKEND = 'sonnet-5.5'
 
 const telling = n => (typeof n === 'number' && Number.isFinite(n) && n > 0 ? n : 0)
 
-// Modelfamilie uit het model-id (`claude-opus-4-…` → opus); onbekend → sonnet.
-export function familie(model) {
+// Sleutel in PRIJZEN uit het model-id: `claude-opus-5-5` → opus-5.5, `claude-sonnet-4-6-20260101` →
+// sonnet-4.6, `claude-haiku-5-5[1m]` → haiku-5.5, `claude-sonnet-5` → sonnet-5. Onbekend → ONBEKEND.
+export function prijsSleutel(model) {
   const m = typeof model === 'string' ? model.toLowerCase() : ''
-  for (const f of ['opus', 'sonnet', 'haiku']) if (m.includes(f)) return f
-  return 'sonnet'
+  const g = /(opus|sonnet|haiku)-(\d{1,2})(?:-(\d{1,2}))?(?=$|[-[@])/.exec(m)
+  if (!g) return ONBEKEND
+  const sleutel = g[3] !== undefined ? `${g[1]}-${g[2]}.${g[3]}` : `${g[1]}-${g[2]}`
+  return Object.hasOwn(PRIJZEN, sleutel) ? sleutel : ONBEKEND
 }
 
 // Kosten van één beurt in USD.
 export function kosten(usage, prijzen = PRIJZEN) {
   if (!usage || typeof usage !== 'object') return 0
-  const p = prijzen[familie(usage.model)] ?? prijzen.sonnet ?? PRIJZEN.sonnet
+  const basis = prijzen[prijsSleutel(usage.model)] ?? prijzen[ONBEKEND] ?? PRIJZEN[ONBEKEND]
+  const prompt = telling(usage.input_tokens) + telling(usage.cache_read_input_tokens) + telling(usage.cache_creation_input_tokens)
+  const p = basis.lang && prompt > basis.lang.vanaf ? basis.lang : basis
   const som =
     telling(usage.input_tokens) * p.input +
     telling(usage.output_tokens) * p.output +
@@ -91,16 +111,29 @@ export function toestandVan(ruw) {
   if (d && typeof d === 'object' && typeof d.label === 'string') {
     t.overgeschakeldDoor = { label: d.label, ...(typeof d.resetsAt === 'number' && Number.isFinite(d.resetsAt) ? { resetsAt: d.resetsAt } : {}) }
   }
+  if (typeof r.handmatigTot === 'number' && Number.isFinite(r.handmatigTot)) t.handmatigTot = r.handmatigTot
   return t
 }
 
-// Wisselen of niet. Naar API: auto aan, modus abonnement en een venster ≥ hoog (het volste telt).
-// Terug: modus api en overgeschakeld door een venster; is dat venster gemeten (en nog niet verlopen),
-// dan pas onder `laag`, anders pas na zijn resetsAt. Nooit binnen WACHTTIJD na de vorige wissel.
+// Hoe lang een venster duurt (ms), voor als de meting geen resetsAt geeft.
+export function horizon(label) {
+  return String(label).startsWith('5u') ? 5 * 3_600_000 : 7 * 24 * 3_600_000
+}
+
+// Metingen die nog gelden: zonder resetsAt, of met een resetsAt in de toekomst.
+const geldig = (limieten, nu) => (Array.isArray(limieten) ? limieten : []).filter(l => l && (l.resetsAt === undefined || l.resetsAt > nu))
+
+// Wisselen of niet. Nooit binnen WACHTTIJD na de vorige wissel, en niet zolang een keuze met de hand
+// geldt (`handmatigTot`).
+// Naar API: auto aan, modus abonnement en een venster ≥ hoog (het volste telt); zonder resetsAt
+// rekent `door` met de lengte van het venster.
+// Terug: modus api, overgeschakeld door een venster en geen enkel gemeten venster meer ≥ hoog; is het
+// venster van de wissel gemeten, dan pas onder `laag`, anders pas na zijn resetsAt.
 export function beslis(s) {
   const nu = s.nu
   if (nu - (s.laatsteWissel ?? 0) < WACHTTIJD) return null
-  const limieten = Array.isArray(s.limieten) ? s.limieten : []
+  if (typeof s.handmatigTot === 'number' && nu < s.handmatigTot) return null
+  const limieten = geldig(s.limieten, nu)
 
   if (s.modus === 'abonnement') {
     if (!s.auto) return null
@@ -109,19 +142,35 @@ export function beslis(s) {
     return {
       naar: 'api',
       reden: `${vol.label}-venster op ${vol.percent}% (grens ${s.hoog}%)`,
-      door: { label: vol.label, ...(vol.resetsAt !== undefined ? { resetsAt: vol.resetsAt } : {}) },
+      door: { label: vol.label, resetsAt: vol.resetsAt ?? nu + horizon(vol.label) },
     }
   }
 
   if (s.modus === 'api' && s.overgeschakeldDoor) {
+    // Een ander (of hetzelfde) venster staat nog boven de grens: blijven, anders over 5 min weer heen.
+    if (limieten.some(l => l.percent >= s.hoog)) return null
     const door = s.overgeschakeldDoor
-    const gemeten = limieten.find(l => l.label === door.label && (l.resetsAt === undefined || l.resetsAt > nu))
+    const gemeten = limieten.find(l => l.label === door.label)
     if (gemeten) {
       return gemeten.percent < s.laag ? { naar: 'abonnement', reden: `${door.label}-venster op ${gemeten.percent}% (onder ${s.laag}%)` } : null
     }
     if (door.resetsAt !== undefined && nu >= door.resetsAt) return { naar: 'abonnement', reden: `${door.label}-venster is gereset` }
   }
   return null
+}
+
+// Met de hand terug naar het abonnement: tot wanneer automatisch wisselen dat respecteert. Dat is de
+// laatste reset van de vensters die nu ≥ hoog staan en van het venster van een automatische wissel;
+// undefined als er niets is om op te wachten.
+export function houdTot(s) {
+  const nu = s.nu
+  const tijden = geldig(s.limieten, nu)
+    .filter(l => l.percent >= s.hoog)
+    .map(l => l.resetsAt ?? nu + horizon(l.label))
+  const door = s.overgeschakeldDoor
+  if (door) tijden.push(door.resetsAt ?? nu + horizon(door.label))
+  const tot = Math.max(...tijden.filter(t => t > nu), -Infinity)
+  return Number.isFinite(tot) ? tot : undefined
 }
 
 const twee = n => String(n).padStart(2, '0')

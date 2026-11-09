@@ -208,3 +208,15 @@ TaskUpdate {"taskId":"1","status":"completed"}
 **Login in de desktop (al vastgesteld in een Code-tab-sessie).** De omgeving bevat `CLAUDE_CODE_SDK_HAS_HOST_AUTH_REFRESH`, `ANTHROPIC_BASE_URL`, `CLAUDE_CODE_ACCOUNT_UUID` en `CLAUDE_CODE_ORGANIZATION_UUID`: de desktop-app regelt de login zelf. De Keychain-item `Claude Code-credentials` (acct = macOS-gebruiker) bestaat. Werkhypothese: wisselen via de Keychain werkt niet in de desktop.
 
 **Nog open (Taak 5):** de desktopcheck van de takenlijst-tools (`/tmp/ff-spike` blijft staan voor een symlink in `~/.claude/dev-mods/<sessie-id>/`) en de login-check (tweede account via `/login`, daarna in een open Code-tab `echo $CLAUDE_CODE_USER_EMAIL`).
+
+## Uitbreiding 9-11-2026
+
+Besluiten van Colin bij plan 3 (`docs/superpowers/plans/2026-11-09-futureflow-3-voortgang-connectors-api.md`), met wat de eindreview daaraan toevoegde.
+
+- Connectors uitzetten per projectmap, zoals `/mcp`; context per connector zichtbaar. De projectmap is de git-root van de sessiemap (een worktree is zijn eigen map), anders de map zelf. Alleen servers die `/mcp` kan uitzetten krijgen een knop (claude.ai-connectors, servers van plugins en uit de eigen configuratie); servers van de app en van mods staan op één regel zonder knop.
+- API-key in de macOS-sleutelhanger.
+- Automatisch naar API vanaf 90% van het 5u- of 7d-venster, terug na de reset (onder 50%); marges instelbaar. Terug pas als geen gemeten venster meer boven de grens staat. Een wissel met de hand gaat voor tot de reset van het venster (met de hand naar API zet auto nooit terug); auto uit- en aanzetten beëindigt dat.
+- Kosten: melding bij elke wissel en geschatte API-kosten vandaag/deze maand in het dashboard; geen harde stop. Prijzen per model, met bron en datum in `lib/api.mjs`.
+- Voortgangsbalk tekent in dezelfde balk boven de prompt als de verbruiksmeters van de skin. `mcp__ccd_turn__wrap_up` sluit de lijst af.
+- Gemeten: met `apiKeyHelper` in de settings gebruikt een gewone terminal-sessie de helper in plaats van het abonnement (nep-key → "Invalid API key · Fix external API key"); een vanuit de desktop-app geërfde omgeving negeert hem.
+- Gemeten bijwerking: in API-modus laadt Claude Code de claude.ai-connectors niet ("claude.ai connectors are disabled because ANTHROPIC_API_KEY or another auth source is set"). De tab API en de wisselmelding zeggen dat.

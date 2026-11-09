@@ -35,7 +35,7 @@ import { hyperlinksFrom, touchOf } from './links'
 // futureflow: de voortgangsbalk tekent in dezelfde balk boven de prompt.
 import { STANDAARD_KLEUREN, voortgangRij } from '../voortgang'
 // futureflow: de tab API kijkt na elke meting of er tussen abonnement en API gewisseld moet worden.
-import { apiMeet } from '../api'
+import { apiMeetLos } from '../api'
 
 const SETTINGS = 'skins-settings'
 const GALLERY = 'skins-gallery'
@@ -807,14 +807,11 @@ export const registerSkins = (on: Parameters<Register>[0]): void => {
   // A turn's end and a plan limit's move are when the band's numbers change.
   on('session.measure', async ($, e, next) => {
     await refreshUsage($)
-    // futureflow: automatisch wisselen (tab API); faalt open en raakt de verbruiksbalk niet.
-    try {
-      await apiMeet($, e.rateLimits)
-    } catch {
-      // apiMeet vangt zelf al op
-    }
+    const result = await next(e)
+    // futureflow: automatisch wisselen (tab API), los van de meting; faalt open en raakt de verbruiksbalk niet.
+    apiMeetLos($, e.rateLimits)
 
-    return next(e)
+    return result
   }).catch(laatDoor as any)
 
   // Times every call and counts the main loop's calls and changed lines.

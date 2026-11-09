@@ -131,6 +131,18 @@ test('foute invoer laat de lijst ongewijzigd', () => {
   assert.doesNotThrow(() => pasToe({ stappen: null }, 'TaskUpdate', { taskId: '1', status: 'completed' }, {}, 0, ''))
 })
 
+test('wrap_up vinkt de hele lijst af; zonder lijst of al klaar niets', () => {
+  const items = ['Kijken', 'Bouwen', 'Testen'].map((content, i) => ({ content, status: i === 0 ? 'completed' : i === 1 ? 'in_progress' : 'pending' }))
+  const l = pasToe(null, 'mcp__ccd_turn__update_plan', { items }, null, 0, 'Klus')
+  assert.equal(percentage(l), 33)
+  const klaar = pasToe(l, 'mcp__ccd_turn__wrap_up', { recap: 'Klaar.' }, [], 1, '')
+  assert.equal(percentage(klaar), 100)
+  assert.deepEqual(klaar.stappen.map((s) => s.status), ['klaar', 'klaar', 'klaar'])
+  assert.equal(klaar.doel, 'Klus')
+  assert.equal(pasToe(klaar, 'mcp__ccd_turn__wrap_up', { recap: 'x' }, [], 2, ''), klaar)
+  assert.equal(pasToe(null, 'mcp__ccd_turn__wrap_up', { recap: 'x' }, [], 2, ''), null)
+})
+
 test('blokjes en duur', () => {
   let l = pasToe(null, 'TodoWrite', { todos: Array.from({ length: 7 }, (_, i) => ({ content: `s${i}`, status: i < 4 ? 'completed' : 'pending' })) }, {}, 0, '')
   assert.equal(percentage(l), 57)

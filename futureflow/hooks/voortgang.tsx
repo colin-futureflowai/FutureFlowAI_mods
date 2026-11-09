@@ -8,7 +8,8 @@ import { failOpen } from './ctx'
 import { blokjes, doelVan, duur, huidige, pasToe, percentage, positie, telling } from '../lib/voortgang.mjs'
 
 // Voortgangsbalk: de takenlijst van de hoofdsessie (TaskCreate/TaskUpdate, TodoWrite,
-// mcp__ccd_turn__update_plan) als één regel boven de prompt, uit te klappen tot alle stappen.
+// mcp__ccd_turn__update_plan; wrap_up vinkt alles af) als één regel boven de prompt, uit te
+// klappen tot alle stappen.
 // Tekenen schrijft nooit state; alles wat verandert gebeurt in tool.call, prompt.submit of een knop.
 
 const lijstAtom = atom({ plugin: 'futureflow', key: 'voortgang.lijst' } as const, null as Lijst | null)
@@ -17,7 +18,7 @@ const klaarAtom = atom({ plugin: 'futureflow', key: 'voortgang.klaarSinds' } as 
 const opdrachtAtom = atom({ plugin: 'futureflow', key: 'voortgang.opdracht' } as const, '')
 const tikAtom = atom({ plugin: 'futureflow', key: 'voortgang.tik' } as const, 0)
 
-const MATCH = /^(TaskCreate|TaskUpdate|TodoWrite|mcp__ccd_turn__update_plan)$/
+const MATCH = /^(TaskCreate|TaskUpdate|TodoWrite|mcp__ccd_turn__update_plan|mcp__ccd_turn__wrap_up)$/
 // Zo lang blijft de ✓-regel staan als alles klaar is.
 const KLAAR_MS = 5000
 const OPEN_STORE = 'voortgang.open'

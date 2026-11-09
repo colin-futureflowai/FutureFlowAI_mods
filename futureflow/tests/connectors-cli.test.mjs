@@ -34,9 +34,21 @@ const BASIS = () => ({
 
 test('list geeft de uitgezette servers van de map, of een lege lijst', () => {
   schrijf(BASIS())
-  assert.deepEqual(JSON.parse(cli(['list', '--cwd', '/a']).stdout), { uit: ['claude.ai Gmail'] })
-  assert.deepEqual(JSON.parse(cli(['list', '--cwd', '/b']).stdout), { uit: [] })
-  assert.deepEqual(JSON.parse(cli(['list', '--cwd', '/nergens']).stdout), { uit: [] })
+  assert.deepEqual(JSON.parse(cli(['list', '--cwd', '/a']).stdout), { uit: ['claude.ai Gmail'], servers: ['global'] })
+  assert.deepEqual(JSON.parse(cli(['list', '--cwd', '/b']).stdout), { uit: [], servers: ['global', 'n8n'] })
+  assert.deepEqual(JSON.parse(cli(['list', '--cwd', '/nergens']).stdout), { uit: [], servers: ['global'] })
+})
+
+test('list noemt ook de servers uit .mcp.json van de projectmap en van --map; een kapotte .mcp.json telt als leeg', () => {
+  const project = path.join(dir, 'repo')
+  const sub = path.join(project, 'sub')
+  fs.mkdirSync(sub, { recursive: true })
+  fs.writeFileSync(path.join(project, '.mcp.json'), JSON.stringify({ mcpServers: { projectserver: { command: 'x' } } }))
+  fs.writeFileSync(path.join(sub, '.mcp.json'), '{ kapot')
+  schrijf({ ...BASIS(), projects: { [project]: { disabledMcpServers: ['projectserver'] } } })
+  assert.deepEqual(JSON.parse(cli(['list', '--cwd', project, '--map', sub]).stdout), { uit: ['projectserver'], servers: ['global', 'projectserver'] })
+  fs.writeFileSync(path.join(sub, '.mcp.json'), JSON.stringify({ mcpServers: { subserver: {} } }))
+  assert.deepEqual(JSON.parse(cli(['list', '--cwd', project, '--map', sub]).stdout).servers, ['global', 'projectserver', 'subserver'])
 })
 
 test('zet --uit voegt alleen aan die lijst toe; al het andere blijft exact', () => {

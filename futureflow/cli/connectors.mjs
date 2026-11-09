@@ -2,8 +2,13 @@
 // connectors — MCP-servers per projectmap uit- of aanzetten, in dezelfde lijst als /mcp:
 // `projects[<map>].disabledMcpServers` in ~/.claude.json. Alleen Node-builtins.
 //
-//   connectors list --cwd <map>                          → JSON { uit: string[] }
+//   connectors list --cwd <map> [--map <sessiemap>]      → JSON { uit: string[], servers: string[] }
 //   connectors zet --cwd <map> --server <naam> --uit|--aan → JSON { uit: string[], gewijzigd: boolean }
+//
+// `--cwd` is de projectsleutel zoals Claude Code hem gebruikt: de git-root van de sessiemap (de hook
+// bepaalt die met `git rev-parse --show-toplevel`), anders de sessiemap zelf. `servers` zijn de
+// servers uit de eigen configuratie (`mcpServers` in ~/.claude.json, in het project en in .mcp.json
+// van de projectmap en `--map`): die kan /mcp uitzetten.
 //
 // Claude Code schrijft hetzelfde bestand. Daarom: lezen, alleen die ene lijst wijzigen,
 // naar een tijdelijk bestand in dezelfde map schrijven (zelfde rechten) en dan rename.
@@ -26,10 +31,11 @@ class Fout extends Error {
 }
 
 function opties(args) {
-  const o = { cwd: undefined, server: undefined, uit: false, aan: false }
+  const o = { cwd: undefined, map: undefined, server: undefined, uit: false, aan: false }
   for (let i = 0; i < args.length; i++) {
     const a = args[i]
     if (a === '--cwd') o.cwd = args[++i]
+    else if (a === '--map') o.map = args[++i]
     else if (a === '--server') o.server = args[++i]
     else if (a === '--uit') o.uit = true
     else if (a === '--aan') o.aan = true
@@ -59,6 +65,24 @@ function lees(doel) {
     throw new Fout(`${BESTAND}: "projects" is geen object; niets gewijzigd`, 2)
   }
   return { tekst, data, stat }
+}
+
+const namenVan = obj => (obj && typeof obj === 'object' && !Array.isArray(obj) ? Object.keys(obj) : [])
+
+// Namen in `mcpServers` van een .mcp.json; een ontbrekend of kapot bestand telt als leeg.
+function mcpJson(map) {
+  try {
+    return namenVan(JSON.parse(fs.readFileSync(path.join(map, '.mcp.json'), 'utf8'))?.mcpServers)
+  } catch {
+    return []
+  }
+}
+
+// Alle servers uit de eigen configuratie: gebruiker, project in ~/.claude.json en .mcp.json.
+function eigenServers(data, o) {
+  const namen = new Set([...namenVan(data.mcpServers), ...namenVan(data.projects?.[o.cwd]?.mcpServers), ...mcpJson(o.cwd)])
+  if (o.map && path.isAbsolute(o.map)) for (const n of mcpJson(o.map)) namen.add(n)
+  return [...namen].sort()
 }
 
 const lijstVan = project => (Array.isArray(project?.disabledMcpServers) ? project.disabledMcpServers.filter(s => typeof s === 'string') : [])
@@ -131,14 +155,14 @@ export function main(args) {
       let doel
       try { doel = fs.realpathSync(BESTAND) } catch (err) { throw new Fout(`${BESTAND} niet gelezen (${err.code ?? err.message})`, 2) }
       const { data } = lees(doel)
-      console.log(JSON.stringify({ uit: lijstVan(data.projects?.[o.cwd]) }))
+      console.log(JSON.stringify({ uit: lijstVan(data.projects?.[o.cwd]), servers: eigenServers(data, o) }))
       return 0
     }
     if (cmd === 'zet') {
       console.log(JSON.stringify(zet(opties(rest))))
       return 0
     }
-    console.error('Gebruik: connectors list --cwd <map> | connectors zet --cwd <map> --server <naam> --uit|--aan')
+    console.error('Gebruik: connectors list --cwd <map> [--map <sessiemap>] | connectors zet --cwd <map> --server <naam> --uit|--aan')
     return 1
   } catch (err) {
     if (err instanceof Fout) {

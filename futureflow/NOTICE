@@ -43,7 +43,7 @@ with these changes by FutureFlowAI (each marked with a "futureflow:" comment):
   - helpers for the dashboard (skinPrefs, setSkinPrefs, openSkinSettings);
   - futureflow's progress row (hooks/voortgang.tsx) drawn above the usage band,
     and on its own when the skin is off or its band drawing fails;
-  - session.measure also calls futureflow's API switch (apiMeet in hooks/api.tsx).
+  - session.measure also starts futureflow's API switch after next(e), detached (apiMeetLos in hooks/api.tsx).
 
 hooks/skins/vendor/mermaid-ascii.js bundles beautiful-mermaid 1.1.3 (MIT,
 Copyright (c) 2026 Craft Docs); its licence is in the file's header.

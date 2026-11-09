@@ -30,6 +30,33 @@ export function perServer(mcpTools, uit, ook = []) {
   return [...rijen.values()].sort((a, b) => b.tokens - a.tokens || a.server.localeCompare(b.server))
 }
 
+// Kan /mcp deze server uitzetten? Ja voor claude.ai-connectors, servers van plugins (`plugin:<plugin>:<naam>`)
+// en servers uit de eigen configuratie (`mcpServers` in ~/.claude.json, het project of .mcp.json).
+// De rest komt van de app of van een mod (bv. ccd_session, Claude_Browser, terminal, futureflow).
+export function wisselbaar(server, geconfigureerd) {
+  if (typeof server !== 'string' || !server) return false
+  if (server.startsWith('claude.ai ') || server.startsWith('plugin:')) return true
+  return Array.isArray(geconfigureerd) ? geconfigureerd.includes(server) : false
+}
+
+// Splitst de rijen: `eigen` met een knop (wisselbaar, of al uitgezet zodat hij weer aan kan) en
+// `intern` als één optelsom (servers, tools, schema-tokens, tokens in context) zonder knop.
+export function verdeel(rijen, geconfigureerd) {
+  const eigen = []
+  const intern = { servers: 0, tools: 0, tokens: 0, inContext: 0 }
+  for (const r of Array.isArray(rijen) ? rijen : []) {
+    if (r.uit || wisselbaar(r.server, geconfigureerd)) {
+      eigen.push(r)
+    } else {
+      intern.servers++
+      intern.tools += r.tools
+      intern.tokens += r.tokens
+      intern.inContext += r.inContext
+    }
+  }
+  return { eigen, intern }
+}
+
 // Totalen over alle rijen: schema-tokens en tokens nu in context.
 export function totalen(rijen) {
   return rijen.reduce((t, r) => ({ tokens: t.tokens + r.tokens, inContext: t.inContext + r.inContext }), { tokens: 0, inContext: 0 })

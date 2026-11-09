@@ -43,6 +43,21 @@ export type SlotsSnapshot = {
 
 export type DashboardTab = 'overzicht' | 'slots' | 'minify' | 'stijl' | 'connectors' | 'api'
 
+/** `cli/connectors.mjs list` voor de projectsleutel (git-root van de sessiemap, anders die map zelf). */
+export type ConnectorsLijst = {
+  /** Sleutel in `projects` van ~/.claude.json. */
+  sleutel: string
+  /** De map van de sessie. */
+  map: string
+  /** Uitgezette servers (`disabledMcpServers`). */
+  uit: string[]
+  /** Servers uit de eigen configuratie (mcpServers, .mcp.json): die kan /mcp uitzetten. */
+  servers: string[]
+  fout?: string
+  /** Epoch ms van het lezen. */
+  gelezen: number
+}
+
 /** `cli/api.mjs status`: alleen de laatste 4 tekens van de key, nooit de key zelf. */
 export type ApiStatus = { heeftKey: boolean; staart: string; modus: 'abonnement' | 'api'; vreemdeHelper: boolean; fout?: string }
 
@@ -58,6 +73,8 @@ export type ApiToestand = {
   overgeschakeldDoor?: { label: string; resetsAt?: number }
   /** Epoch ms van de laatste wissel. */
   laatsteWissel: number
+  /** Met de hand gekozen: tot dit moment (epoch ms) wisselt auto niet. */
+  handmatigTot?: number
 }
 
 export type MinifyNiveau = 'O1' | 'O2' | 'O3' | 'uit'
@@ -144,8 +161,8 @@ declare module 'claude-code' {
       'voortgang.opdracht': string
       /** Telt op als de ✓-regel moet verdwijnen, zodat de balk opnieuw tekent. */
       'voortgang.tik': number
-      /** Telt op na een klik in de tab Connectors, zodat die opnieuw tekent. */
-      'connectors.versie': number
+      /** Laatst gelezen lijst van de tab Connectors (na openen, na een klik en elke 30 s); null = nog niet gelezen. */
+      'connectors.lijst': ConnectorsLijst | null
       /** Per server wat in deze sessie met een klik is omgezet; geldt pas vanaf de volgende sessie. */
       'connectors.gewijzigd': Record<string, 'uit' | 'aan'>
       /** Uitkomst van `cli/api.mjs status` (nooit de key zelf); null = nog niet gelezen. */

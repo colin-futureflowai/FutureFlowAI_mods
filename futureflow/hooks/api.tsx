@@ -5,7 +5,7 @@ import type { ApiStatus, ApiToestand } from '../types'
 
 import { failOpen } from './ctx'
 
-import { beslis, dagSleutel, geldigeKey, HELPER, kosten, kostenOverzicht, limietenVan, telOp, toestandVan, usd } from '../lib/api.mjs'
+import { beslis, dagSleutel, geldigeKey, HELPER, houdTot, kosten, kostenOverzicht, limietenVan, telOp, toestandVan, usd } from '../lib/api.mjs'
 import type { Door } from '../lib/api.mjs'
 
 // Tab API: de API-key in de macOS-sleutelhanger en wisselen tussen abonnement en API, met de hand
@@ -38,15 +38,20 @@ function cliPath($: Engine): string {
   return `${$.plugin.root}/cli/api.mjs`
 }
 
+// Vaste waarden voor de CLI: `env` van $.process.run komt bovenop die van de host, dus zonder deze
+// zouden SECURITY_BIN of SETTINGS_JSON uit een settings-`env`-blok de CLI bereiken (en SECURITY_BIN
+// de key op stdin krijgen). Leeg = de standaard van de CLI.
+const CLI_ENV = { SECURITY_BIN: '/usr/bin/security', SETTINGS_JSON: '', CLAUDE_JSON: '' }
+
 // Draait cli/api.mjs. De desktop-app heeft een kaal PATH en argv[0] wordt daarop gezocht,
 // dus `node` via /usr/bin/env met een PATH waar Homebrew vooraan staat.
 async function cli($: Engine, args: string[], stdin?: string) {
   const init = { timeoutMs: 20_000, ...(stdin === undefined ? {} : { stdin }) }
   const isWin = (await $.env.get('OS')) === 'Windows_NT'
-  if (isWin) return $.process.run(['node', cliPath($), ...args], init)
+  if (isWin) return $.process.run(['node', cliPath($), ...args], { ...init, env: CLI_ENV })
   const hostPath = (await $.env.get('PATH')) ?? ''
   const PATH = `/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:${hostPath}`
-  return $.process.run(['/usr/bin/env', 'node', cliPath($), ...args], { ...init, env: { PATH } })
+  return $.process.run(['/usr/bin/env', 'node', cliPath($), ...args], { ...init, env: { ...CLI_ENV, PATH } })
 }
 
 function foutVan(r: { exitCode: number; stderr: string }): string {
@@ -138,16 +143,25 @@ export async function startApi($: Engine): Promise<void> {
   }
 }
 
-// Wisselt via de CLI en bewaart de toestand. `door` = het venster bij een automatische wissel naar API.
+// Wisselt via de CLI en bewaart de toestand. `door` = het venster bij een automatische wissel naar API;
+// `handmatigTot` = tot wanneer auto een keuze met de hand laat staan.
 // Faalt een automatische wissel (andere helper, geen key), dan gaat auto uit: geen melding elke 5 minuten.
-async function wissel($: Engine, naar: 'abonnement' | 'api', reden: string, opties: { door?: Door; auto?: boolean } = {}): Promise<boolean> {
-  if (wisselt) return false
+async function wissel(
+  $: Engine,
+  naar: 'abonnement' | 'api',
+  reden: string,
+  opties: { door?: Door; auto?: boolean; handmatigTot?: number } = {},
+): Promise<boolean> {
+  if (wisselt) {
+    if (!opties.auto) $.ui.toast('Er loopt al een wissel; probeer het zo opnieuw.')
+    return false
+  }
   wisselt = true
   try {
     const r = await cli($, ['modus', naar])
     const t = await leesToestand($)
     const nu = await $.clock.now()
-    const { overgeschakeldDoor: _oud, ...rest } = t
+    const { overgeschakeldDoor: _oud, handmatigTot: _hand, ...rest } = t
     if (r.exitCode !== 0) {
       const uitleg =
         r.exitCode === 3 ? 'in ~/.claude/settings.json staat al een andere apiKeyHelper; futureflow laat die staan.'
@@ -168,7 +182,13 @@ async function wissel($: Engine, naar: 'abonnement' | 'api', reden: string, opti
       await verversApi($)
       return true
     }
-    await bewaarToestand($, { ...rest, modus: naar, laatsteWissel: nu, ...(naar === 'api' && opties.door ? { overgeschakeldDoor: opties.door } : {}) })
+    await bewaarToestand($, {
+      ...rest,
+      modus: naar,
+      laatsteWissel: nu,
+      ...(naar === 'api' && opties.door ? { overgeschakeldDoor: opties.door } : {}),
+      ...(opties.handmatigTot !== undefined ? { handmatigTot: opties.handmatigTot } : {}),
+    })
     $.ui.toast(
       naar === 'api'
         ? `Naar API (${reden}). Nieuwe terminal-sessies gebruiken je API-key en dat kost geld per token; de claude.ai-connectors staan daar uit. Deze sessie en de desktop-app houden hun eigen login.`
@@ -195,8 +215,14 @@ export async function apiMeet($: Engine, rateLimits?: unknown): Promise<void> {
   }
 }
 
+// apiMeet los van de beurt of meting: een wissel start de CLI (en mogelijk een sleutelhanger-
+// dialoog), dat mag de beurt niet ophouden. Aanroepen nadat `next(e)` klaar is.
+export function apiMeetLos($: Engine, rateLimits?: unknown): void {
+  void apiMeet($, rateLimits).catch(err => failOpen($, err))
+}
+
 // Telt de geschatte kosten van een beurt als deze sessie op de API draait (gestart met onze helper
-// en zonder abonnementslimieten), en kijkt daarna of er gewisseld moet worden.
+// en zonder abonnementslimieten). Wisselen doet apiMeetLos, na de beurt.
 export async function apiTurnComplete($: Engine, e: { usage?: any }): Promise<void> {
   try {
     if (sessieOpApi && e.usage) {
@@ -213,7 +239,6 @@ export async function apiTurnComplete($: Engine, e: { usage?: any }): Promise<vo
   } catch (err) {
     failOpen($, err)
   }
-  await apiMeet($)
 }
 
 // ---- acties uit de tab (alleen in onPress/onSubmit, nooit tijdens het tekenen) ----
@@ -256,9 +281,18 @@ async function wisKey($: Engine): Promise<void> {
   }
 }
 
+// Met de hand gekozen gaat voor: terug naar het abonnement terwijl een venster boven de grens staat,
+// dan wisselt auto pas weer na de reset van dat venster. Met de hand naar API heeft geen
+// `overgeschakeldDoor`, dus auto zet dat nooit terug.
 async function handmatig($: Engine, naar: 'abonnement' | 'api'): Promise<void> {
   try {
-    await wissel($, naar, 'met de hand')
+    let tot: number | undefined
+    if (naar === 'abonnement') {
+      const t = await leesToestand($)
+      const ruw = await $.session.usage().then(u => u.rateLimits, () => [])
+      tot = houdTot({ ...t, limieten: limietenVan(ruw), nu: await $.clock.now() })
+    }
+    await wissel($, naar, 'met de hand', tot === undefined ? {} : { handmatigTot: tot })
   } catch (err) {
     failOpen($, err)
   }
@@ -278,7 +312,9 @@ async function zetAuto($: Engine): Promise<void> {
         return
       }
     }
-    await bewaarToestand($, { ...t, auto: !t.auto })
+    // Aan- of uitzetten beëindigt ook een keuze met de hand.
+    const { handmatigTot: _hand, ...rest } = t
+    await bewaarToestand($, { ...rest, auto: !t.auto })
     if (!t.auto && !(await $.store.get('api.autoUitgelegd'))) {
       await $.store.set('api.autoUitgelegd', true)
       $.ui.toast(AUTO_UITLEG)
@@ -311,6 +347,16 @@ async function zetGrens($: Engine, welke: 'hoog' | 'laag', invoer: string): Prom
 
 const vinkje = (aan: boolean) => (aan ? '☑' : '☐')
 
+const twee = (n: number) => String(n).padStart(2, '0')
+// Lokale tijd kort: "14:05", of "di 10-11 14:05" als het niet vandaag is.
+function wanneer(ms: number, nu: number): string {
+  const d = new Date(ms)
+  const tijd = `${twee(d.getHours())}:${twee(d.getMinutes())}`
+  if (dagSleutel(ms) === dagSleutel(nu)) return tijd
+  const dag = ['zo', 'ma', 'di', 'wo', 'do', 'vr', 'za'][d.getDay()]
+  return `${dag} ${twee(d.getDate())}-${twee(d.getMonth() + 1)} ${tijd}`
+}
+
 // Inhoud van de tab API. Tekent alleen; schrijven gebeurt in onPress/onSubmit.
 export async function apiTab($: Engine, e: any, k: Kleuren) {
   const { Box, Text, Button, Input } = $.ui.resolve(e)
@@ -334,6 +380,12 @@ export async function apiTab($: Engine, e: any, k: Kleuren) {
           </Text>
           {t.overgeschakeldDoor && opApi ? (
             <Text color={k.warn}>Automatisch naar API door het {t.overgeschakeldDoor.label}-venster; terug na de reset.</Text>
+          ) : null}
+          {t.auto && t.handmatigTot !== undefined && t.handmatigTot > nu ? (
+            <Text color={k.warn}>Met de hand gekozen: automatisch wisselen wacht tot {wanneer(t.handmatigTot, nu)} (of tot je het uit- en aanzet).</Text>
+          ) : null}
+          {t.auto && opApi && !t.overgeschakeldDoor ? (
+            <Text color={k.warn}>Met de hand op API: automatisch wisselen zet dit niet terug.</Text>
           ) : null}
           {status.vreemdeHelper ? (
             <Text color={k.err}>In ~/.claude/settings.json staat al een andere apiKeyHelper. futureflow laat die staan en wisselt niet.</Text>

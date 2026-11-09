@@ -4,7 +4,7 @@ import type { EngineInterface as Engine, Register } from 'claude-code'
 import type { DashboardTab, MinifyTeller, SlotsSnapshot } from '../types'
 
 import { apiTab, verversApi } from './api'
-import { connectorsTab } from './connectors'
+import { connectorsTab, openConnectors } from './connectors'
 import { failOpen, oud } from './ctx'
 import { minifyTab, niveauLezen } from './minify'
 import { openDashboard, PANE, TABS } from './paneel'
@@ -195,6 +195,7 @@ export const registerDashboard = (on: Parameters<Register>[0]): void => {
       }
       const tab = (woord || undefined) as DashboardTab | undefined
       if (tab === 'api') await verversApi($)
+      if (tab === 'connectors') await openConnectors($)
       await openDashboard($, tab)
       if (!(await oud($)).slots) await startSlotsTicker($)
       return { text: `Dashboard geopend${tab ? ` op de tab ${NAMEN[tab]}` : ''}.` }
@@ -242,6 +243,7 @@ export const registerDashboard = (on: Parameters<Register>[0]): void => {
                   await update($, tabAtom, () => t)
                   if ((t === 'slots' || t === 'overzicht') && !(await oud($)).slots) await startSlotsTicker($)
                   if (t === 'api') await verversApi($)
+                  if (t === 'connectors') await openConnectors($)
                 }}
               >
                 {t === tab ? <Text color={p.groen} bold>{NAMEN[t]}</Text> : NAMEN[t]}
