@@ -3,11 +3,12 @@ import type { EngineInterface as Engine, Register } from 'claude-code'
 
 import type { DashboardTab, MinifyTeller, SlotsSnapshot } from '../types'
 
+import { apiTab, verversApi } from './api'
 import { connectorsTab } from './connectors'
 import { failOpen, oud } from './ctx'
 import { minifyTab, niveauLezen } from './minify'
 import { openDashboard, PANE, TABS } from './paneel'
-import { openSkinSettings, setSkinPrefs, skinPrefs } from './skins/register'
+import { actieveKleuren, openSkinSettings, setSkinPrefs, skinPrefs } from './skins/register'
 import { slotsTab, startSlotsTicker } from './slots'
 import { balkCommando, stappenRijen, voortgangLijst } from './voortgang'
 
@@ -28,12 +29,13 @@ const NAMEN: Record<DashboardTab, string> = {
   minify: 'Minify',
   stijl: 'Stijl',
   connectors: 'Connectors',
+  api: 'API',
 }
 
 // Start van het dashboard; register.tsx roept dit aan vanuit zijn ene session.start.
 export async function startDashboard($: Engine): Promise<void> {
   try {
-    await $.command.register({ name: 'futureflow', description: 'Dashboard van FutureFlowAI: overzicht, slots, minify, stijl, connectors' })
+    await $.command.register({ name: 'futureflow', description: 'Dashboard van FutureFlowAI: overzicht, slots, minify, stijl, connectors, api' })
   } catch (err) {
     failOpen($, err)
   }
@@ -192,6 +194,7 @@ export const registerDashboard = (on: Parameters<Register>[0]): void => {
         return { text: `Onbekende tab "${woord}". Gebruik: /futureflow ${TABS.join('|')}` }
       }
       const tab = (woord || undefined) as DashboardTab | undefined
+      if (tab === 'api') await verversApi($)
       await openDashboard($, tab)
       if (!(await oud($)).slots) await startSlotsTicker($)
       return { text: `Dashboard geopend${tab ? ` op de tab ${NAMEN[tab]}` : ''}.` }
@@ -216,6 +219,7 @@ export const registerDashboard = (on: Parameters<Register>[0]): void => {
       : tab === 'minify' ? await minifyTab($, e)
       : tab === 'overzicht' ? await overzichtTab($, e, p)
       : tab === 'connectors' ? await connectorsTab($, e)
+      : tab === 'api' ? await apiTab($, e, await actieveKleuren($))
       : await stijlTab($, e, p)
 
     return (
@@ -237,6 +241,7 @@ export const registerDashboard = (on: Parameters<Register>[0]): void => {
                 onPress={async () => {
                   await update($, tabAtom, () => t)
                   if ((t === 'slots' || t === 'overzicht') && !(await oud($)).slots) await startSlotsTicker($)
+                  if (t === 'api') await verversApi($)
                 }}
               >
                 {t === tab ? <Text color={p.groen} bold>{NAMEN[t]}</Text> : NAMEN[t]}

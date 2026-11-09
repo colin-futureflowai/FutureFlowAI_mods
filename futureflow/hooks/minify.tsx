@@ -3,6 +3,7 @@ import type { EngineInterface as Engine, Register } from 'claude-code'
 
 import type { MinifyInkorting, MinifyNiveau, MinifyTeller } from '../types'
 
+import { apiTurnComplete } from './api'
 import { failOpen, log, oud } from './ctx'
 import { openDashboard } from './paneel'
 import { skinsTurnComplete } from './skins/register'
@@ -349,6 +350,12 @@ export const registerMinify = (on: Parameters<Register>[0]): void => {
   on('turn.complete', async ($, e, next) => {
     // Skin (claude-skins): voettekst en verbruiksbalk van de beurt. Een fout daar raakt minify niet.
     await skinsTurnComplete($, e).catch(err => failOpen($, err))
+    // Tab API: kosten van de beurt tellen en kijken of er gewisseld moet worden. Een fout daar raakt minify niet.
+    try {
+      await apiTurnComplete($, e)
+    } catch (err) {
+      failOpen($, err)
+    }
     if ((await oud($)).minify) return next(e)
     const result = await next(e)
     if (e.agentId || !e.usage || e.isAborted) return result

@@ -41,7 +41,24 @@ export type SlotsSnapshot = {
   error?: string
 }
 
-export type DashboardTab = 'overzicht' | 'slots' | 'minify' | 'stijl' | 'connectors'
+export type DashboardTab = 'overzicht' | 'slots' | 'minify' | 'stijl' | 'connectors' | 'api'
+
+/** `cli/api.mjs status`: alleen de laatste 4 tekens van de key, nooit de key zelf. */
+export type ApiStatus = { heeftKey: boolean; staart: string; modus: 'abonnement' | 'api'; vreemdeHelper: boolean; fout?: string }
+
+/** Store `api.toestand` (zelfde vorm als Toestand in lib/api.d.mts). */
+export type ApiToestand = {
+  modus: 'abonnement' | 'api'
+  auto: boolean
+  /** Naar API vanaf dit percentage van het 5u- of 7d-venster (50-100). */
+  hoog: number
+  /** Terug naar het abonnement onder dit percentage (0-90). */
+  laag: number
+  /** Het venster dat de automatische wissel naar API veroorzaakte, met zijn reset (epoch ms). */
+  overgeschakeldDoor?: { label: string; resetsAt?: number }
+  /** Epoch ms van de laatste wissel. */
+  laatsteWissel: number
+}
 
 export type MinifyNiveau = 'O1' | 'O2' | 'O3' | 'uit'
 
@@ -131,6 +148,12 @@ declare module 'claude-code' {
       'connectors.versie': number
       /** Per server wat in deze sessie met een klik is omgezet; geldt pas vanaf de volgende sessie. */
       'connectors.gewijzigd': Record<string, 'uit' | 'aan'>
+      /** Uitkomst van `cli/api.mjs status` (nooit de key zelf); null = nog niet gelezen. */
+      'api.status': ApiStatus | null
+      /** Kopie van de store `api.toestand`, zodat de tab opnieuw tekent na een wissel. */
+      'api.toestand': ApiToestand | null
+      /** Telt op na een actie in de tab API, zodat die opnieuw tekent (en het key-veld leeg wordt). */
+      'api.versie': number
     }
   }
 }

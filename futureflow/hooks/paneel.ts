@@ -8,7 +8,7 @@ import type { DashboardTab } from '../types'
 // Gedeeld door dashboard.tsx, slots.tsx en minify.tsx: zo hoeven die geen kringimport te maken.
 export const PANE = 'futureflow'
 export const TITEL = 'FutureFlowAI'
-export const TABS: readonly DashboardTab[] = ['overzicht', 'slots', 'minify', 'stijl', 'connectors']
+export const TABS: readonly DashboardTab[] = ['overzicht', 'slots', 'minify', 'stijl', 'connectors', 'api']
 
 const tabAtom = atom({ plugin: 'futureflow', key: 'dashboard.tab' } as const, null as DashboardTab | null)
 

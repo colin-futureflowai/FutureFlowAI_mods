@@ -1,5 +1,6 @@
 import type { Register } from 'claude-code'
 
+import { startApi } from './api'
 import { failOpen, oud, stateDir, vergeetOud } from './ctx'
 import { registerDashboard, startDashboard } from './dashboard'
 import { registerMinify, startMinify } from './minify'
@@ -32,6 +33,8 @@ export const register: Register = (on, options) => {
     await startSlots($)
     await startMinify($)
     await startDashboard($)
+    // Tab API: modus uit settings.json (geen CLI); faalt open.
+    await startApi($).catch(err => failOpen($, err))
     // Skin (claude-skins): mag nooit de start van de sessie breken.
     await startSkins($).catch(err => failOpen($, err))
     return next(e)
