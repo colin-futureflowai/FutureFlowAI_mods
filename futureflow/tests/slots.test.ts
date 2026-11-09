@@ -160,7 +160,8 @@ test('dashboard: /agent-slots opent het paneel met geheugen, slots en weigeringe
 
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ plugin: 'futureflow', surface, component: 'Pane', requestId: 'futureflow', props: {} } as any)
-    expect(await ui.find({ type: 'Text', text: /31% vrij van 16 GB/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /31% vrij \(5,0 van 16 GB\)/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /bezet 1\/2|bezet/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /1\/2/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /~\/orca\/workspaces\/a · pnpm dev/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /PORT=6001 pnpm dev/ })).toBeDefined()

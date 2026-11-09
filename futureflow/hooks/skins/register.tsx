@@ -4,6 +4,7 @@ import type { EngineInterface, Register, RenderElement, RenderSurface, SessionCo
 import type { CustomSkin, Disclosure, Prefs, SkinSlot, SkinsMarkdownArgs, Touch, TurnStats, UsageSnap } from '../../types'
 import { DEFAULT_PREFS, listing, nextTables, parsePrefs, runSkinCommand, TOGGLES, withCalm } from './command'
 import { buildCustom, resolveSkin, skinNames, withSlot } from './custom'
+import futureflowSkin from './themes/futureflow'
 import { forTheme, gnomeDark, macDark, resolveLight, windowsDark } from './light'
 import { parseFolders, prefsFor, withFolder, withoutFolder } from './folders'
 import { DESIGN_TOOL, runDesign } from './designer'
@@ -734,6 +735,13 @@ async function naAanroep($: EngineInterface, e: any, ran: any, startedAt: number
 function kleurenVan(look: Look): { accent: string; mut: string; fg: string } {
   const { palette } = look.skin
   return { accent: palette.ok, mut: palette.muted, fg: palette.fg }
+}
+
+// futureflow: kleuren van de actieve skin voor het dashboard (tab Slots); met skin uit die van FutureFlowAI.
+export async function actieveKleuren($: EngineInterface): Promise<{ accent: string; mut: string; fg: string; ok: string; warn: string; err: string; vlak: string }> {
+  const active = await activeSkin($)
+  const { palette } = active === null ? forTheme(futureflowSkin, await read($, lightAtom)) : active.skin
+  return { accent: palette.ok, mut: palette.muted, fg: palette.fg, ok: palette.ok, warn: palette.warn, err: palette.err, vlak: palette.surface }
 }
 
 // futureflow: alleen de voortgangsrij, boven wat Claude Code of een andere mod daar tekent.

@@ -83,7 +83,7 @@ test('/agent-slots zonder argument opent het dashboard op slots', async ($, on) 
   await run($, 'agent-slots', '')
   expect(f.opened[0]!.id).toBe('futureflow')
   const ui = await $.ui.mount(PANE('terminal'))
-  expect(await ui.find({ type: 'Text', text: /40% vrij van 16 GB/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /40% vrij \(6,4 van 16 GB\)/ })).toBeDefined()
   await ui.unmount()
 })
 

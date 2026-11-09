@@ -5,10 +5,11 @@ import type { OverflowJob, SlotsHolder, SlotsSnapshot } from '../types'
 
 import { failOpen, log, oud } from './ctx'
 import { openDashboard, PANE } from './paneel'
-import { stopSkins } from './skins/register'
+import { actieveKleuren, stopSkins } from './skins/register'
 
 import { classify, hasShellBackground, maskSecrets, unwrapCommand, wrapCommand } from '../lib/classify.mjs'
 import { reportMessage } from '../lib/report.mjs'
+import { meterTekst, meterToon } from '../lib/slotsmeter.mjs'
 
 // Tools die een nieuwe sessie of workflow starten: tegenhouden bij krap geheugen.
 const SESSION_TOOLS = new Set(['Workflow', 'mcp__ccd_session__start_session'])
@@ -94,11 +95,6 @@ export async function startSlotsTicker($: Engine) {
 const pad = (n: number) => String(n).padStart(2, '0')
 const clock = (t: string | number) => { const d = new Date(t); return `${pad(d.getHours())}:${pad(d.getMinutes())}` }
 const shortPath = (p?: string) => (p ?? '').replace(/^\/(Users|home)\/[^/]+/, '~').replace(/^C:\\Users\\[^\\]+/i, '~')
-
-function memoryBar(free: number, width = 24) {
-  const used = Math.round(((100 - free) / 100) * width)
-  return '█'.repeat(used) + '░'.repeat(Math.max(0, width - used))
-}
 
 // Let op: noem niets `h` in dit bestand; dat is de globale JSX-functie.
 function holderLine(slot: SlotsHolder) {
@@ -275,22 +271,60 @@ export const registerSlots = (on: Parameters<Register>[0]): void => {
   })
 }
 
+// Twee kaarten naast elkaar als één Svg (desktop), in de stijl van de kaarten op het Overzicht.
+type KaartInvoer = { vrij: number; totaalGB: number; toonKleur: string; slots: { kind: string; n: number; limit: number }[] }
+type KaartKleuren = { mut: string; fg: string; vlak: string }
+const esc = (t: string) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;')
+function slotsKaartenSvg(inv: KaartInvoer, c: KaartKleuren): string {
+  const b = 190, hoogte = 104, gat = 12
+  const lijn = c.mut
+  const kaart = (i: number, titel: string, waarde: string, kleur: string, sub: string, fractie: number) => {
+    const x = i * (b + gat)
+    const f = Math.max(0, Math.min(1, fractie))
+    return `<rect x="${x}" y="0" width="${b}" height="${hoogte}" rx="10" fill="${c.vlak}" stroke="${lijn}" stroke-opacity="0.35"/>` +
+      `<text x="${x + 14}" y="24" font-size="11" fill="${c.mut}">${esc(titel)}</text>` +
+      `<text x="${x + 14}" y="55" font-size="28" font-weight="600" fill="${kleur}">${esc(waarde)}</text>` +
+      `<text x="${x + 14}" y="76" font-size="11" fill="${c.mut}">${esc(sub)}</text>` +
+      `<rect x="${x + 14}" y="${hoogte - 14}" width="${b - 28}" height="4" rx="2" fill="${lijn}" fill-opacity="0.35"/>` +
+      `<rect x="${x + 14}" y="${hoogte - 14}" width="${f * (b - 28)}" height="4" rx="2" fill="${kleur}"/>`
+  }
+  const bezet = inv.slots.reduce((t, s) => t + s.n, 0)
+  const totaal = inv.slots.reduce((t, s) => t + s.limit, 0)
+  const breed = 2 * b + gat
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${breed}" height="${hoogte}" viewBox="0 0 ${breed} ${hoogte}" font-family="-apple-system, 'Segoe UI', sans-serif">` +
+    kaart(0, 'Geheugen vrij', `${Math.round(inv.vrij)}%`, inv.toonKleur, `van ${inv.totaalGB} GB`, inv.vrij / 100) +
+    kaart(1, 'Slots bezet', `${bezet}/${totaal}`, c.fg, inv.slots.map(s => `${s.kind} ${s.n}/${s.limit}`).join(' · '), totaal === 0 ? 0 : bezet / totaal) +
+    '</svg>'
+}
+
 // Inhoud van de tab Slots in het dashboard (was het losse paneel agent-slots).
 export async function slotsTab($: Engine, e: any) {
-    const { Box, Text, Button } = $.ui.resolve(e)
+    const el = $.ui.resolve(e)
+    const { Box, Text, Button } = el
+    // Alleen de desktop tekent kaarten (Svg); de terminal krijgt tekst. `'Svg' in el` zegt in de terminal niets.
+    const Svg = e.surface !== 'terminal' && 'Svg' in el ? el.Svg : undefined
+    const k = await actieveKleuren($)
     if ((await oud($)).slots) return <Text dimColor>De oude agent-slots-plugin staat nog aan en beheert dit onderdeel.</Text>
     const snap = await read($, snapshot)
     if (!snap) return <Text dimColor>Laden…</Text>
 
     const { memory, config, slots, refusals } = snap
     const free = memory.freePercent
-    const tone = free < config.criticalPercent ? 'error' : free < config.floorPercent ? 'warning' : free < config.floorPercent + 15 ? 'warning' : 'success'
+    const toon = meterToon(free, config.floorPercent, config.criticalPercent)
+    const toonKleur = k[toon]
+    const kaartSlots = Object.entries(config.limits).map(([kind, limit]) => ({ kind, n: slots.filter(s => s.kind === kind).length, limit }))
     const state = free < config.criticalPercent ? 'kritiek' : free < config.floorPercent ? 'krap: nieuwe zware taken worden geweigerd' : 'ok'
 
     const isOff = config.enabled === false
 
     return (
       <Box flexDirection="column" gap={1}>
+        {Svg ? (
+          <Svg
+            source={slotsKaartenSvg({ vrij: free, totaalGB: memory.totalGB, toonKleur, slots: kaartSlots }, k)}
+            alt={`Geheugen: ${meterTekst(free, memory.totalGB)}. Slots: ${kaartSlots.map(c => `${c.kind} ${c.n}/${c.limit}`).join(', ')}`}
+          />
+        ) : null}
         <Box flexDirection="column">
           <Button
             key="enabled"
@@ -302,7 +336,7 @@ export async function slotsTab($: Engine, e: any) {
           >
             {isOff ? '☐' : '☑'} agent-slots aan
           </Button>
-          <Text color={isOff ? 'warning' : undefined} dimColor={!isOff}>
+          <Text color={isOff ? k.warn : k.mut}>
             {isOff
               ? 'Uit: niets wordt tegengehouden of ingepakt, in alle sessies op deze computer. Slots en geheugen hieronder zijn alleen ter info.'
               : 'Aan: zware commando\'s, browsers en sessies wachten als er geen slot of geheugen vrij is.'}
@@ -310,53 +344,53 @@ export async function slotsTab($: Engine, e: any) {
         </Box>
 
         <Box flexDirection="column">
-          <Text bold>Geheugen</Text>
+          <Text bold color={k.accent}>Geheugen</Text>
           <Text>
-            <Text color={tone}>{memoryBar(free)}</Text> {free}% vrij van {memory.totalGB} GB
+            <Text color={toonKleur}>{meterTekst(free, memory.totalGB)}</Text>
           </Text>
-          <Text dimColor>
+          <Text color={k.mut}>
             grens {config.floorPercent}% · kritiek {config.criticalPercent}% · {state}
           </Text>
         </Box>
 
         <Box flexDirection="column">
-          <Text bold>Slots</Text>
+          <Text bold color={k.accent}>Slots</Text>
           {Object.entries(config.limits).map(([kind, limit]) => {
             const held = slots.filter(s => s.kind === kind)
             const full = held.length >= limit
             return (
               <Box flexDirection="column">
                 <Text>
-                  <Text color={full ? 'warning' : 'success'}>{'●'.repeat(held.length)}{'○'.repeat(Math.max(0, limit - held.length))}</Text>
-                  {'  '}{kind.padEnd(8)}{held.length}/{limit}
+                  <Text color={full ? k.warn : k.ok}>{'●'}</Text>
+                  {'  '}{kind.padEnd(8)}<Text color={k.mut}>bezet </Text>{held.length}/{limit}
                 </Text>
-                {held.map(holder => <Text dimColor wrap="truncate-end">{"    "}{holderLine(holder)}</Text>)}
+                {held.map(holder => <Text color={k.mut} wrap="truncate-end">{"    "}{holderLine(holder)}</Text>)}
               </Box>
             )
           })}
         </Box>
 
         <Box flexDirection="column">
-          <Text bold>Laatste weigeringen</Text>
-          {refusals.length === 0 && <Text dimColor>Geen.</Text>}
+          <Text bold color={k.accent}>Laatste weigeringen</Text>
+          {refusals.length === 0 && <Text color={k.mut}>Geen.</Text>}
           {[...refusals].reverse().map(r => (
             <Text wrap="truncate-end">
-              <Text dimColor>{clock(r.t)}</Text>  {(r.kind ?? r.tool ?? '').padEnd(8)}<Text color="warning">{r.reason ?? ''}</Text>  {r.command ?? ''}
+              <Text color={k.mut}>{clock(r.t)}  {(r.kind ?? r.tool ?? '').padEnd(8)}</Text><Text color={k.warn}>{r.reason ?? ''}</Text><Text color={k.mut}>  {r.command ?? ''}</Text>
             </Text>
           ))}
         </Box>
 
         {(snap.overflow ?? []).length > 0 && (
           <Box flexDirection="column">
-            <Text bold>Cloud-workers</Text>
+            <Text bold color={k.accent}>Cloud-workers</Text>
             {[...(snap.overflow ?? [])].reverse().slice(0, 5).map(job => (
               <Box flexDirection="column">
                 <Text wrap="truncate-end">
-                  <Text color={job.status === 'done' ? 'success' : 'warning'}>{job.status === 'done' ? '✓' : '…'}</Text>
-                  {'  '}{job.branch.replace(/^overflow\//, '')}  <Text dimColor>{job.status === 'done' ? `klaar ${clock(job.finished ?? job.started)}${job.delivered ? ' · gemeld' : ''}` : `loopt sinds ${clock(job.started)}`}</Text>
+                  <Text color={job.status === 'done' ? k.ok : k.warn}>{job.status === 'done' ? '✓' : '…'}</Text>
+                  {'  '}{job.branch.replace(/^overflow\//, '')}  <Text color={k.mut}>{job.status === 'done' ? `klaar ${clock(job.finished ?? job.started)}${job.delivered ? ' · gemeld' : ''}` : `loopt sinds ${clock(job.started)}`}</Text>
                 </Text>
-                {job.task ? <Text dimColor wrap="truncate-end">{'    '}{job.task}</Text> : null}
-                {job.error ? <Text color="error" wrap="truncate-end">{'    '}{job.error}</Text> : null}
+                {job.task ? <Text color={k.mut} wrap="truncate-end">{'    '}{job.task}</Text> : null}
+                {job.error ? <Text color={k.err} wrap="truncate-end">{'    '}{job.error}</Text> : null}
               </Box>
             ))}
           </Box>
@@ -373,14 +407,14 @@ export async function slotsTab($: Engine, e: any) {
           >
             {config.cloudOverflow ? '☑' : '☐'} Cloud-overflow
           </Button>
-          <Text dimColor>
+          <Text color={k.mut}>
             {config.cloudOverflow
               ? 'Aan: bij een weigering voor een taak (tests, builds, subagents) stelt de agent voor om hem uit te besteden aan een cloud-worker.'
               : 'Uit: bij een weigering wacht de agent tot er lokaal plek is.'}
           </Text>
         </Box>
 
-        <Text dimColor>
+        <Text color={k.mut}>
           Bijgewerkt {clock(snap.at)}{snap.error ? ` · fout: ${snap.error.slice(0, 80)}` : ''} · /agent-slots status voor tekst
         </Text>
       </Box>
