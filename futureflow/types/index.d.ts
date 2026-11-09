@@ -41,7 +41,7 @@ export type SlotsSnapshot = {
   error?: string
 }
 
-export type DashboardTab = 'overzicht' | 'slots' | 'minify' | 'stijl'
+export type DashboardTab = 'overzicht' | 'slots' | 'minify' | 'stijl' | 'connectors'
 
 export type MinifyNiveau = 'O1' | 'O2' | 'O3' | 'uit'
 
@@ -127,6 +127,10 @@ declare module 'claude-code' {
       'voortgang.opdracht': string
       /** Telt op als de ✓-regel moet verdwijnen, zodat de balk opnieuw tekent. */
       'voortgang.tik': number
+      /** Telt op na een klik in de tab Connectors, zodat die opnieuw tekent. */
+      'connectors.versie': number
+      /** Per server wat in deze sessie met een klik is omgezet; geldt pas vanaf de volgende sessie. */
+      'connectors.gewijzigd': Record<string, 'uit' | 'aan'>
     }
   }
 }

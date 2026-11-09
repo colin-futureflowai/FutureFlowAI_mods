@@ -3,6 +3,7 @@ import type { EngineInterface as Engine, Register } from 'claude-code'
 
 import type { DashboardTab, MinifyTeller, SlotsSnapshot } from '../types'
 
+import { connectorsTab } from './connectors'
 import { failOpen, oud } from './ctx'
 import { minifyTab, niveauLezen } from './minify'
 import { openDashboard, PANE, TABS } from './paneel'
@@ -21,12 +22,18 @@ const tabAtom = atom({ plugin: 'futureflow', key: 'dashboard.tab' } as const, nu
 const tellerAtom = atom({ plugin: 'futureflow', key: 'minify.teller' } as const, null as MinifyTeller | null)
 const snapshotAtom = atom({ plugin: 'futureflow', key: 'slots.snapshot' } as const, null as SlotsSnapshot | null)
 
-const NAMEN: Record<DashboardTab, string> = { overzicht: 'Overzicht', slots: 'Slots', minify: 'Minify', stijl: 'Stijl' }
+const NAMEN: Record<DashboardTab, string> = {
+  overzicht: 'Overzicht',
+  slots: 'Slots',
+  minify: 'Minify',
+  stijl: 'Stijl',
+  connectors: 'Connectors',
+}
 
 // Start van het dashboard; register.tsx roept dit aan vanuit zijn ene session.start.
 export async function startDashboard($: Engine): Promise<void> {
   try {
-    await $.command.register({ name: 'futureflow', description: 'Dashboard van FutureFlowAI: overzicht, slots, minify, stijl' })
+    await $.command.register({ name: 'futureflow', description: 'Dashboard van FutureFlowAI: overzicht, slots, minify, stijl, connectors' })
   } catch (err) {
     failOpen($, err)
   }
@@ -208,6 +215,7 @@ export const registerDashboard = (on: Parameters<Register>[0]): void => {
       tab === 'slots' ? await slotsTab($, e)
       : tab === 'minify' ? await minifyTab($, e)
       : tab === 'overzicht' ? await overzichtTab($, e, p)
+      : tab === 'connectors' ? await connectorsTab($, e)
       : await stijlTab($, e, p)
 
     return (
