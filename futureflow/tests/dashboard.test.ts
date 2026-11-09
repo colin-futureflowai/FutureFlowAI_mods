@@ -159,29 +159,32 @@ test('overzicht zonder gegevens crasht niet', async ($, on) => {
   await ui2.unmount()
 })
 
-const laatsteStijl = () => STORED.filter(s => s.key === 'stijl').at(-1)?.value
+// De tab Stijl stuurt de ingebouwde claude-skins: voorkeuren in de store onder `skins.prefs`.
+const laatstePrefs = () => STORED.filter(s => s.key === 'skins.prefs').at(-1)?.value
 
-test('stijl uit zet aan op false', async ($, on) => {
+test('stijl uit zet de skin op off', async ($, on) => {
   fake(on)
   STORED.length = 0
   const r = await run($, 'futureflow', 'stijl uit')
-  expect(laatsteStijl().aan).toBe(false)
+  expect(laatstePrefs().skin).toBe('off')
   expect(r.text).toContain('uit')
 })
 
-test('stijl licht zet modus licht', async ($, on) => {
+test('stijl aan en stijl noir kiezen een skin; standaard is futureflow', async ($, on) => {
   fake(on)
   STORED.length = 0
-  const r = await run($, 'futureflow', 'stijl licht')
-  expect(laatsteStijl().modus).toBe('licht')
-  expect(r.text).toContain('licht')
+  await run($, 'futureflow', 'stijl noir')
+  expect(laatstePrefs().skin).toBe('noir')
+  const r = await run($, 'futureflow', 'stijl aan')
+  expect(laatstePrefs().skin).toBe('futureflow')
+  expect(r.text).toContain('futureflow')
 })
 
 test('stijl met onbekend woord geeft één regel uitleg en schrijft niets', async ($, on) => {
   const f = fake(on)
   STORED.length = 0
   const r = await run($, 'futureflow', 'stijl paars')
-  expect(r.text).toContain('uit|aan|licht|donker|auto')
+  expect(r.text).toContain('aan|uit|<skin>')
   expect(STORED.length).toBe(0)
   expect(f.opened.length).toBe(0)
 })
@@ -195,36 +198,36 @@ test('kale /futureflow stijl opent de tab', async ($, on) => {
   await ui.unmount()
 })
 
-test('vinkje diff uit schakelt alleen diff uit', async ($, on) => {
+test('vinkje verbruiksbalk zet alleen band uit', async ($, on) => {
   fake(on)
   STORED.length = 0
   await run($, 'futureflow', 'stijl')
   const ui = await $.ui.mount(PANE('desktop'))
-  await ui.press({ key: 'stijl-diff' } as any)
-  const s = laatsteStijl()
-  expect(s.diff).toBe(false)
-  expect(s.aan).toBe(true)
-  expect(s.regels).toBe(true)
-  expect(s.shell).toBe(true)
-  expect(s.spinner).toBe(true)
-  expect(s.modus).toBe('auto')
+  await ui.press({ key: 'stijl-band' } as any)
+  const p = laatstePrefs()
+  expect(p.band).toBe(false)
+  expect(p.skin).toBe('futureflow')
+  expect(p.shell).toBe(true)
+  expect(p.markdown).toBe(true)
   await ui.unmount()
 })
 
-test('stijl-tab tekent op terminal zonder Svg', async ($, on) => {
+test('stijl-tab tekent op terminal zonder Svg, met de skins als knoppen', async ($, on) => {
   fake(on)
   await run($, 'futureflow', 'stijl')
   const ui = await $.ui.mount(PANE('terminal'))
   expect(JSON.stringify(await ui.drawn())).not.toContain('"type":"Svg"')
-  expect(await ui.find({ type: 'Text', text: /Groene spinner/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Verbruiksbalk boven de prompt/ })).toBeDefined()
+  expect(await ui.find({ type: 'Button', key: 'stijl-skin-futureflow' } as any)).toBeDefined()
   await ui.unmount()
 })
 
-test('stijl-tab tekent op desktop een voorbeeld als Svg', async ($, on) => {
-  fake(on)
+test('knop Alle instellingen opent het instellingenpaneel van de skin', async ($, on) => {
+  const f = fake(on)
   await run($, 'futureflow', 'stijl')
   const ui = await $.ui.mount(PANE('desktop'))
-  expect(await ui.find({ type: 'Svg', alt: /Wijziging in/ } as any)).toBeDefined()
+  await ui.press({ key: 'stijl-alles' } as any)
+  expect(f.opened.map(o => o.id)).toContain('skins-settings')
   await ui.unmount()
 })
 

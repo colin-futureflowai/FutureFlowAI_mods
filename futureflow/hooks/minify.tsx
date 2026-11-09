@@ -5,7 +5,7 @@ import type { MinifyInkorting, MinifyNiveau, MinifyTeller } from '../types'
 
 import { failOpen, log, oud } from './ctx'
 import { openDashboard } from './paneel'
-import { stopTikker } from './skin'
+import { skinsTurnComplete } from './skins/register'
 
 import { herinnering, isUitVerzoek, leesCommando, NIVEAUS, regelsVoor, STANDAARD, subagentRegel } from '../lib/regels.mjs'
 import { inkorten, voetregel } from '../lib/uitvoer.mjs'
@@ -338,8 +338,8 @@ export const registerMinify = (on: Parameters<Register>[0]): void => {
 
   // Meten: output-tokens per beurt van de hoofdsessie, per sessie en per niveau.
   on('turn.complete', async ($, e, next) => {
-    // De spinner-tikker van de skin hoort bij de beurt van de hoofdsessie.
-    if (!e.agentId) stopTikker()
+    // Skin (claude-skins): voettekst en verbruiksbalk van de beurt. Een fout daar raakt minify niet.
+    await skinsTurnComplete($, e).catch(err => failOpen($, err))
     if ((await oud($)).minify) return next(e)
     const result = await next(e)
     if (e.agentId || !e.usage || e.isAborted) return result

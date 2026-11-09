@@ -6,13 +6,11 @@ import type { DashboardTab, MinifyTeller, SlotsSnapshot } from '../types'
 import { failOpen, oud } from './ctx'
 import { minifyTab, niveauLezen } from './minify'
 import { openDashboard, PANE, TABS } from './paneel'
-import { huidigeModus, leesStijl, zetStijl } from './skin'
-import { diffKaart, toolRegel } from './skin-kaarten'
+import { openSkinSettings, setSkinPrefs, skinPrefs } from './skins/register'
 import { slotsTab, startSlotsTicker } from './slots'
 
 import { kpis } from '../lib/overzicht.mjs'
 import type { Kpi } from '../lib/overzicht.mjs'
-import { icoonVoor } from '../lib/skin.mjs'
 import { balkTekst, palet, woordmerkSvg } from '../lib/thema.mjs'
 
 export { openDashboard }
@@ -103,80 +101,74 @@ async function overzichtTab($: Engine, e: any, p: ReturnType<typeof palet>) {
   )
 }
 
-const MODI = ['auto', 'licht', 'donker'] as const
+// Skins die het dashboard als knop toont; de rest staat in /skin.
+const SNEL = ['futureflow', 'noir', 'github', 'mono'] as const
 
-// Inhoud van de tab Stijl: skin aan/uit, thema, losse onderdelen en (desktop) een voorbeeld.
+// Onderdelen van de skin die je hier aan- of uitzet (sleutel in Prefs, naam in het dashboard).
+const ONDERDELEN = [
+  ['band', 'Verbruiksbalk boven de prompt'],
+  ['shell', 'Shell-kaart'],
+  ['markdown', 'Antwoorden opmaken'],
+  ['highlight', 'Code kleuren'],
+  ['rail', 'Rail langs tool-aanroepen'],
+  ['shimmer', 'Glans op de spinner'],
+] as const
+
+// Inhoud van de tab Stijl: welke skin, aan/uit, losse onderdelen en de volledige instellingen.
 // Tekent alleen; schrijven gebeurt in de onPress van de knoppen.
 async function stijlTab($: Engine, e: any, p: ReturnType<typeof palet>) {
-  const el = $.ui.resolve(e)
-  const { Box, Text, Button } = el
-  const desktop = e.surface !== 'terminal' && 'Svg' in el
-  const stijl = await leesStijl($)
-  const zet = (deel: Parameters<typeof zetStijl>[1]) => async () => {
-    await zetStijl($, deel)
+  const { Box, Text, Button } = $.ui.resolve(e)
+  const { prefs, names } = await skinPrefs($)
+  const zet = (deel: Parameters<typeof setSkinPrefs>[1]) => async () => {
+    await setSkinPrefs($, deel)
     $.ui.invalidate('ui.render')
   }
-  const vinkje = (sleutel: 'regels' | 'diff' | 'shell' | 'spinner', naam: string) => (
-    <Button key={`stijl-${sleutel}`} onPress={zet({ [sleutel]: !stijl[sleutel] })}>
-      <Text>{`${stijl[sleutel] ? '☑' : '☐'} ${naam}`}</Text>
-    </Button>
-  )
-  const voorbeeld = desktop ? (
-    <Box flexDirection="column" gap={1}>
-      {toolRegel(el, p, {
-        icoon: icoonVoor('Edit'), label: 'Edit', kort: 'src/app.ts', fout: false, duur: '0,4s', tel: { plus: 1, min: 1 },
-        open: false, velden: [], resultaat: '', wissel: () => undefined,
-      })}
-      {diffKaart(el, true, p, 'src/app.ts', [
-        { soort: ' ', tekst: 'const naam = leesNaam()', nr: 11 },
-        { soort: '-', tekst: 'console.log(naam)', nr: 12 },
-        { soort: '+', tekst: 'toon(naam)', nr: 12 },
-      ], { plus: 1, min: 1 })}
-    </Box>
-  ) : ''
+  const aan = prefs.skin !== 'off'
+  const snel = SNEL.filter(n => names.includes(n))
   return (
     <Box flexDirection="column" gap={1}>
       <Box flexDirection="column">
-        <Button key="stijl-aan" hotkey="s" onPress={zet({ aan: !stijl.aan })}>
-          <Text>{`${stijl.aan ? '☑' : '☐'} Skin aan`}</Text>
+        <Button key="stijl-aan" hotkey="s" onPress={zet({ skin: aan ? 'off' : 'futureflow' })}>
+          <Text>{`${aan ? '☑' : '☐'} Skin aan`}</Text>
         </Button>
-        <Text dimColor>Uit = Claude Code's eigen weergave.</Text>
+        <Text dimColor>Uit = Claude Code's eigen weergave. Licht of donker volgt het thema van Claude Code (/theme).</Text>
       </Box>
       <Box flexDirection="row" gap={2}>
-        <Text dimColor>Thema</Text>
-        {MODI.map(m => (
-          <Button key={`stijl-modus-${m}`} onPress={zet({ modus: m })}>
-            {m === stijl.modus ? <Text color={p.groen} bold>{m}</Text> : m}
+        <Text dimColor>Skin</Text>
+        {snel.map(n => (
+          <Button key={`stijl-skin-${n}`} onPress={zet({ skin: n })}>
+            {n === prefs.skin ? <Text color={p.groen} bold>{n}</Text> : n}
+          </Button>
+        ))}
+        {aan && !(snel as readonly string[]).includes(prefs.skin) ? <Text color={p.groen} bold>{prefs.skin}</Text> : ''}
+      </Box>
+      <Box flexDirection="column">
+        {ONDERDELEN.map(([sleutel, naam]) => (
+          <Button key={`stijl-${sleutel}`} onPress={zet({ [sleutel]: !prefs[sleutel] })}>
+            <Text>{`${prefs[sleutel] ? '☑' : '☐'} ${naam}`}</Text>
           </Button>
         ))}
       </Box>
-      <Box flexDirection="column">
-        {vinkje('regels', 'Tool-regels')}
-        {vinkje('diff', 'Diff-kaart')}
-        {vinkje('shell', 'Shell-kaart')}
-        {vinkje('spinner', 'Groene spinner')}
+      <Box flexDirection="row" gap={2}>
+        <Button key="stijl-alles" hotkey="a" onPress={() => openSkinSettings($)}>
+          Alle instellingen
+        </Button>
+        <Text dimColor>of /skin, /skin gallery</Text>
       </Box>
-      {voorbeeld}
     </Box>
   )
 }
 
-const STIJL_HULP = 'Gebruik: /futureflow stijl uit|aan|licht|donker|auto'
+const STIJL_HULP = 'Gebruik: /futureflow stijl aan|uit|<skin>, bv. futureflow of noir. Meer: /skin'
 
 // Past de stijl aan vanuit een commando; één regel tekst terug.
-async function stijlCommando($: Engine, keuze: string): Promise<{ text: string } | null> {
-  const deel: Record<string, Parameters<typeof zetStijl>[1]> = {
-    uit: { aan: false },
-    aan: { aan: true },
-    licht: { modus: 'licht' },
-    donker: { modus: 'donker' },
-    auto: { modus: 'auto' },
-  }
-  const gekozen = deel[keuze]
-  if (!gekozen) return { text: `Onbekende stijl "${keuze}". ${STIJL_HULP}` }
-  await zetStijl($, gekozen)
+async function stijlCommando($: Engine, keuze: string): Promise<{ text: string }> {
+  const { names } = await skinPrefs($)
+  const skin = keuze === 'aan' ? 'futureflow' : keuze === 'uit' ? 'off' : keuze
+  if (skin !== 'off' && !names.includes(skin)) return { text: `Onbekende stijl "${keuze}". ${STIJL_HULP}` }
+  await setSkinPrefs($, { skin })
   $.ui.invalidate('ui.render')
-  return { text: keuze === 'uit' ? 'Skin uit: Claude Code\'s eigen weergave.' : keuze === 'aan' ? 'Skin aan.' : `Thema van de skin: ${keuze}.` }
+  return { text: skin === 'off' ? 'Skin uit: Claude Code\'s eigen weergave.' : `Skin: ${skin}.` }
 }
 
 export const registerDashboard = (on: Parameters<Register>[0]): void => {
@@ -203,7 +195,7 @@ export const registerDashboard = (on: Parameters<Register>[0]): void => {
     const el = $.ui.resolve(e)
     const { Box, Text, Button } = el
     const tab = (await read($, tabAtom)) ?? 'overzicht'
-    const modus = await huidigeModus($)
+    const modus = (await skinPrefs($)).isLight ? 'licht' : 'donker'
     const p = palet(modus)
     // Alleen de terminal tekent geen Svg. Niet `'Svg' in el` gebruiken: de tabel antwoordt daar ook in de terminal ja.
     const Svg = e.surface !== 'terminal' && 'Svg' in el ? el.Svg : undefined

@@ -24,19 +24,25 @@ Files that fall under the Apache License 2.0 (Minify):
   tests/minify.test.ts, tests/minify-lib.test.mjs, tests/minify-regels-sh.test.mjs
   docs/minify.md
 
-The part of this plugin called Skin (tool rows, diff card, shell card, green
-spinner) is based on claude-skins (https://github.com/hellosverre/claude-skins),
-commit cf0d39f, licensed under the MIT License (see LICENSES/MIT-claude-skins.txt):
+The part of this plugin called Skin is claude-skins
+(https://github.com/hellosverre/claude-skins), version 0.5.16, commit cf0d39f,
+licensed under the MIT License (see LICENSES/MIT-claude-skins.txt):
 
   claude-skins
   Copyright (c) 2026 hellosverre
 
-From claude-skins we took the shape of the render events (ToolUse, ToolResult,
-Spinner, TurnDuration), the ▸ disclosure of a tool row, timing each call in
-tool.call, following the theme through config.set, reading Bash and Edit
-results (stdout/stderr, "Exit code N", structuredPatch) and the layout of the
-diff and shell cards. The code itself is new. Files:
-  hooks/skin.tsx, hooks/skin-kaarten.tsx
-  lib/skin.mjs, lib/skin.d.mts, lib/skin-svg.mjs, lib/skin-svg.d.mts
+Its code is included in hooks/skins/ and its tests in tests/skins-*.test.ts(x),
+with these changes by FutureFlowAI (each marked with a "futureflow:" comment):
+  - a FutureFlowAI skin (hooks/skins/themes/futureflow.ts), the default;
+  - state and store keys under the plugin futureflow with the prefix "skins.";
+  - session.start and turn.complete split into startSkins/skinsTurnComplete,
+    called from futureflow's own hooks; tool.call measures without failing a call
+    and shows commands unwrapped from the slots wrapper;
+  - the update check, the star request, the $.skins API for other mods and the
+    classic.SessionStart, session.append and prompt.compose hooks removed;
+  - helpers for the dashboard (skinPrefs, setSkinPrefs, openSkinSettings).
+
+hooks/skins/vendor/mermaid-ascii.js bundles beautiful-mermaid 1.1.3 (MIT,
+Copyright (c) 2026 Craft Docs); its licence is in the file's header.
 
 All other files in this plugin are licensed under the MIT License.

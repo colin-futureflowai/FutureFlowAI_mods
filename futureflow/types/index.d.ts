@@ -43,20 +43,6 @@ export type SlotsSnapshot = {
 
 export type DashboardTab = 'overzicht' | 'slots' | 'minify' | 'stijl'
 
-/** Instellingen van de FFAI-skin, in `$.store` onder `stijl`. */
-export type Stijl = {
-  aan: boolean
-  modus: 'auto' | 'licht' | 'donker'
-  /** Tool-regels met icoon en tijd. */
-  regels: boolean
-  /** Diff-kaart onder Edit/Write/MultiEdit. */
-  diff: boolean
-  /** Shell-kaart onder Bash. */
-  shell: boolean
-  /** Spinner en beurtduur in groen. */
-  spinner: boolean
-}
-
 export type MinifyNiveau = 'O1' | 'O2' | 'O3' | 'uit'
 
 export type MinifyTeller = {
@@ -80,24 +66,45 @@ export type MinifyInkorting = {
 }
 
 declare module 'claude-code' {
+  interface EngineInterface {
+    // What the skin-code mod adds, when it is installed (absent, or a call throws, when it
+    // is not): skins leaves it the replies it draws.
+    skinCode?: {
+      draws: (args: { text: string }) => Promise<boolean>
+    }
+  }
+
   interface PluginState {
     futureflow: {
+      // State van de ingebouwde claude-skins (hooks/skins), met `skins.` voor elke sleutel.
+      'skins.prefs': Prefs
+      'skins.custom': Record<string, CustomSkin>
+      'skins.startedAt': number
+      'skins.frame': number
+      'skins.turns': Record<string, TurnStats>
+      'skins.duration': StateFamily<number>
+      'skins.editing': SkinSlot
+      'skins.usage': UsageSnap
+      // The usage band's countdowns by limit label, as last drawn.
+      'skins.countdowns': Record<string, string>
+      'skins.isLight': boolean
+      'skins.images': StateFamily<boolean>
+      'skins.quiet': StateFamily<boolean>
+      // A shell call's command, for its output card's header: ToolResult does not carry it.
+      'skins.command': StateFamily<string>
+      // Each tool row's chevron, and whether its opened answer shows past the fold.
+      'skins.disclosure': StateFamily<Disclosure>
+      'skins.showAll': StateFamily<boolean>
+      // Files the turn created or edited, by absolute path, for their colour in rows and prose.
+      'skins.touched': Record<string, Touch>
+      // Per drawing, the keys of the blocks the person unfolded.
+      'skins.folds': StateFamily<string[]>
+      'skins.compacting': boolean
+      'skins.pinned': boolean
+      'skins.settle': number
+      'skins.lastReply': string
       'slots.snapshot': SlotsSnapshot | null
       'dashboard.tab': DashboardTab | null
-      /** Laatst gezette waarde van Claude Code's thema, om skin en dashboard opnieuw te tekenen. */
-      'skin.theme': string | null
-      /** Stijl zoals laatst gezet in deze sessie (spiegel van de store, zodat tekenaars opnieuw tekenen). */
-      'skin.stijl': Stijl | null
-      /** Per tool-aanroep (id = tool_use_id): duur in ms, -1 zolang onbekend. */
-      'skin.duur': number
-      /** Per Bash-aanroep: het commando, voor de kop van de shell-kaart. */
-      'skin.commando': string
-      /** Per tool-regel: opengeklapt met ▸. */
-      'skin.open': boolean
-      /** Begin van de lopende beurt (clock-ms), 0 = onbekend. */
-      'skin.start': number
-      /** Telt elke seconde op zolang de spinner loopt, om hem opnieuw te tekenen. */
-      'skin.tik': number
       'minify.niveau': MinifyNiveau | null
       'minify.teller': MinifyTeller | null
       /** Output-tokens per beurt van deze sessie, de laatste 60. */
@@ -107,3 +114,101 @@ declare module 'claude-code' {
     }
   }
 }
+
+// ---- claude-skins (MIT, hellosverre, commit cf0d39f): typen van de ingebouwde skin ----
+
+// Every colour a skin names. `fg` is body text, `muted` secondary text, `surface` the
+// band behind a table header, `zebra` every other table row.
+export type SkinSlot =
+  | 'read'
+  | 'write'
+  | 'run'
+  | 'search'
+  | 'web'
+  | 'mcp'
+  | 'other'
+  | 'user'
+  | 'fg'
+  | 'muted'
+  | 'surface'
+  | 'zebra'
+  | 'ok'
+  | 'err'
+  | 'warn'
+
+// What /skin and the settings pane change. `skin` is a skin's name, or 'off'.
+export type Prefs = {
+  skin: string
+  icons: 'unicode' | 'ascii'
+  // Which side the outline around a typed prompt sits on; 'right' matches the desktop app.
+  // 'plain' drops the outline for a leading marker.
+  prompt: 'left' | 'right' | 'plain'
+  // Whose words the spinner and the turn footer show: 'claude' keeps Claude Code's own,
+  // whatever the skin says; 'skin' draws the skin's.
+  words: 'claude' | 'skin'
+  rail: boolean
+  // 'text' keeps the skin but draws tables and code as text the desktop can select.
+  tables: 'on' | 'text' | 'off'
+  shimmer: boolean
+  band: boolean
+  // When each plan limit resets, beside its meter in the band.
+  countdown: boolean
+  clipOutput: boolean
+  markdown: boolean
+  quiet: boolean
+  charts: boolean
+  // Display formulas as cards and inline TeX as Unicode.
+  math: boolean
+  // Tables and code in slash-command output drawn the way replies are.
+  commands: boolean
+  // Shell output as a card: the command, its exit status, stderr apart, long output folded.
+  shell: boolean
+  // Fenced code on the terminal and shell output in the skin's colours.
+  highlight: boolean
+  // The model-only note that charts and diagrams draw here.
+  hints: boolean
+  // Bare URLs as links: OSC 8 where the terminal draws it, anchors on the desktop.
+  links: boolean
+  // Copy buttons on tables, code, diagrams and whole replies.
+  copy: boolean
+  // Long code, tables and shell output folded behind a `▾ N more` control.
+  fold: boolean
+  // Runs of reads and searches drawn open, as if each had been expanded, not as one line.
+  expand: boolean
+  // The band's Compact button, and its nudge once the context is full enough to be worth it.
+  compact: boolean
+  // While /skin calm is on, the parts it changed as they were before it, for calm off to
+  // put back; null while it is off.
+  calm: CalmSnapshot | null
+}
+
+// The prefs /skin calm changes: no shimmer, no rail line above each tool row, quiet output.
+export type CalmSnapshot = { shimmer: boolean; rail: boolean; quiet: boolean }
+
+// A skin someone made in the settings pane or through their agent: a built-in skin
+// with some slots and words changed.
+export type CustomSkin = {
+  name: string
+  label: string
+  base: string
+  palette: Partial<Record<SkinSlot, string>>
+  spinner: string[]
+  done: string[]
+}
+
+// How full the context window is and how much of each plan limit is spent, in percent,
+// as the band above the prompt shows them, and when each limit resets (epoch ms) where known.
+export type UsageSnap = { context: number | null; limits: { label: string; percent: number; resetsAt?: number }[] }
+
+// What one turn did, shown in its footer.
+export type TurnStats = { tools: number; added: number; removed: number }
+
+// What this turn did to a file: made it, or changed one that was there.
+export type Touch = 'created' | 'edited'
+
+// How a tool row stands: opened or closed by the person, or `auto`, open only when the
+// call failed.
+export type Disclosure = 'auto' | 'open' | 'closed'
+
+// `$.skins.markdown`'s argument: where the tree draws, the markdown, the width in columns.
+export type SkinsMarkdownArgs = { surface: 'terminal' | 'desktop' | 'vscode' | 'mobile'; text: string; columns: number }

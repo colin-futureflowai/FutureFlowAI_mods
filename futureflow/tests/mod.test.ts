@@ -1,10 +1,16 @@
-import { expect, test } from 'claude-code/testing'
+import { expect, mock, test } from 'claude-code/testing'
 
 const S = 'agent-slots@futureflowai-mods'
 const M = 'minify@futureflowai-mods'
 
 // Nep-omgeving: bestanden in een Map; alle on(...)-mocks vóór de eerste $-aanroep.
 function fake(on: any, files: Record<string, string>, env: Record<string, string> = {}, dirs: Record<string, string[]> = {}) {
+  // De ingebouwde skin (claude-skins) meet tijd en start tikkers: een nepklok, en het design-tool.
+  mock.clock(on)
+  on('tool.register', () => ({ value: undefined }))
+  on('session.cwd', () => ({ value: '/proj' }))
+  on('session.usage', () => ({ value: { context: { tokens: 0, window: 200000 }, rateLimits: [] } }))
+  on('config.list', () => ({ value: [] }))
   const written = new Map<string, string>()
   const toasts: string[] = []
   const vars: Record<string, string> = { HOME: '/home/t', ...env }
@@ -50,7 +56,7 @@ test('session.start schrijft een leeg oud-bestand zonder oude plugins, en geen t
   const f = fake(on, {})
   await $.session.start({ cwd: '/r', surface: 'terminal', isInteractive: true } as any)
   expect(f.written.get('/home/t/.claude/futureflow/oud')).toBe('')
-  expect(f.toasts.length).toBe(0)
+  expect(f.toasts).toEqual([])
 })
 
 test('FUTUREFLOW_HOME bepaalt waar oud komt; uitgeschakelde plugin telt niet mee', async ($, on) => {

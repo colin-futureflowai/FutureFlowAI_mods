@@ -5,7 +5,7 @@ import type { OverflowJob, SlotsHolder, SlotsSnapshot } from '../types'
 
 import { failOpen, log, oud } from './ctx'
 import { openDashboard, PANE } from './paneel'
-import { stopTikker } from './skin'
+import { stopSkins } from './skins/register'
 
 import { classify, hasShellBackground, maskSecrets, unwrapCommand, wrapCommand } from '../lib/classify.mjs'
 import { reportMessage } from '../lib/report.mjs'
@@ -268,7 +268,7 @@ export const registerSlots = (on: Parameters<Register>[0]): void => {
 
   // Browser-slot van deze sessie vrijgeven als de sessie stopt.
   on('session.end', async ($, e, next) => {
-    stopTikker() // spinner-tikker van de skin
+    stopSkins() // tikkers van de skin
     if ((await oud($)).slots) return next(e)
     if (sessionId) await cli($, ['release-session', '--session', sessionId]).catch(() => undefined)
     return next(e)

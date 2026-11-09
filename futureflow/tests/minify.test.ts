@@ -1,10 +1,13 @@
-import { expect, test } from 'claude-code/testing'
+import { expect, mock, test } from 'claude-code/testing'
 
 type Answer = Record<string, unknown>
 
 // Nep-omgeving: env, sessie, bestanden (in een Map) en een systeemprompt met één sectie.
 // Alle mocks vóór de eerste $-aanroep registreren.
 function fake(on: any, begin: Record<string, string> = {}) {
+  // De ingebouwde skin (claude-skins) meet tijd en start tikkers: een nepklok, en het design-tool.
+  mock.clock(on)
+  on('tool.register', () => ({ value: undefined }))
   const files = new Map<string, string>(Object.entries(begin))
   const store = new Map<string, unknown>()
   const status: (string | undefined)[] = []

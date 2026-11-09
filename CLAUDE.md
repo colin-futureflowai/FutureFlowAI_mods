@@ -70,6 +70,18 @@ Na een wijziging: `/reload-plugins` in de sessie (een lokale marketplace wordt d
 
 ## Plugins
 
+### futureflow
+Eén mod die agent-slots, minify en een skin bundelt, met dashboard `/futureflow` (tabs Overzicht, Slots, Minify, Stijl). Ontwerp: `docs/superpowers/specs/2026-11-08-futureflow-supermod-design.md`.
+- Eén hooks-module: per event mag maar één ongematchte handler bestaan. Onderdelen exporteren `startX($)` en gematchte handlers; `register.tsx` heeft de enige `session.start`, `minify.tsx` de enige `turn.complete`, `slots.tsx` de enige ongematchte `tool.call` en `session.end`.
+- Skin = claude-skins 0.5.16 (MIT, commit `cf0d39f`) in `hooks/skins/`, met skin `futureflow` als standaard. Elke eigen wijziging heeft een `futureflow:`-commentaar; de lijst staat in `NOTICE`. Upstream-update = handmatig diffen tegen die commit.
+- `classic.SessionStart`, `session.append` en `prompt.compose` niet gebruiken: Claude Code slaat ze bij een zelf geïnstalleerde plugin over en zet bij elke sessie een melding in beeld.
+- De validator weigert `$` doorgeven aan een pijl-functie (`const f = ($) => …`); gebruik `function f($) {}`.
+- `types` in `plugin.json` moet één zelfstandig bestand zijn: geen `import` in `types/index.d.ts`.
+- Een fout in de `tool.call` van één onderdeel slaat de hele `tool.call` van futureflow over. Skin meet daarom alleen in try/catch en laat de aanroep nooit mislukken.
+- Slots verpakt zware Bash-commando's; wie het commando toont of beoordeelt, pakt het eerst uit met `unwrapCommand` (`lib/classify.mjs`).
+- `tsc` alleen draaien als `.claude-plugin/types/` bestaat: zonder die map valt `noEmit` weg en schrijft `tsc` overal `.js`-bestanden.
+- Testen: `claude plugin test futureflow` (ook de tests van claude-skins als `tests/skins-*`; die kiezen noir via de store) en `node --test futureflow/tests/*.test.mjs`.
+
 ### agent-slots
 Houdt agents tegen voordat ze zoveel dev-servers, tests, browsers of sessies starten dat de computer vastloopt. Werkt voor Claude Code automatisch; andere agents gebruiken de CLI `agent-slot`. Ontwerp en regels: `agent-slots/DESIGN.md`.
 - **CLI** `cli/agent-slot.mjs` (niet `bin/`: de pluginbibliotheek op claude.ai weigert een `bin/`-map op het hoogste niveau; de kopie in `~/.claude/agent-slots/bin/` staat buiten de plugin en blijft): alle state in `~/.claude/agent-slots/` (locks met `O_EXCL`, `config.json`, `log.jsonl`). Alleen Node-builtins, want het bestand wordt los gekopieerd naar `~/.claude/agent-slots/bin/` (bij elke `session.start`) en de shim in `~/.local/bin` wijst daarheen.
