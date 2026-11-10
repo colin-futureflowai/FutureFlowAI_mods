@@ -177,6 +177,34 @@ test('openrouter → api → openrouter: onze helpers wisselen, de rest blijft',
   assert.equal(fs.readFileSync(bestand, 'utf8'), begin)
 })
 
+test('marker kwijt: terug naar abonnement of api haalt onze bekende waarden weg; eigen regels blijven', async () => {
+  const begin = JSON.stringify({ env: { FOO: 'bar', ANTHROPIC_DEFAULT_OPUS_MODEL: 'claude-opus-5-5' } }, null, 2) + '\n'
+  for (const naar of ['abonnement', 'api']) {
+    fs.writeFileSync(bestand, begin)
+    await cli(['openrouter', 'zet-key'], ORKEY)
+    await cli(['zet-key'], APIKEY)
+    // Eigen OPUS-regel staat er al met een andere waarde: geweigerd. Dus eerst zonder die regel.
+    fs.writeFileSync(bestand, JSON.stringify({ env: { FOO: 'bar' } }, null, 2) + '\n')
+    assert.equal((await cli(['modus', 'openrouter', ...MODEL])).status, 0)
+    fs.rmSync(path.join(ordir, 'marker.json'))
+    assert.equal(json(await cli(['status'])).vreemdeBasis, false)
+    const r = await cli(['modus', naar])
+    assert.equal(r.status, 0, r.stderr)
+    const d = lees()
+    assert.deepEqual(d.env, { FOO: 'bar' })
+    assert.equal(d.apiKeyHelper, naar === 'api' ? HELPER : undefined)
+  }
+})
+
+test('marker kwijt en helper al weg: de base-URL van OpenRouter blokkeert niet en gaat weg', async () => {
+  fs.writeFileSync(bestand, JSON.stringify({ env: { ANTHROPIC_BASE_URL: 'https://openrouter.ai/api', ANTHROPIC_DEFAULT_HAIKU_MODEL: 'openai/gpt-5-mini', ANTHROPIC_API_KEY: '', Y: '2' } }, null, 2) + '\n')
+  await cli(['zet-key'], APIKEY)
+  const r = await cli(['modus', 'api'])
+  assert.equal(r.status, 0, r.stderr)
+  // Lege ANTHROPIC_API_KEY alleen samen met onze helper: hier blijft hij staan.
+  assert.deepEqual(lees(), { env: { ANTHROPIC_API_KEY: '', Y: '2' }, apiKeyHelper: HELPER })
+})
+
 test('vreemde waarden: andere base-URL of modelregel geweigerd met exit 3; terug naar abonnement mag', async () => {
   await cli(['openrouter', 'zet-key'], ORKEY)
   await cli(['zet-key'], APIKEY)

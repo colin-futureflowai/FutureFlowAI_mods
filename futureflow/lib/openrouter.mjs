@@ -71,21 +71,40 @@ export function pasToe(data, gewenst) {
 }
 
 // Haalt precies weg wat de marker zegt, en alleen als de waarde nog gelijk is; onze helper altijd.
-// Zonder marker blijft alles behalve de helper staan (dan is niet te zien wat van ons was).
+// Zonder marker (kwijt): alleen waarden die futureflow zelf zou schrijven, zodat het abonnement weer
+// werkt: de base-URL van OpenRouter, en met onze helper erbij ook de lege ANTHROPIC_API_KEY, de
+// betas-vlag en model-ids in OpenRouter-vorm (aanbieder/model).
 export function haalWeg(data, marker) {
   const nieuw = kloon(data)
-  if (nieuw.apiKeyHelper === OR_HELPER) delete nieuw.apiKeyHelper
-  const m = isObject(marker) ? marker : {}
-  if (isObject(nieuw.env) && isObject(m.env)) {
+  const metHelper = nieuw.apiKeyHelper === OR_HELPER
+  if (metHelper) delete nieuw.apiKeyHelper
+  const m = isObject(marker) ? marker : undefined
+  if (isObject(nieuw.env) && m && isObject(m.env)) {
     for (const [k, v] of Object.entries(m.env)) if (nieuw.env[k] === v) delete nieuw.env[k]
     if (m.envNieuw && Object.keys(nieuw.env).length === 0) delete nieuw.env
+  } else if (isObject(nieuw.env) && !m) {
+    const env = nieuw.env
+    const voor = Object.keys(env).length
+    if (env.ANTHROPIC_BASE_URL === OR_URL) delete env.ANTHROPIC_BASE_URL
+    if (metHelper) {
+      if (env.ANTHROPIC_API_KEY === '') delete env.ANTHROPIC_API_KEY
+      if (env.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS === '1') delete env.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS
+    }
+    if (metHelper || data?.env?.ANTHROPIC_BASE_URL === OR_URL) {
+      for (const k of MODEL_SLEUTELS) if (geldigModel(env[k]) && env[k].includes('/')) delete env[k]
+    }
+    if (voor > 0 && Object.keys(env).length === 0) delete nieuw.env
   }
   return nieuw
 }
 
-// Staat de marker nog in settings (zijn base-URL)? Dan is die base-URL van ons.
+const MODEL_SLEUTELS = ['ANTHROPIC_DEFAULT_OPUS_MODEL', 'ANTHROPIC_DEFAULT_SONNET_MODEL', 'ANTHROPIC_DEFAULT_FABLE_MODEL', 'ANTHROPIC_DEFAULT_HAIKU_MODEL', 'CLAUDE_CODE_SUBAGENT_MODEL']
+
+// Welke base-URL van ons is: die uit de marker, en zonder marker de vaste URL van OpenRouter (dan is
+// hij met haalWeg weer weg te halen en blokkeert hij het wisselen niet).
 export function eigenBasis(marker) {
-  return isObject(marker) && isObject(marker.env) && typeof marker.env.ANTHROPIC_BASE_URL === 'string' ? marker.env.ANTHROPIC_BASE_URL : undefined
+  if (!isObject(marker)) return OR_URL
+  return isObject(marker.env) && typeof marker.env.ANTHROPIC_BASE_URL === 'string' ? marker.env.ANTHROPIC_BASE_URL : undefined
 }
 
 // Prijs per token (string of getal) → USD per miljoen tokens; undefined bij onzin of negatief.

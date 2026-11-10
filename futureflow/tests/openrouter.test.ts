@@ -227,6 +227,18 @@ test('ketting: OpenRouter eerst, alleen met key en modellen; terug na de reset',
   expect(f.modusAanroepen()[1]).toBe('abonnement')
 })
 
+test('ketting: API zonder key wordt overgeslagen, door naar OpenRouter (auto blijft aan)', async ($, on) => {
+  const toestand = { modus: 'abonnement', auto: true, hoog: 90, laag: 50, laatsteWissel: 0, stappen: ['api', 'openrouter'] }
+  const f = fake(on, { orKey: true, store: { 'api.toestand': toestand } })
+  await $.session.start(START)
+  f.store.set('api.heeftKey', false)
+  f.store.set('openrouter.heeftKey', true)
+  f.store.set('openrouter.keuze', { model: 'openai/gpt-5', snel: 'openai/gpt-5-mini' })
+  await meet($, [{ kind: 'five_hour', percentUsed: 95, resetsAt: '2026-11-10T14:00:00Z' }], f.clock)
+  expect(f.modusAanroepen()).toEqual(['openrouter --model openai/gpt-5 --snel openai/gpt-5-mini'])
+  expect((f.store.get('api.toestand') as any).auto).toBe(true)
+})
+
 test('volgorde en stappen in de tab', async ($, on) => {
   const f = fake(on)
   await run($, 'futureflow', 'openrouter')

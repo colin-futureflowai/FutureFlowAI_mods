@@ -157,6 +157,7 @@ export async function verversApi($: Engine): Promise<ApiStatus> {
   await update($, statusAtom, () => status)
   // Voor de ketting (zonder CLI): staat er een OpenRouter-key.
   if (!status.fout) await $.store.set('openrouter.heeftKey', status.orHeeftKey === true)
+  if (!status.fout) await $.store.set('api.heeftKey', status.heeftKey === true)
   if (!status.fout && !status.vreemdeHelper) {
     const t = await leesToestand($)
     if (t.modus !== status.modus) {
@@ -211,11 +212,12 @@ export async function orKeuze($: Engine): Promise<{ model?: string; snel?: strin
   }
 }
 
-// Welke stappen van de ketting kunnen (zonder CLI): de API altijd (zonder key zet een mislukte wissel
-// auto uit, zoals voorheen), OpenRouter alleen met een key en beide modellen gekozen.
+// Welke stappen van de ketting kunnen (zonder CLI): de API tenzij de laatste status zei dat er geen
+// key is (dan door naar de volgende stap in plaats van auto uit), OpenRouter alleen met een key en
+// beide modellen gekozen.
 export async function beschikbaarheid($: Engine): Promise<Beschikbaar> {
   const k = await orKeuze($)
-  return { api: true, openrouter: (await $.store.get('openrouter.heeftKey')) === true && !!k.model && !!k.snel }
+  return { api: (await $.store.get('api.heeftKey')) !== false, openrouter: (await $.store.get('openrouter.heeftKey')) === true && !!k.model && !!k.snel }
 }
 
 const NAAM: Record<Modus, string> = { abonnement: 'het abonnement', api: 'API', openrouter: 'OpenRouter' }
