@@ -10,6 +10,11 @@
 //   accounts zet <id> rotatie aan|uit                                     → { id, inRotatie }
 //   accounts instellingen '<json>'                                        → { instellingen }
 //   accounts sync                              kopie van het actieve account bijwerken → { gesynct, id?, reden? }
+//   accounts sessie <sessionId> bezig|tussen|weg                          → { sessie, status }
+//   accounts bezig [--ikzelf <sessionId>]      andere terminal-sessies midden in een beurt → { bezig, wie }
+//   accounts switch <id> [--van <id>] [--ikzelf <sessionId>] [--auto]  → { gewisseld, van, naar, email, plan }
+//                                              exit 7 → { fout, code, wie, sinds }
+//   accounts freshen <id>                      kopie vers maken (niet-actief) → { id, ververst, reden? }
 //
 // Uitvoer: altijd één JSON-regel op stdout, ook bij een fout ({ fout, code, … }; de melding staat ook
 // op stderr). Nooit een token, credential of volledig e-mailadres.
@@ -29,7 +34,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { GEDEELD, instellingenVan, KOPIE, LIVE, maskEmail, planLabel, VORIGE } from '../lib/accounts.mjs'
+import { GEDEELD, instellingenVan, KOPIE, LIVE, maskEmail, planLabel, REDDING, telBezig, VORIGE } from '../lib/accounts.mjs'
 
 const THUIS = os.homedir()
 const CLAUDE_HOME = process.env.CLAUDE_HOME || path.join(THUIS, '.claude')
@@ -646,9 +651,423 @@ async function sync() {
   return { gesynct: true, id: acc.id }
 }
 
+// --- sessies tussen beurten -----------------------------------------------------------------
+
+const SESSIES = path.join(HOME, 'sessies')
+const SESSIE_ID = /^[A-Za-z0-9._-]{1,128}$/
+const DAG = 24 * UUR
+const VERS_BESTAND = 10 * 60_000
+
+// Eigen sessiebestand (de mod schrijft het zelf met $.fs.write; dit is voor tests en de tekstversie).
+function sessie(sid, st) {
+  if (!SESSIE_ID.test(sid ?? '') || !['bezig', 'tussen', 'weg'].includes(st)) throw new Fout('kies: sessie <sessionId> bezig|tussen|weg', 1)
+  const pad = path.join(SESSIES, `${sid}.json`)
+  let oud
+  try { oud = parse(fs.readFileSync(pad, 'utf8')) } catch {}
+  const t = nu()
+  schrijfAtomisch(pad, JSON.stringify({ sessie: sid, status: st, sinds: oud?.status === st && typeof oud.sinds === 'number' ? oud.sinds : t, hartslag: t, terminal: true }) + '\n')
+  return { sessie: sid, status: st }
+}
+
+// Eigen sessiebestanden; ruimt `weg` en hartslag > 24 u op. Een half geschreven bestand telt als bezig
+// zolang het vers is; een onleesbare map als bezig.
+function eigenSessies() {
+  let namen
+  try {
+    namen = fs.readdirSync(SESSIES)
+  } catch (err) {
+    return err.code === 'ENOENT' ? [] : [{ sessie: '(sessies onleesbaar)', status: 'bezig', hartslag: nu() }]
+  }
+  const t = nu()
+  const uit = []
+  for (const n of namen) {
+    if (!n.endsWith('.json')) continue
+    const pad = path.join(SESSIES, n)
+    let d
+    try { d = parse(fs.readFileSync(pad, 'utf8')) } catch { continue }
+    if (!d || typeof d.sessie !== 'string') {
+      try { if (Date.now() - fs.statSync(pad).mtimeMs < VERS_BESTAND) uit.push({ sessie: n.slice(0, -5), status: 'bezig', hartslag: t }) } catch {}
+      continue
+    }
+    const hartslag = Number(d.hartslag) || 0
+    if (d.status === 'weg' || t - hartslag > DAG) {
+      fs.rmSync(pad, { force: true })
+      continue
+    }
+    uit.push({ sessie: d.sessie, status: d.status, hartslag })
+  }
+  return uit
+}
+
+const MAANDEN = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+// `Tue Nov 10 10:27:32 2026` (ps -o lstart onder LC_ALL=C TZ=UTC) → epoch-seconden.
+function lstart(tekst) {
+  const d = String(tekst).trim().split(/\s+/)
+  if (d.length !== 5 || !MAANDEN.includes(d[1])) return undefined
+  const [u, m, s] = d[3].split(':').map(Number)
+  const t = Date.UTC(Number(d[4]), MAANDEN.indexOf(d[1]), Number(d[2]), u, m, s) / 1000
+  return Number.isFinite(t) ? t : undefined
+}
+
+function ps(pid, kolommen) {
+  const r = spawnSync('/bin/ps', ['-o', kolommen, '-p', String(pid)], { encoding: 'utf8', timeout: 5_000, env: { ...process.env, LC_ALL: 'C', TZ: 'UTC' } })
+  const tekst = (r.stdout ?? '').trim()
+  return r.status === 0 && tekst ? tekst : undefined
+}
+
+// Is de levende pid nog de Claude Code die het record schreef? Een hergebruikte pid hoort bij een
+// proces dat later startte (> 120 s) en geen claude is (claude-swap process_detection.py). Niet te
+// bepalen = ja.
+function pidKlopt(pid, procStart) {
+  if (typeof procStart !== 'string' || !procStart || /^\d+$/.test(procStart)) return true
+  const opgenomen = lstart(procStart)
+  if (opgenomen === undefined) return true
+  const s = ps(pid, 'lstart=')
+  const gestart = s === undefined ? undefined : lstart(s)
+  if (gestart === undefined || gestart <= opgenomen + 120) return true
+  const c = ps(pid, 'comm=,args=')
+  return c === undefined || c.toLowerCase().includes('claude')
+}
+
+// Records van Claude Code zelf (~/.claude/sessions/<pid>.json), zonder de ouder van deze CLI (de
+// sessie die hem startte). Onleesbaar met een levende pid telt als bezig.
+function claudeRecords() {
+  const map = path.join(CLAUDE_HOME, 'sessions')
+  let namen
+  try {
+    namen = fs.readdirSync(map)
+  } catch (err) {
+    return err.code === 'ENOENT' ? [] : [{ pid: 0, levend: true, onleesbaar: true }]
+  }
+  const uit = []
+  for (const n of namen) {
+    if (!n.endsWith('.json')) continue
+    const naamPid = Number(n.slice(0, -5))
+    let d
+    try { d = parse(fs.readFileSync(path.join(map, n), 'utf8')) } catch {}
+    const pid = Number.isInteger(d?.pid) ? d.pid : naamPid
+    if (pid === process.ppid || pid === process.pid) continue
+    if (!d || !Number.isInteger(d.pid)) {
+      if (Number.isInteger(naamPid) && leeft(naamPid)) uit.push({ pid: naamPid, levend: true, onleesbaar: true })
+      continue
+    }
+    const telt = d.entrypoint !== 'claude-desktop' && d.status !== 'idle'
+    uit.push({
+      pid,
+      levend: leeft(pid) && (!telt || pidKlopt(pid, d.procStart)),
+      ...(typeof d.sessionId === 'string' ? { sessionId: d.sessionId } : {}),
+      ...(typeof d.entrypoint === 'string' ? { entrypoint: d.entrypoint } : {}),
+      ...(typeof d.status === 'string' ? { status: d.status } : {}),
+      ...(typeof d.statusUpdatedAt === 'number' ? { statusUpdatedAt: d.statusUpdatedAt } : {}),
+    })
+  }
+  return uit
+}
+
+function bezig(ikzelf) {
+  return telBezig({ eigen: eigenSessies(), claude: claudeRecords(), ikzelf: ikzelf ?? '', nu: nu() })
+}
+
+// --- refresh van een niet-actief account --------------------------------------------------------
+
+// Publieke OAuth-client-id van Claude Code (bron: claude-swap oauth.py:21).
+const CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e'
+
+// POST /v1/oauth/token. Nooit de body van een fout tonen of loggen.
+async function tokenPost(refreshToken) {
+  let r
+  try {
+    r = await haal(`${PLATFORM}/v1/oauth/token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ grant_type: 'refresh_token', refresh_token: refreshToken, client_id: CLIENT_ID }),
+    })
+  } catch (err) {
+    return { soort: 'tijdelijk', fout: err?.name === 'TimeoutError' ? 'timeout' : 'netwerk' }
+  }
+  let d
+  try { d = await r.json() } catch {}
+  if (!r.ok) {
+    // Alleen een expliciete invalid_grant is definitief (claude-swap oauth.py:297-322).
+    if ([400, 401, 403].includes(r.status) && d?.error === 'invalid_grant') return { soort: 'invalid_grant', fout: 'login ongeldig' }
+    return { soort: 'tijdelijk', fout: `http-${r.status}` }
+  }
+  if (typeof d?.access_token !== 'string' || !d.access_token || typeof d?.expires_in !== 'number') return { soort: 'tijdelijk', fout: 'onverwacht antwoord' }
+  return { soort: 'ok', d }
+}
+
+async function zetStatus(id, st, uitleg) {
+  await werkBij(s => {
+    const a = s.accounts.find(x => x.id === id)
+    if (!a) return
+    a.status = st
+    if (uitleg) a.statusUitleg = uitleg
+    else delete a.statusUitleg
+  })
+}
+
+const OPNIEUW = 'login verlopen of ingetrokken; log in met /login en kies Toevoegen'
+
+// Kopie van een niet-actief account vers maken als zijn access-token binnen `marge` ms verloopt.
+// Onder refresh-<account>.lock: kopie opnieuw lezen (een ander proces kan net ververst hebben), POST,
+// en de opvolger **eerst** bewaren (elk refresh-token werkt één keer). Mislukt dat bewaren, dan de
+// opvolger in futureflow-accounts-redding en status `onbekend`.
+// → { soort: 'ok', cred, ververst } | { soort: 'invalid_grant' | 'tijdelijk' | 'kapot', fout }
+async function ververs(acc, marge) {
+  const vrij = await bestandLock(path.join(HOME, `refresh-${bestandsnaam(acc.sleutel)}.lock`), 60_000)
+  try {
+    const kopie = leesKopie(acc.sleutel)
+    if (!geldig(kopie)) return { soort: 'kapot', fout: 'kopie ontbreekt of is kapot; log in met /login en kies Toevoegen' }
+    if (verloopt(kopie) - nu() > marge) return { soort: 'ok', cred: kopie, ververst: false }
+    const r = await tokenPost(kopie.claudeAiOauth.refreshToken)
+    if (r.soort === 'invalid_grant') {
+      await zetStatus(acc.id, 'opnieuw-inloggen', OPNIEUW)
+      logRegel({ soort: 'refresh', id: acc.id, uitkomst: 'opnieuw-inloggen' })
+      return r
+    }
+    if (r.soort !== 'ok') return r
+    const d = r.d
+    const nieuw = {
+      ...kopie,
+      claudeAiOauth: {
+        ...kopie.claudeAiOauth,
+        accessToken: d.access_token,
+        expiresAt: nu() + d.expires_in * 1000,
+        ...(typeof d.refresh_token === 'string' && d.refresh_token ? { refreshToken: d.refresh_token } : {}),
+        ...(typeof d.scope === 'string' && d.scope ? { scopes: d.scope.split(/\s+/) } : {}),
+      },
+    }
+    const ander = typeof d.account?.uuid === 'string' && d.account.uuid !== uuidVan(acc.sleutel)
+    let fout
+    if (ander) fout = 'de ververste login hoort bij een ander account'
+    else {
+      try { schrijfKopie(acc.sleutel, nieuw) } catch (err) { fout = err.message }
+    }
+    if (fout) {
+      let gered = false
+      try {
+        keychainSchrijf(REDDING, ander ? `uuid:${String(d.account.uuid).slice(0, 80)}` : acc.sleutel, JSON.stringify(zonderGedeeld(nieuw)))
+        gered = true
+      } catch {}
+      await zetStatus(acc.id, 'onbekend', `nieuwe login niet bewaard${gered ? ' (staat in futureflow-accounts-redding)' : ''}; log in met /login en kies Toevoegen`)
+      logRegel({ soort: 'refresh', id: acc.id, uitkomst: 'niet bewaard', gered })
+      return { soort: 'kapot', fout }
+    }
+    logRegel({ soort: 'refresh', id: acc.id, uitkomst: 'ok' })
+    return { soort: 'ok', cred: nieuw, ververst: true }
+  } finally {
+    vrij()
+  }
+}
+
+async function freshen(idArg) {
+  eisStandaard()
+  const a = zoek(leesStaat(), idArg)
+  if (identiteitNu()?.sleutel === a.sleutel) return { id: a.id, ververst: false, reden: 'actief; Claude Code ververst deze login zelf' }
+  const f = await ververs(a, 10 * 60_000)
+  if (f.soort === 'invalid_grant') throw new Fout(`account ${a.id}: ${OPNIEUW}`, 9)
+  if (f.soort === 'kapot') throw new Fout(`account ${a.id}: ${f.fout}`, 5)
+  if (f.soort === 'tijdelijk') return { id: a.id, ververst: false, reden: `tijdelijk niet gelukt (${f.fout})` }
+  if (a.status !== 'ok') await zetStatus(a.id, 'ok')
+  return { id: a.id, ververst: f.ververst }
+}
+
+// --- wisselen -------------------------------------------------------------------------------
+
+// Kopie van oauthAccount van een account (voor ~/.claude.json).
+function leesConfig(sleutel) {
+  let d
+  try { d = parse(fs.readFileSync(configPad(sleutel), 'utf8')) } catch {}
+  if (!d || d.accountUuid !== uuidVan(sleutel)) throw new Fout('accountgegevens (config) ontbreken of zijn kapot; voeg het account opnieuw toe', 2)
+  return d
+}
+
+// Zelfde opmaak als het origineel: inspringing van de tweede regel, eind-newline alleen als die er was.
+function opmaak(tekst, data) {
+  const m = /^\{\r?\n([ \t]+)/.exec(tekst)
+  const inspring = m ? m[1] : tekst.includes('\n') ? 2 : 0
+  return JSON.stringify(data, null, inspring) + (/\n$/.test(tekst) ? '\n' : '')
+}
+
+const zelfde = (a, b) => a.mtimeMs === b.mtimeMs && a.size === b.size && a.ino === b.ino
+
+// Alleen oauthAccount vervangen; tmp met dezelfde rechten, stat vergelijken, rename (zoals
+// cli/connectors.mjs). Een symlink blijft een symlink.
+function schrijfOauthAccount(eerst, oauthAccount) {
+  let doel
+  try { doel = fs.realpathSync(CLAUDE_JSON) } catch (err) { throw new Fout(`~/.claude.json niet gelezen (${err.code})`, 2) }
+  let gelezen = eerst
+  for (let poging = 1; poging <= 3; poging++) {
+    if (!gelezen) gelezen = leesClaudeJson()
+    if (!gelezen) throw new Fout('~/.claude.json verdween tijdens het wisselen', 2)
+    const { tekst, data, stat } = gelezen
+    data.oauthAccount = oauthAccount
+    const mode = stat.mode & 0o777
+    const tmp = path.join(path.dirname(doel), `.${path.basename(doel)}.futureflow-${process.pid}-${Date.now()}.tmp`)
+    try {
+      fs.writeFileSync(tmp, opmaak(tekst, data), { mode, flag: 'wx' })
+      fs.chmodSync(tmp, mode)
+      let st
+      try { st = fs.statSync(doel) } catch { st = undefined }
+      if (!st || !zelfde(st, stat)) {
+        fs.rmSync(tmp, { force: true })
+        gelezen = undefined
+        continue
+      }
+      fs.renameSync(tmp, doel)
+      return
+    } catch (err) {
+      fs.rmSync(tmp, { force: true })
+      if (err instanceof Fout) throw err
+      throw new Fout(`~/.claude.json niet geschreven (${err.code ?? err.message})`, 2)
+    }
+  }
+  throw new Fout('~/.claude.json veranderde steeds tijdens het schrijven', 2)
+}
+
+// Stap 3-6, onder de credential-locks en de config-lock: alleen lokale I/O.
+function wisselOnderLocks({ doel, config, id1, vinger1, uitgaand }) {
+  const S = leesLive()
+  if (!S) throw new Fout('niet ingelogd: geen login in de sleutelhanger', 3)
+  const C = leesClaudeJson()
+  if (!C) throw new Fout('~/.claude.json ontbreekt; niets gewijzigd', 2)
+  const nuId = identiteit(C.data)
+  const vS = geldig(S.cred) ? vinger(S.cred.claudeAiOauth.refreshToken) : undefined
+  if (nuId?.sleutel !== id1?.sleutel || vS !== vinger1) throw new Fout('login veranderde tijdens het wisselen; probeer het opnieuw', 3)
+
+  // Uitgaande login terug in zijn kopie; hoort hij bij geen (gecontroleerd) bekend account, dan redding.
+  if (uitgaand && vS) {
+    const k = leesKopie(uitgaand.sleutel)
+    if (!geldig(k) || verloopt(S.cred) >= verloopt(k)) schrijfKopie(uitgaand.sleutel, S.cred)
+  } else if (vS) {
+    keychainSchrijf(REDDING, nuId?.sleutel ?? 'live', JSON.stringify(zonderGedeeld(S.cred)))
+  }
+
+  // Doel = kopie + de gedeelde velden van de live login.
+  const kopie = leesKopie(doel.sleutel)
+  if (!geldig(kopie)) throw new Fout(`kopie van account ${doel.id} ontbreekt of is kapot; niets gewijzigd`, 5)
+  const T = zonderGedeeld(kopie)
+  for (const k of GEDEELD) if (S.cred[k] !== undefined) T[k] = S.cred[k]
+  const Ttekst = JSON.stringify(T)
+
+  const herstelLive = () => {
+    try { keychainSchrijf(LIVE, KEYCHAIN_USER, S.tekst) } catch { logRegel({ soort: 'switch', fout: 'live login niet teruggezet' }) }
+  }
+  try {
+    keychainSchrijf(LIVE, KEYCHAIN_USER, Ttekst)
+  } catch (err) {
+    herstelLive()
+    throw new Fout(`niet gewisseld (${err.message}); je oude login staat er weer`, 5)
+  }
+
+  // Lopende sessies: bestaat ~/.claude/.credentials.json, dan herschrijven (nooit aanmaken).
+  const credBestand = path.join(CLAUDE_HOME, '.credentials.json')
+  let credOud, credMode = 0o600
+  try {
+    credMode = fs.statSync(credBestand).mode & 0o777
+    credOud = fs.readFileSync(credBestand, 'utf8')
+  } catch (err) {
+    if (err.code !== 'ENOENT') {
+      herstelLive()
+      throw new Fout(`.credentials.json niet gelezen (${err.code}); niet gewisseld`, 2)
+    }
+  }
+  if (credOud !== undefined) {
+    try {
+      schrijfAtomisch(credBestand, Ttekst, credMode)
+    } catch {
+      herstelLive()
+      throw new Fout('.credentials.json niet geschreven; niet gewisseld, je oude login staat er weer', 5)
+    }
+  }
+
+  try {
+    schrijfOauthAccount(C, config)
+  } catch (err) {
+    herstelLive()
+    if (credOud !== undefined) try { schrijfAtomisch(credBestand, credOud, credMode) } catch {}
+    throw new Fout(`${err.message}; niet gewisseld, je oude login staat er weer`, 2)
+  }
+}
+
+async function wissel(o) {
+  eisStandaard()
+  if (o._.length !== 1) throw new Fout(GEBRUIK, 1)
+  const van = o.van === undefined ? undefined : Number(o.van)
+  if (o.van !== undefined && !Number.isInteger(van)) throw new Fout('--van verwacht een account-nummer', 1)
+  if (o.ikzelf !== undefined && !SESSIE_ID.test(o.ikzelf)) throw new Fout('--ikzelf verwacht een sessie-id', 1)
+
+  // 1. Buiten de locks (netwerk mag): doel controleren en vers maken, live login vaststellen.
+  let staat = leesStaat()
+  const doel = zoek(staat, o._[0])
+  if (doel.status === 'opnieuw-inloggen') throw new Fout(`account ${doel.id}: ${OPNIEUW}`, 9)
+  if (doel.status !== 'ok') throw new Fout(`account ${doel.id}: ${doel.statusUitleg ?? 'status onbekend; voeg het opnieuw toe'}`, 9)
+  const id1 = identiteitNu()
+  if (id1?.sleutel === doel.sleutel) throw new Fout(`account ${doel.id} is al actief`, 6)
+  if (van !== undefined && staat.accounts.find(a => a.sleutel === id1?.sleutel)?.id !== van) throw new Fout(`account ${van} is niet meer actief; niets gedaan`, 6)
+  const config = leesConfig(doel.sleutel)
+  const f = await ververs(doel, 10 * 60_000)
+  if (f.soort === 'invalid_grant') throw new Fout(`account ${doel.id}: ${OPNIEUW}; niet gewisseld`, 9)
+  if (f.soort === 'kapot') throw new Fout(`account ${doel.id}: ${f.fout}; niet gewisseld`, 5)
+  // Tijdelijk mislukt: toch wisselen; Claude Code ververst een verlopen token zelf bij het volgende bericht.
+
+  const live1 = leesLive()
+  if (!live1) throw new Fout('niet ingelogd: geen login in de sleutelhanger', 3)
+  const vinger1 = geldig(live1.cred) ? vinger(live1.cred.claudeAiOauth.refreshToken) : undefined
+  let uitgaand
+  const accUit = staat.accounts.find(a => a.sleutel === id1?.sleutel)
+  if (accUit && vinger1) {
+    const k = leesKopie(accUit.sleutel)
+    if ((geldig(k) && vinger(k.claudeAiOauth.refreshToken) === vinger1) || staat.profielOk[vinger1] === accUit.sleutel) uitgaand = accUit
+    else {
+      const p = await profiel(live1.cred.claudeAiOauth.accessToken)
+      if (p.uuid && hoortBij(p, accUit.sleutel)) {
+        uitgaand = accUit
+        await werkBij(s => { s.profielOk[vinger1] = accUit.sleutel })
+      }
+    }
+  }
+
+  // 2. wissel.lock: opnieuw kijken of het nog moet en mag.
+  return metLocks(['wissel'], async () => {
+    staat = leesStaat()
+    const nuSleutel = identiteitNu()?.sleutel
+    const actief = staat.accounts.find(a => a.sleutel === nuSleutel)?.id ?? null
+    if (nuSleutel === doel.sleutel) throw new Fout(`account ${doel.id} is al actief`, 6)
+    if (van !== undefined && actief !== van) throw new Fout(`account ${van} is niet meer actief; niets gedaan`, 6)
+    if (o.auto) {
+      if (!staat.instellingen.auto) throw new Fout('automatisch wisselen staat uit', 6)
+      if (nu() - (staat.laatsteWissel?.tijd ?? 0) < staat.instellingen.wachttijd) throw new Fout('net gewisseld; eerst de wachttijd afwachten', 6)
+    }
+    const b = bezig(o.ikzelf)
+    if (b.bezig > 0) {
+      const w = await werkBij(s => {
+        s.wacht = { sinds: s.wacht?.sinds ?? nu(), wie: b.wie }
+        return s.wacht
+      })
+      throw new Fout(`${b.bezig} sessie(s) midden in een beurt; nog niet gewisseld`, 7, { wie: b.wie, sinds: w.sinds })
+    }
+
+    // 3-6. Claude Code's locks.
+    await metLocks(['cred', 'config'], () => wisselOnderLocks({ doel, config, id1, vinger1, uitgaand }))
+
+    // 7. Eigen staat en log.
+    const tijd = nu()
+    await werkBij(s => {
+      s.actief = doel.id
+      s.laatsteWissel = { tijd, van: actief, naar: doel.id, auto: !!o.auto }
+      delete s.wacht
+    })
+    logRegel({ soort: 'switch', van: actief, naar: doel.id, email: doel.email, auto: !!o.auto, ...(uitgaand ? {} : { redding: true }) })
+    return { gewisseld: true, van: actief, naar: doel.id, email: doel.email, plan: doel.plan ?? '?' }
+  })
+}
+
 const GEBRUIK =
   'Gebruik: accounts add [--label <tekst>] | list | status [--json] | remove <id> | zet <id> rotatie aan|uit | ' +
-  "instellingen '<json>' | sync"
+  "instellingen '<json>' | sync | sessie <sessionId> bezig|tussen|weg | bezig [--ikzelf <sessionId>] | " +
+  'switch <id> [--van <id>] [--ikzelf <sessionId>] [--auto] | freshen <id>'
 
 export async function main(args) {
   const [cmd, ...rest] = args
@@ -666,6 +1085,13 @@ export async function main(args) {
     else if (cmd === 'zet' && rest.length === 3) uit = await zet(rest[0], rest[1], rest[2])
     else if (cmd === 'instellingen' && rest.length === 1) uit = await instellingen(rest[0])
     else if (cmd === 'sync' && rest.length === 0) uit = await sync()
+    else if (cmd === 'sessie' && rest.length === 2) uit = sessie(rest[0], rest[1])
+    else if (cmd === 'bezig') {
+      const o = opties(rest, { ikzelf: 'waarde' })
+      if (o._.length) throw new Fout(GEBRUIK, 1)
+      uit = bezig(o.ikzelf)
+    } else if (cmd === 'switch') uit = await wissel(opties(rest, { van: 'waarde', ikzelf: 'waarde', auto: 'vlag' }))
+    else if (cmd === 'freshen' && rest.length === 1) uit = await freshen(rest[0])
     else throw new Fout(GEBRUIK, 1)
     console.log(JSON.stringify(uit))
     return 0
