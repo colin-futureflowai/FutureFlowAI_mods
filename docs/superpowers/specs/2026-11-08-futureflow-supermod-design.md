@@ -109,7 +109,10 @@ Een balk boven het invoerveld (`ui.render` op `AbovePrompt`), **de enige** `Abov
 
 ### 6. Accounts (eigen versie, naar claude-swap, MIT)
 
-Besluit Colin: eigen wisselaar met instelbare marges voor automatisch wisselen. Hij kent de afweging rond de voorwaarden van Anthropic; bij het **eerste** aanzetten van automatisch wisselen toont het dashboard één keer een korte uitleg met een link naar de Consumer Terms en Usage Policy. Daarna niet meer.
+Besluit Colin: eigen wisselaar met instelbare marges voor automatisch wisselen. Alleen voor intern gebruik; geen melding over voorwaarden (besluit Colin 10-11-2026). Elk account is een apart betaald abonnement, en futureflow wisselt alleen tussen accounts die de gebruiker zelf toevoegde.
+
+- **Ketting met de API-switch** (besluit Colin 10-11-2026): eerst naar het volgende abonnement met ruimte; pas als **alle** abonnementen in de rotatie boven hun marge zitten naar de API (de bestaande switch van plan 3, `beslis` in `lib/api.mjs`); terug van API naar een abonnement zodra er een weer ruimte heeft. Met minder dan twee accounts in de rotatie blijft het gedrag van plan 3 ongewijzigd. Plan: `docs/superpowers/plans/2026-11-10-futureflow-6-accounts.md`.
+- **Alleen terminal** (besluit Colin 10-11-2026): de desktop-app houdt zijn eigen login; de tab zegt dat.
 
 - **CLI** `cli/accounts.mjs` (Node, alleen builtins). macOS Keychain via `/usr/bin/security`. Opslag van kopieën en instellingen in `~/.claude/futureflow/accounts/` (chmod 700); geheimen alleen in de Keychain, nooit in een bestand of log.
 - **Toevoegen**: Colin logt in Claude Code in met een account en kiest *Account toevoegen*. De CLI maakt een kopie van de huidige login. Niet `/logout` gebruiken tussen accounts (claude-swap: kan het refresh-token intrekken); dat staat in de uitleg.
