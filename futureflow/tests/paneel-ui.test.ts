@@ -1,6 +1,6 @@
 import { expect, mock, test } from 'claude-code/testing'
 
-// Het dashboard in een smal (44) en breed (100) terminalpaneel: alle zeven tabs zichtbaar, korte
+// Het dashboard in een smal (44) en breed (100) terminalpaneel: alle acht tabs zichtbaar, korte
 // namen als het smal is, en geen regel die breder is dan het paneel. De testkit tekent geen
 // tekens, dus schatten we per element hoe smal het minstens kan: tekst breekt af op woorden
 // (truncate-end tot 1 teken), een knop breekt nooit af, een rij zonder flexWrap telt op.
@@ -125,7 +125,7 @@ function minBreed(n: Knoop, fout: string[]): number {
 }
 
 for (const kolommen of [44, 100]) {
-  test(`terminal ${kolommen} kolommen: alle zeven tabs, juiste namen, wrap-rij`, async ($, on) => {
+  test(`terminal ${kolommen} kolommen: alle acht tabs, juiste namen, wrap-rij`, async ($, on) => {
     fake(on)
     await run($, 'futureflow', '')
     const ui = await $.ui.mount(PANE(kolommen))

@@ -3,7 +3,7 @@ import type { EngineInterface as Engine, Register, RenderElement } from 'claude-
 
 import type { AccountsAccount, AccountsMelding, AccountsStatus, AccountsVraag, AccountsWacht, DashboardTab } from '../types'
 
-import { apiToestand, wissel as apiWissel } from './api'
+import { apiToestand, beschikbaarheid, wissel as apiWissel } from './api'
 import { accountsDir, failOpen, leesAccountsStaat } from './ctx'
 import { openDashboard, PANE } from './paneel'
 import { kaart, knop, knoppen, leeg, paneelVan, uitleg, vinkje } from './paneel-ui'
@@ -315,6 +315,7 @@ async function accountsMeet($: Engine, rateLimits?: unknown): Promise<void> {
       ...kettingInvoerVan(status),
       nu: await $.clock.now(),
       api,
+      beschikbaar: await beschikbaarheid($),
       sessieLimieten: limietenVan(ruw),
       ...(handmatigTot !== null ? { handmatigTot } : {}),
     })

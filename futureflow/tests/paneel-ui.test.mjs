@@ -10,18 +10,18 @@ test('tabNamen: kort onder 50 kolommen, lang daarboven en zonder meting', () => 
   assert.deepEqual(tabNamen(undefined), LANG)
 })
 
-test('tabRijen: elke rij past, volgorde blijft, alle zeven tabs', () => {
+test('tabRijen: elke rij past, volgorde blijft, alle acht tabs', () => {
   for (const kolommen of [20, 30, 44, 50, 60, 80, 100, 200]) {
     const breedte = binnenBreedte(kolommen)
     const namen = tabNamen(kolommen)
     const rijen = tabRijen(namen, breedte)
-    assert.deepEqual(rijen.flat(), [0, 1, 2, 3, 4, 5, 6])
+    assert.deepEqual(rijen.flat(), [0, 1, 2, 3, 4, 5, 6, 7])
     for (const rij of rijen) assert.ok(rijBreedte(namen, rij) <= breedte, `${kolommen}: ${rijBreedte(namen, rij)} > ${breedte}`)
   }
 })
 
-test('tabRijen: 100 kolommen is één rij, 44 kolommen twee', () => {
-  assert.equal(tabRijen(LANG, binnenBreedte(100)).length, 1)
+test('tabRijen: 110 kolommen is één rij, 44 kolommen twee', () => {
+  assert.equal(tabRijen(LANG, binnenBreedte(110)).length, 1)
   assert.equal(tabRijen(KORT, binnenBreedte(44)).length, 2)
 })
 

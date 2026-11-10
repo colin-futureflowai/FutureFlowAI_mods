@@ -41,7 +41,7 @@ export type SlotsSnapshot = {
   error?: string
 }
 
-export type DashboardTab = 'overzicht' | 'slots' | 'minify' | 'stijl' | 'connectors' | 'api' | 'accounts'
+export type DashboardTab = 'overzicht' | 'slots' | 'minify' | 'stijl' | 'connectors' | 'api' | 'accounts' | 'openrouter'
 
 /** `cli/connectors.mjs list` voor de projectsleutel (git-root van de sessiemap, anders die map zelf). */
 export type ConnectorsLijst = {
@@ -59,11 +59,33 @@ export type ConnectorsLijst = {
 }
 
 /** `cli/api.mjs status`: alleen de laatste 4 tekens van de key, nooit de key zelf. */
-export type ApiStatus = { heeftKey: boolean; staart: string; modus: 'abonnement' | 'api'; vreemdeHelper: boolean; fout?: string }
+export type ApiStatus = {
+  heeftKey: boolean
+  staart: string
+  modus: 'abonnement' | 'api' | 'openrouter'
+  vreemdeHelper: boolean
+  /** Een ANTHROPIC_BASE_URL in settings.json die niet van futureflow is. */
+  vreemdeBasis?: boolean
+  /** OpenRouter-key in de sleutelhanger; alleen de laatste 4 tekens. */
+  orHeeftKey?: boolean
+  orStaart?: string
+  /** Op OpenRouter: het hoofd- en snelle model zoals ze in settings.json staan. */
+  orModel?: string
+  orSnel?: string
+  fout?: string
+}
+
+/** Eén model uit `cli/api.mjs openrouter modellen`; prijzen in USD per miljoen tokens. */
+export type OrModel = { id: string; naam: string; context?: number; in?: number; uit?: number }
+
+/** Uitkomst van `cli/api.mjs openrouter modellen` (of een fout zonder lijst). */
+export type OrModellen = { modellen: OrModel[]; opgehaald?: number; uitCache?: boolean; fout?: string }
 
 /** Store `api.toestand` (zelfde vorm als Toestand in lib/api.d.mts). */
 export type ApiToestand = {
-  modus: 'abonnement' | 'api'
+  modus: 'abonnement' | 'api' | 'openrouter'
+  /** Stappen van de ketting na de abonnementen, in volgorde (api, openrouter). */
+  stappen: ('api' | 'openrouter')[]
   auto: boolean
   /** Naar API vanaf dit percentage van het 5u- of 7d-venster (50-100). */
   hoog: number
@@ -223,6 +245,14 @@ declare module 'claude-code' {
       'api.versie': number
       /** Takenlijst-tools in de terminal aan (env in settings.json); null = nog niet gelezen. */
       'stijl.takenlijst': boolean | null
+      /** Modellijst van OpenRouter (cache van de CLI); null = nog niet gelezen. */
+      'openrouter.modellen': OrModellen | null
+      /** Zoektekst in de tab OpenRouter. */
+      'openrouter.zoek': string
+      /** Telt op na een actie in de tab OpenRouter, zodat die opnieuw tekent. */
+      'openrouter.versie': number
+      /** Uitkomst van de laatste verbindingstest (één regel); null = nog niet getest. */
+      'openrouter.test': string | null
       /** Laatst gelezen status van de tab Accounts (bij openen, na een klik, elke 30 s en na een meting); null = nog niet gelezen. */
       'accounts.status': AccountsStatus | null
       /** Telt op na een actie in de tab Accounts, zodat die opnieuw tekent. */

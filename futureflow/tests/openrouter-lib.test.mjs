@@ -179,3 +179,8 @@ test('ketting: tabel met OpenRouter als laatste stap en terug naar een abonnemen
     else assert.deepEqual({ soort: b?.soort, naar: b?.naar }, verwacht, naam)
   }
 })
+
+test('modellenVan: uitvoer van de CLI (al per Mtok) blijft gelijk', () => {
+  const lijst = [{ id: 'openai/gpt-5', naam: 'GPT-5', context: 400000, in: 1.25, uit: 10 }, { id: 'x/y', naam: 'Y', in: -1 }]
+  assert.deepEqual(modellenVan(lijst), [lijst[0], { id: 'x/y', naam: 'Y' }])
+})

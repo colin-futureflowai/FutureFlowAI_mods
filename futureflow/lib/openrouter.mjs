@@ -94,15 +94,18 @@ export function perMtok(v) {
   return typeof n === 'number' && Number.isFinite(n) && n >= 0 ? Math.round(n * 1e6 * 1e4) / 1e4 : undefined
 }
 
-// Uitvoer van GET /api/v1/models → { id, naam, context, in, uit } (prijzen per Mtok); onbruikbare weg.
+const alPerMtok = v => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : undefined)
+
+// Uitvoer van GET /api/v1/models (of de CLI-uitvoer daarvan, al per Mtok) → { id, naam, context, in, uit } (prijzen per Mtok); onbruikbare weg.
 export function modellenVan(ruw) {
   const lijst = Array.isArray(ruw?.data) ? ruw.data : Array.isArray(ruw) ? ruw : []
   const uit = []
   for (const m of lijst) {
     if (!m || !geldigModel(m.id)) continue
     const context = Number.isFinite(m.context_length) ? m.context_length : Number.isFinite(m.context) ? m.context : undefined
-    const prijsIn = perMtok(m.pricing?.prompt ?? m.in)
-    const prijsUit = perMtok(m.pricing?.completion ?? m.uit)
+    // Van de API: per token in `pricing`; al omgerekend (uitvoer van de CLI): per Mtok in `in`/`uit`.
+    const prijsIn = m.pricing ? perMtok(m.pricing.prompt) : alPerMtok(m.in)
+    const prijsUit = m.pricing ? perMtok(m.pricing.completion) : alPerMtok(m.uit)
     uit.push({
       id: m.id,
       naam: typeof (m.name ?? m.naam) === 'string' ? String(m.name ?? m.naam).slice(0, 80) : m.id,

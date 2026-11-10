@@ -8,6 +8,7 @@ import { apiTab, takenlijstStand, verversApi, zetTakenlijst } from './api'
 import { connectorsTab, openConnectors } from './connectors'
 import { failOpen, oud } from './ctx'
 import { minifyTab, niveauLezen } from './minify'
+import { openOpenrouter, openrouterTab } from './openrouter'
 import { openDashboard, PANE, TABS } from './paneel'
 import { kaart, knop, knoppen, leeg, paneelVan, raster, stat, tabs, uitleg, vinkje } from './paneel-ui'
 import type { Paneel } from './paneel-ui'
@@ -34,12 +35,13 @@ const NAMEN: Record<DashboardTab, string> = {
   connectors: 'Connectors',
   api: 'API',
   accounts: 'Accounts',
+  openrouter: 'OpenRouter',
 }
 
 // Start van het dashboard; register.tsx roept dit aan vanuit zijn ene session.start.
 export async function startDashboard($: Engine): Promise<void> {
   try {
-    await $.command.register({ name: 'futureflow', description: 'Dashboard van FutureFlowAI: overzicht, slots, minify, stijl, connectors, api, accounts' })
+    await $.command.register({ name: 'futureflow', description: 'Dashboard van FutureFlowAI: overzicht, slots, minify, stijl, connectors, api, accounts, openrouter' })
   } catch (err) {
     failOpen($, err)
   }
@@ -172,6 +174,7 @@ export const registerDashboard = (on: Parameters<Register>[0]): void => {
       if (tab === 'api') await verversApi($)
       if (tab === 'connectors') await openConnectors($)
       if (tab === 'accounts') await openAccounts($)
+      if (tab === 'openrouter') await openOpenrouter($)
       await openDashboard($, tab)
       if (!(await oud($)).slots) await startSlotsTicker($)
       return { text: `Dashboard geopend${tab ? ` op de tab ${NAMEN[tab]}` : ''}.` }
@@ -198,6 +201,7 @@ export const registerDashboard = (on: Parameters<Register>[0]): void => {
       : tab === 'connectors' ? await connectorsTab($, e)
       : tab === 'api' ? await apiTab($, e, k)
       : tab === 'accounts' ? await accountsTab($, e, k)
+      : tab === 'openrouter' ? await openrouterTab($, e, k)
       : await stijlTab($, ui)
 
     const kies = (i: number) => async () => {
@@ -207,6 +211,7 @@ export const registerDashboard = (on: Parameters<Register>[0]): void => {
       if (t === 'api') await verversApi($)
       if (t === 'connectors') await openConnectors($)
       if (t === 'accounts') await openAccounts($)
+      if (t === 'openrouter') await openOpenrouter($)
     }
 
     return (

@@ -6,9 +6,10 @@ import type { ApiStatus, ApiToestand } from '../types'
 import { failOpen, leesAccountsStaat } from './ctx'
 import { kaart, knop, knoppen, paneelVan, uitleg, vinkje } from './paneel-ui'
 
-import { beslis, dagSleutel, geldigeKey, HELPER, houdTot, kosten, kostenOverzicht, limietenVan, telOp, toestandVan, usd } from '../lib/api.mjs'
-import type { Door } from '../lib/api.mjs'
+import { beslis, dagSleutel, geldigeKey, houdTot, kosten, kostenOverzicht, limietenVan, modusVan, telOp, toestandVan, usd } from '../lib/api.mjs'
+import type { Beschikbaar, Door, Modus } from '../lib/api.mjs'
 import { kettingAan } from '../lib/accounts.mjs'
+import { geldigModel, orKosten } from '../lib/openrouter.mjs'
 
 // Tab API: de API-key in de macOS-sleutelhanger en wisselen tussen abonnement en API, met de hand
 // of automatisch op de rate limits. Alles buiten de plugin (settings.json, sleutelhanger) gaat via
@@ -31,23 +32,25 @@ const FOUTE_KEY = 'Dat is geen Anthropic API-key (die begint met sk-ant-); niets
 const AUTO_UITLEG =
   'Automatisch wisselen staat aan: vanaf de grens van je 5u- of 7d-venster gebruiken nieuwe terminal-sessies je API-key, en dat kost geld per token (geschat in de tab API). Terug na de reset. Deze sessie en de desktop-app houden hun eigen login.'
 
-// Of deze sessie zelf op de API draait: gestart terwijl onze helper aan stond. Per sessie (één module-instantie).
+// Of deze sessie zelf op de API of OpenRouter draait: gestart terwijl onze helper aan stond. Per sessie (één module-instantie).
 let sessieOpApi = false
+let sessieOpOpenrouter = false
 // Eén wissel tegelijk (turn.complete en session.measure kunnen kort na elkaar komen).
 let wisselt = false
 
-function cliPath($: Engine): string {
+export function cliPath($: Engine): string {
   return `${$.plugin.root}/cli/api.mjs`
 }
 
 // Vaste waarden voor de CLI: `env` van $.process.run komt bovenop die van de host, dus zonder deze
 // zouden SECURITY_BIN of SETTINGS_JSON uit een settings-`env`-blok de CLI bereiken (en SECURITY_BIN
 // de key op stdin krijgen). Leeg = de standaard van de CLI.
-const CLI_ENV = { SECURITY_BIN: '/usr/bin/security', SETTINGS_JSON: '', CLAUDE_JSON: '' }
+const CLI_ENV = { SECURITY_BIN: '/usr/bin/security', SETTINGS_JSON: '', CLAUDE_JSON: '', OPENROUTER_DIR: '', OPENROUTER_URL: '' }
 
 // Draait cli/api.mjs. De desktop-app heeft een kaal PATH en argv[0] wordt daarop gezocht,
 // dus `node` via /usr/bin/env met een PATH waar Homebrew vooraan staat.
-async function cli($: Engine, args: string[], stdin?: string) {
+// Ook gebruikt door hooks/openrouter.tsx.
+export async function cli($: Engine, args: string[], stdin?: string) {
   const init = { timeoutMs: 20_000, ...(stdin === undefined ? {} : { stdin }) }
   const isWin = (await $.env.get('OS')) === 'Windows_NT'
   if (isWin) return $.process.run(['node', cliPath($), ...args], { ...init, env: CLI_ENV })
@@ -96,16 +99,18 @@ export async function zetTakenlijst($: Engine, aan: boolean): Promise<void> {
   }
 }
 
-function foutVan(r: { exitCode: number; stderr: string }): string {
+export function foutVan(r: { exitCode: number; stderr: string }): string {
   return r.stderr.trim().replace(/^\[api\] /, '').slice(0, 200) || `exitcode ${r.exitCode}`
 }
 
-function laatsteJson(stdout: string): any {
+export function laatsteJson(stdout: string): any {
   return JSON.parse(stdout.trim().split('\n').pop() ?? '{}')
 }
 
+const MODI_SET = new Set(['abonnement', 'api', 'openrouter'])
+
 // Status uit de CLI (alleen lezen); een fout komt terug in `fout`.
-async function leesStatus($: Engine): Promise<ApiStatus> {
+export async function leesStatus($: Engine): Promise<ApiStatus> {
   try {
     const r = await cli($, ['status'])
     if (r.exitCode !== 0) return { heeftKey: false, staart: '', modus: 'abonnement', vreemdeHelper: false, fout: foutVan(r) }
@@ -113,8 +118,13 @@ async function leesStatus($: Engine): Promise<ApiStatus> {
     return {
       heeftKey: d.heeftKey === true,
       staart: typeof d.staart === 'string' ? d.staart.slice(-4) : '',
-      modus: d.modus === 'api' ? 'api' : 'abonnement',
+      modus: MODI_SET.has(d.modus) ? d.modus : 'abonnement',
       vreemdeHelper: d.vreemdeHelper === true,
+      vreemdeBasis: d.vreemdeBasis === true,
+      orHeeftKey: d.orHeeftKey === true,
+      orStaart: typeof d.orStaart === 'string' ? d.orStaart.slice(-4) : '',
+      ...(geldigModel(d.orModel) ? { orModel: d.orModel } : {}),
+      ...(geldigModel(d.orSnel) ? { orSnel: d.orSnel } : {}),
       ...(typeof d.fout === 'string' ? { fout: d.fout.slice(0, 200) } : {}),
     }
   } catch (err) {
@@ -145,6 +155,8 @@ async function hertekenen($: Engine): Promise<void> {
 export async function verversApi($: Engine): Promise<ApiStatus> {
   const status = await leesStatus($)
   await update($, statusAtom, () => status)
+  // Voor de ketting (zonder CLI): staat er een OpenRouter-key.
+  if (!status.fout) await $.store.set('openrouter.heeftKey', status.orHeeftKey === true)
   if (!status.fout && !status.vreemdeHelper) {
     const t = await leesToestand($)
     if (t.modus !== status.modus) {
@@ -159,14 +171,13 @@ export async function verversApi($: Engine): Promise<ApiStatus> {
 
 // De modus uit ~/.claude/settings.json, zonder de CLI (die start een Node-proces); undefined als
 // het bestand ontbreekt of onleesbaar is.
-async function modusUitSettings($: Engine): Promise<{ modus: 'abonnement' | 'api'; vreemdeHelper: boolean } | undefined> {
+async function modusUitSettings($: Engine): Promise<{ modus: Modus; vreemdeHelper: boolean } | undefined> {
   const home = (await $.env.get('HOME')) ?? (await $.env.get('USERPROFILE'))
   if (!home) return undefined
   try {
     const tekst = await $.fs.read(`${home}/.claude/settings.json`)
-    const data = tekst ? (JSON.parse(tekst) as { apiKeyHelper?: unknown }) : {}
-    const helper = data && typeof data === 'object' ? data.apiKeyHelper : undefined
-    return { modus: helper === HELPER ? 'api' : 'abonnement', vreemdeHelper: helper !== undefined && helper !== HELPER }
+    const { modus, vreemdeHelper } = modusVan(tekst ? JSON.parse(tekst) : {})
+    return { modus, vreemdeHelper }
   } catch {
     return undefined
   }
@@ -179,6 +190,7 @@ export async function startApi($: Engine): Promise<void> {
   try {
     const gelezen = await modusUitSettings($)
     sessieOpApi = gelezen?.modus === 'api'
+    sessieOpOpenrouter = gelezen?.modus === 'openrouter'
     if (!gelezen || gelezen.vreemdeHelper) return
     const t = await leesToestand($)
     if (t.modus !== gelezen.modus) {
@@ -190,13 +202,32 @@ export async function startApi($: Engine): Promise<void> {
   }
 }
 
-// Wisselt via de CLI en bewaart de toestand. `door` = het venster bij een automatische wissel naar API;
-// `handmatigTot` = tot wanneer auto een keuze met de hand laat staan.
+// De gekozen OpenRouter-modellen (store `openrouter.keuze`); alleen geldige ids.
+export async function orKeuze($: Engine): Promise<{ model?: string; snel?: string }> {
+  const k = (await $.store.get('openrouter.keuze')) as { model?: unknown; snel?: unknown } | undefined
+  return {
+    ...(geldigModel(k?.model) ? { model: k!.model as string } : {}),
+    ...(geldigModel(k?.snel) ? { snel: k!.snel as string } : {}),
+  }
+}
+
+// Welke stappen van de ketting kunnen (zonder CLI): de API altijd (zonder key zet een mislukte wissel
+// auto uit, zoals voorheen), OpenRouter alleen met een key en beide modellen gekozen.
+export async function beschikbaarheid($: Engine): Promise<Beschikbaar> {
+  const k = await orKeuze($)
+  return { api: true, openrouter: (await $.store.get('openrouter.heeftKey')) === true && !!k.model && !!k.snel }
+}
+
+const NAAM: Record<Modus, string> = { abonnement: 'het abonnement', api: 'API', openrouter: 'OpenRouter' }
+
+// Wisselt via de CLI en bewaart de toestand. `door` = het venster bij een automatische wissel naar API
+// of OpenRouter; `handmatigTot` = tot wanneer auto een keuze met de hand laat staan.
 // Faalt een automatische wissel (andere helper, geen key), dan gaat auto uit: geen melding elke 5 minuten.
-// Ook gebruikt door de ketting in hooks/accounts.tsx (naar API als alle accounts vol zitten, en terug).
+// Ook gebruikt door de ketting in hooks/accounts.tsx (naar API of OpenRouter als alle accounts vol
+// zitten, en terug) en door hooks/openrouter.tsx.
 export async function wissel(
   $: Engine,
-  naar: 'abonnement' | 'api',
+  naar: Modus,
   reden: string,
   opties: { door?: Door; auto?: boolean; handmatigTot?: number } = {},
 ): Promise<boolean> {
@@ -206,14 +237,23 @@ export async function wissel(
   }
   wisselt = true
   try {
-    const r = await cli($, ['modus', naar])
+    let args = ['modus', naar]
+    if (naar === 'openrouter') {
+      const k = await orKeuze($)
+      if (!k.model || !k.snel) {
+        if (!opties.auto) $.ui.toast('Niet gewisseld: kies eerst een hoofdmodel en een snel model in de tab OpenRouter.')
+        return false
+      }
+      args = [...args, '--model', k.model, '--snel', k.snel]
+    }
+    const r = await cli($, args)
     const t = await leesToestand($)
     const nu = await $.clock.now()
     const { overgeschakeldDoor: _oud, handmatigTot: _hand, ...rest } = t
     if (r.exitCode !== 0) {
       const uitleg =
-        r.exitCode === 3 ? 'in ~/.claude/settings.json staat al een andere apiKeyHelper; futureflow laat die staan.'
-        : r.exitCode === 4 ? 'er staat nog geen key in de sleutelhanger.'
+        r.exitCode === 3 ? `${foutVan(r).replace(/^in \S+settings\.json/, 'in ~/.claude/settings.json')}.`
+        : r.exitCode === 4 ? (naar === 'openrouter' ? 'er staat nog geen OpenRouter-key in de sleutelhanger.' : 'er staat nog geen key in de sleutelhanger.')
         : foutVan(r)
       if (opties.auto) {
         // Niet elke meting opnieuw proberen: auto uit en niets meer om terug te draaien.
@@ -226,7 +266,11 @@ export async function wissel(
       return false
     }
     if (laatsteJson(r.stdout).gewijzigd === false && !opties.auto) {
-      $.ui.toast(naar === 'api' ? 'Nieuwe terminal-sessies gebruiken je API-key al.' : 'Nieuwe terminal-sessies gebruiken je abonnement al.')
+      $.ui.toast(
+        naar === 'api' ? 'Nieuwe terminal-sessies gebruiken je API-key al.'
+        : naar === 'openrouter' ? 'Nieuwe terminal-sessies gebruiken OpenRouter al met deze modellen.'
+        : 'Nieuwe terminal-sessies gebruiken je abonnement al.',
+      )
       await verversApi($)
       return true
     }
@@ -234,13 +278,15 @@ export async function wissel(
       ...rest,
       modus: naar,
       laatsteWissel: nu,
-      ...(naar === 'api' && opties.door ? { overgeschakeldDoor: opties.door } : {}),
+      ...(naar !== 'abonnement' && opties.door ? { overgeschakeldDoor: opties.door } : {}),
       ...(opties.handmatigTot !== undefined ? { handmatigTot: opties.handmatigTot } : {}),
     })
     $.ui.toast(
       naar === 'api'
         ? `Naar API (${reden}). Nieuwe terminal-sessies gebruiken je API-key en dat kost geld per token; de claude.ai-connectors staan daar uit. Deze sessie en de desktop-app houden hun eigen login.`
-        : `Terug naar het abonnement (${reden}). Nieuwe terminal-sessies gebruiken weer je abonnement. Deze sessie en de desktop-app houden hun eigen login.`,
+        : naar === 'openrouter'
+          ? `Naar OpenRouter (${reden}). Nieuwe terminal-sessies draaien op ${(await orKeuze($)).model} via je OpenRouter-key en dat kost geld per token; webzoeken en de claude.ai-connectors werken daar niet. Deze sessie en de desktop-app houden hun eigen login.`
+          : `Terug naar het abonnement (${reden}). Nieuwe terminal-sessies gebruiken weer je abonnement. Deze sessie en de desktop-app houden hun eigen login.`,
     )
     await verversApi($)
     return true
@@ -259,7 +305,7 @@ export async function apiMeet($: Engine, rateLimits?: unknown): Promise<void> {
     if (!t.auto && !t.overgeschakeldDoor) return
     if (kettingAan(await leesAccountsStaat($))) return
     const ruw = rateLimits ?? (await $.session.usage()).rateLimits
-    const besluit = beslis({ ...t, limieten: limietenVan(ruw), nu: await $.clock.now() })
+    const besluit = beslis({ ...t, beschikbaar: await beschikbaarheid($), limieten: limietenVan(ruw), nu: await $.clock.now() })
     if (besluit) await wissel($, besluit.naar, besluit.reden, { door: besluit.door, auto: true })
   } catch (err) {
     failOpen($, err)
@@ -272,10 +318,23 @@ export function apiMeetLos($: Engine, rateLimits?: unknown): void {
   void apiMeet($, rateLimits).catch(err => failOpen($, err))
 }
 
-// Telt de geschatte kosten van een beurt als deze sessie op de API draait (gestart met onze helper
-// en zonder abonnementslimieten). Wisselen doet apiMeetLos, na de beurt.
+// Telt de geschatte kosten van een beurt als deze sessie op de API of OpenRouter draait (gestart met
+// onze helper en zonder abonnementslimieten). Wisselen doet apiMeetLos, na de beurt.
 export async function apiTurnComplete($: Engine, e: { usage?: any }): Promise<void> {
   try {
+    if (sessieOpOpenrouter && e.usage) {
+      // Prijzen per model (per Mtok) bewaard bij het kiezen; onbekend model → het hoofdmodel.
+      const prijzen = ((await $.store.get('openrouter.prijzen')) ?? {}) as Record<string, { in?: number; uit?: number }>
+      const model = typeof e.usage.model === 'string' ? e.usage.model : ''
+      const prijs = prijzen[model] ?? prijzen[(await orKeuze($)).model ?? '']
+      const bedrag = orKosten(e.usage, prijs)
+      if (bedrag > 0) {
+        const dag = dagSleutel(await $.clock.now())
+        await $.store.set('openrouter.kosten', telOp((await $.store.get('openrouter.kosten')) as Record<string, number> | undefined, dag, bedrag))
+        await hertekenen($)
+      }
+      return
+    }
     if (sessieOpApi && e.usage) {
       const opAbonnement = await $.session.usage().then(u => u.rateLimits.length > 0, () => false)
       if (!opAbonnement) {
@@ -335,7 +394,7 @@ async function wisKey($: Engine): Promise<void> {
 // Met de hand gekozen gaat voor: terug naar het abonnement terwijl een venster boven de grens staat,
 // dan wisselt auto pas weer na de reset van dat venster. Met de hand naar API heeft geen
 // `overgeschakeldDoor`, dus auto zet dat nooit terug.
-async function handmatig($: Engine, naar: 'abonnement' | 'api'): Promise<void> {
+export async function handmatig($: Engine, naar: Modus): Promise<void> {
   try {
     let tot: number | undefined
     if (naar === 'abonnement') {
@@ -418,36 +477,41 @@ export async function apiTab($: Engine, e: any, k: Kleuren) {
     const nu = await $.clock.now()
     const geld = kostenOverzicht((await $.store.get('api.kosten')) as Record<string, number> | undefined, nu)
     const opApi = status.modus === 'api'
+    const opOr = status.modus === 'openrouter'
 
     return (
       <Box flexDirection="column" gap={1}>
         {kaart(ui, 'API', [
           <Text>
             <Text color={k.mut}>Nieuwe terminal-sessies: </Text>
-            <Text bold color={opApi ? k.warn : k.ok}>{opApi ? 'API-key' : 'abonnement'}</Text>
+            <Text bold color={opApi || opOr ? k.warn : k.ok}>{opApi ? 'API-key' : opOr ? 'OpenRouter' : 'abonnement'}</Text>
           </Text>,
           <Text>
             <Text color={k.mut}>{'Key: '}</Text>
             {status.heeftKey ? <Text>{`sk-ant-…${status.staart}`}</Text> : <Text color={k.mut}>geen key</Text>}
           </Text>,
-          t.overgeschakeldDoor && opApi ? (
-            <Text color={k.warn}>Automatisch naar API door het {t.overgeschakeldDoor.label}-venster; terug na de reset.</Text>
+          t.overgeschakeldDoor && (opApi || opOr) ? (
+            <Text color={k.warn}>Automatisch naar {NAAM[status.modus]} door het {t.overgeschakeldDoor.label}-venster; terug na de reset.</Text>
           ) : '',
           t.auto && t.handmatigTot !== undefined && t.handmatigTot > nu ? (
             <Text color={k.warn}>Met de hand gekozen: automatisch wisselen wacht tot {wanneer(t.handmatigTot, nu)} (of tot je het uit- en aanzet).</Text>
           ) : '',
-          t.auto && opApi && !t.overgeschakeldDoor ? (
-            <Text color={k.warn}>Met de hand op API: automatisch wisselen zet dit niet terug.</Text>
+          t.auto && (opApi || opOr) && !t.overgeschakeldDoor ? (
+            <Text color={k.warn}>Met de hand op {NAAM[status.modus]}: automatisch wisselen zet dit niet terug.</Text>
           ) : '',
           status.vreemdeHelper ? (
             <Text color={k.err}>In ~/.claude/settings.json staat al een andere apiKeyHelper. futureflow laat die staan en wisselt niet.</Text>
           ) : '',
+          status.vreemdeBasis ? (
+            <Text color={k.err}>In ~/.claude/settings.json staat al een andere ANTHROPIC_BASE_URL. futureflow laat die staan en wisselt niet naar API of OpenRouter.</Text>
+          ) : '',
           status.fout ? <Text color={k.err} wrap="truncate-end">Status niet volledig gelezen: {status.fout}</Text> : '',
         ], {
-          rechts: opApi ? 'API' : 'abonnement',
+          rechts: opApi ? 'API' : opOr ? 'OpenRouter' : 'abonnement',
           knoppen: knoppen(ui, [
-            knop(ui, 'api-abonnement', opApi ? 'Abonnement' : '● Abonnement', () => handmatig($, 'abonnement'), { primary: !opApi }),
+            knop(ui, 'api-abonnement', opApi || opOr ? 'Abonnement' : '● Abonnement', () => handmatig($, 'abonnement'), { primary: !opApi && !opOr }),
             knop(ui, 'api-api', opApi ? '● API' : 'API', () => handmatig($, 'api'), { primary: opApi }),
+            knop(ui, 'api-openrouter', opOr ? '● OpenRouter' : 'OpenRouter', () => handmatig($, 'openrouter'), { primary: opOr }),
           ]),
         })}
 
@@ -460,7 +524,7 @@ export async function apiTab($: Engine, e: any, k: Kleuren) {
 
         {kaart(ui, 'Automatisch wisselen', [
           vinkje(ui, 'api-auto', t.auto, 'Automatisch wisselen', () => zetAuto($)),
-          uitleg(ui, 'Op de 5u- en 7d-vensters van je abonnement.'),
+          uitleg(ui, 'Op de 5u- en 7d-vensters van je abonnement. Volgorde van API en OpenRouter: tab OpenRouter.'),
           <Input key="api-hoog" label="Naar API vanaf % " value={String(t.hoog)} submitLabel="zet" onSubmit={(waarde: string) => zetGrens($, 'hoog', waarde)} />,
           <Input key="api-laag" label="Terug onder %     " value={String(t.laag)} submitLabel="zet" onSubmit={(waarde: string) => zetGrens($, 'laag', waarde)} />,
         ], { rechts: t.auto ? 'aan' : 'uit' })}
