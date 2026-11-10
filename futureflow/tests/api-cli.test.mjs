@@ -48,10 +48,13 @@ beforeEach(() => {
 })
 
 const cli = (args, stdin) =>
-  spawnSync(process.execPath, [CLI, ...args], { env: { ...process.env, SETTINGS_JSON: bestand, SECURITY_BIN: nep }, input: stdin, encoding: 'utf8' })
+  spawnSync(process.execPath, [CLI, ...args], { env: { ...process.env, SETTINGS_JSON: bestand, SECURITY_BIN: nep, OPENROUTER_DIR: path.join(dir, 'or'), OPENROUTER_URL: 'http://127.0.0.1:9' }, input: stdin, encoding: 'utf8' })
 const logRegels = () => (fs.existsSync(log) ? fs.readFileSync(log, 'utf8').split('\n').filter(Boolean) : [])
 const lees = () => JSON.parse(fs.readFileSync(bestand, 'utf8'))
 const rest = () => fs.readdirSync(dir).filter(f => f !== 'settings.json')
+
+// Alleen de velden van de API-key (de nep-security kent geen services, dus de OpenRouter-velden tellen hier niet).
+const kern = d => ({ heeftKey: d.heeftKey, staart: d.staart, modus: d.modus, vreemdeHelper: d.vreemdeHelper })
 
 const BASIS = () => ({ model: 'opus', permissions: { allow: ['Bash(ls)'] }, enabledPlugins: { 'x@y': true }, zzz: [1, 2] })
 
@@ -78,13 +81,13 @@ test('zet-key met een verkeerde key: exit 1, security niet aangeroepen, key niet
 })
 
 test('status: staart en modus, nooit de hele key', () => {
-  assert.deepEqual(JSON.parse(cli(['status']).stdout), { heeftKey: false, staart: '', modus: 'abonnement', vreemdeHelper: false })
+  assert.deepEqual(kern(JSON.parse(cli(['status']).stdout)), { heeftKey: false, staart: '', modus: 'abonnement', vreemdeHelper: false })
   cli(['zet-key'], KEY)
   fs.writeFileSync(bestand, JSON.stringify({ ...BASIS(), apiKeyHelper: HELPER }, null, 2))
   const r = cli(['status'])
   assert.equal(r.status, 0)
   assert.ok(!r.stdout.includes(KEY))
-  assert.deepEqual(JSON.parse(r.stdout), { heeftKey: true, staart: 'WXYZ', modus: 'api', vreemdeHelper: false })
+  assert.deepEqual(kern(JSON.parse(r.stdout)), { heeftKey: true, staart: 'WXYZ', modus: 'api', vreemdeHelper: false })
 })
 
 test('modus api zet alleen onze helper; abonnement haalt hem weg; de rest blijft exact', () => {
@@ -114,7 +117,7 @@ test('een andere apiKeyHelper blijft staan: exit 3 voor api en abonnement', () =
     assert.match(r.stderr, /andere apiKeyHelper/)
   }
   assert.equal(fs.readFileSync(bestand, 'utf8'), eigen)
-  assert.deepEqual(JSON.parse(cli(['status']).stdout), { heeftKey: true, staart: 'WXYZ', modus: 'abonnement', vreemdeHelper: true })
+  assert.deepEqual(kern(JSON.parse(cli(['status']).stdout)), { heeftKey: true, staart: 'WXYZ', modus: 'abonnement', vreemdeHelper: true })
 })
 
 test('modus api zonder key in de sleutelhanger: exit 4, niets geschreven', () => {

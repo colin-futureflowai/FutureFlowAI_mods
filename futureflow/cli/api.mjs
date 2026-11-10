@@ -6,13 +6,25 @@
 //   api wis-key                 item uit de sleutelhanger               → JSON { gewist }
 //   api status                                                          → JSON { heeftKey, staart, modus, vreemdeHelper, fout? }
 //   api modus api|abonnement    zet of verwijdert alleen onze helper    → JSON { modus, gewijzigd }
+//   api modus openrouter --model <id> --snel <id>
+//                               OpenRouter-instellingen (zie lib/openrouter.mjs), vastgelegd in de marker
 //   api takenlijst aan|uit|status  env.CLAUDE_CODE_ENABLE_TODO_TOOLS = "true" → JSON { aan } (aan/uit ook { gewijzigd })
+//   api openrouter zet-key      OpenRouter-key via stdin → sleutelhanger → JSON { ok, staart }
+//   api openrouter wis-key                                              → JSON { gewist }
+//   api openrouter modellen [--ververs]  lijst met tools-ondersteuning, cache 6 u → JSON { modellen, opgehaald, uitCache, fout? }
+//   api openrouter test --model <id>     één POST /v1/messages met max_tokens 1 → JSON { ok, status?, fout? }
+//
+// OpenRouter: de marker (<OPENROUTER_DIR>/marker.json) legt vast welke sleutels futureflow zelf in
+// settings.json zette; terugwisselen haalt precies die weg, en alleen als de waarde nog gelijk is.
+// Een vreemde waarde op een van die sleutels, een vreemde apiKeyHelper of ANTHROPIC_BASE_URL: exit 3.
 //
 // De key staat nooit in argv (ook niet van `security`: die krijgt de opdracht via stdin van
 // `security -i`) en nooit op stdout of stderr; alleen de laatste 4 tekens.
 // Exitcodes: 1 gebruik of ongeldige key, 2 settings onleesbaar of geen geldige JSON (niets geschreven),
-// 3 er staat een andere apiKeyHelper (blijft staan), 4 geen key in de sleutelhanger, 5 sleutelhanger-fout.
-// SETTINGS_JSON en SECURITY_BIN overschrijven pad en programma (tests).
+// 3 er staat een andere apiKeyHelper of andere waarde (blijft staan), 4 geen key in de sleutelhanger,
+// 5 sleutelhanger-fout, 6 modellijst niet op te halen (en geen cache).
+// SETTINGS_JSON, SECURITY_BIN, OPENROUTER_DIR en OPENROUTER_URL overschrijven paden, programma en
+// adres (tests).
 
 import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
@@ -20,13 +32,20 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { ACCOUNT, geldigeKey, HELPER, SERVICE } from '../lib/api.mjs'
+import { ACCOUNT, geldigeKey, HELPER, MODI, modusVan, SERVICE } from '../lib/api.mjs'
+import {
+  CACHE_MS, eigenBasis, geldigeOrKey, geldigModel, haalWeg, modellenVan, OR_ACCOUNT, OR_SERVICE, OR_URL, orInstellingen, pasToe,
+} from '../lib/openrouter.mjs'
 
 const BESTAND = process.env.SETTINGS_JSON || path.join(os.homedir(), '.claude', 'settings.json')
 const SECURITY = process.env.SECURITY_BIN || '/usr/bin/security'
 const POGINGEN = 3
 const TODO_VAR = 'CLAUDE_CODE_ENABLE_TODO_TOOLS'
 const NIET_GEVONDEN = 44
+const OR_DIR = process.env.OPENROUTER_DIR || path.join(os.homedir(), '.claude', 'futureflow', 'openrouter')
+const OR_BASIS = (process.env.OPENROUTER_URL || OR_URL).replace(/\/+$/, '')
+const MARKER = path.join(OR_DIR, 'marker.json')
+const CACHE = path.join(OR_DIR, 'modellen.json')
 
 class Fout extends Error {
   constructor(bericht, code) {
@@ -40,8 +59,8 @@ function security(args, invoer) {
 }
 
 // De key uit de sleutelhanger, alleen binnen dit proces; undefined als er geen is.
-function leesKey() {
-  const r = security(['find-generic-password', '-s', SERVICE, '-a', ACCOUNT, '-w'])
+function leesKey(service = SERVICE, account = ACCOUNT) {
+  const r = security(['find-generic-password', '-s', service, '-a', account, '-w'])
   if (r.error) throw new Fout(`sleutelhanger niet gelezen (${r.error.code ?? r.error.message})`, 5)
   if (r.status === NIET_GEVONDEN) return undefined
   if (r.status !== 0) throw new Fout(`sleutelhanger niet gelezen (exitcode ${r.status})`, 5)
@@ -57,19 +76,22 @@ function leesStdin() {
   }
 }
 
-function zetKey() {
+function zetKey(or = false) {
   const key = leesStdin().trim()
-  if (!geldigeKey(key)) throw new Fout('geen geldige Anthropic API-key (die begint met sk-ant-); niets opgeslagen', 1)
+  if (or ? !geldigeOrKey(key) : !geldigeKey(key)) {
+    throw new Fout(or ? 'geen geldige OpenRouter-key (die begint met sk-or-); niets opgeslagen' : 'geen geldige Anthropic API-key (die begint met sk-ant-); niets opgeslagen', 1)
+  }
+  const [service, account] = or ? [OR_SERVICE, OR_ACCOUNT] : [SERVICE, ACCOUNT]
   // -U werkt een bestaand item bij. De opdracht gaat via stdin, zodat de key niet in argv staat.
-  const r = security(['-i'], `add-generic-password -U -s ${SERVICE} -a ${ACCOUNT} -w ${key}\n`)
+  const r = security(['-i'], `add-generic-password -U -s ${service} -a ${account} -w ${key}\n`)
   if (r.error || r.status !== 0) throw new Fout(`key niet bewaard in de sleutelhanger (${r.error?.code ?? `exitcode ${r.status}`})`, 5)
   // Terug lezen: pas als hij er echt staat is het gelukt.
-  if (leesKey() !== key) throw new Fout('key niet terug te lezen uit de sleutelhanger; controleer Sleutelhangertoegang', 5)
+  if (leesKey(service, account) !== key) throw new Fout('key niet terug te lezen uit de sleutelhanger; controleer Sleutelhangertoegang', 5)
   return { ok: true, staart: key.slice(-4) }
 }
 
-function wisKey() {
-  const r = security(['delete-generic-password', '-s', SERVICE, '-a', ACCOUNT])
+function wisKey(or = false) {
+  const r = security(['delete-generic-password', '-s', or ? OR_SERVICE : SERVICE, '-a', or ? OR_ACCOUNT : ACCOUNT])
   if (r.error) throw new Fout(`sleutelhanger niet bijgewerkt (${r.error.code ?? r.error.message})`, 5)
   if (r.status === NIET_GEVONDEN) return { gewist: false }
   if (r.status !== 0) throw new Fout(`key niet gewist (exitcode ${r.status})`, 5)
@@ -115,70 +137,199 @@ function opmaak(tekst, data) {
 
 const zelfde = (a, b) => a.mtimeMs === b.mtimeMs && a.size === b.size && a.ino === b.ino
 
-function modusVan(data) {
-  const helper = data?.apiKeyHelper
-  return {
-    modus: helper === HELPER ? 'api' : 'abonnement',
-    vreemdeHelper: helper !== undefined && helper !== HELPER,
+// ---- marker en cache van OpenRouter ----
+
+function leesJson(pad) {
+  try {
+    return JSON.parse(fs.readFileSync(pad, 'utf8'))
+  } catch {
+    return undefined
   }
 }
 
-function zetModus(naar) {
-  if (naar !== 'api' && naar !== 'abonnement') throw new Fout('kies: modus api|abonnement', 1)
+// Atomisch schrijven (tmp + rename), alleen voor de eigen bestanden van futureflow.
+function schrijfJson(pad, data) {
+  fs.mkdirSync(path.dirname(pad), { recursive: true, mode: 0o700 })
+  const tmp = `${pad}.${process.pid}-${Date.now()}.tmp`
+  try {
+    fs.writeFileSync(tmp, JSON.stringify(data, null, 2) + '\n', { mode: 0o600, flag: 'wx' })
+    fs.renameSync(tmp, pad)
+  } catch (err) {
+    fs.rmSync(tmp, { force: true })
+    throw new Fout(`${pad} niet geschreven (${err.code ?? err.message}); niets gewijzigd`, 2)
+  }
+}
+
+const leesMarker = () => leesJson(MARKER)
+
+function zetMarker(marker) {
+  if (marker) schrijfJson(MARKER, marker)
+  else fs.rmSync(MARKER, { force: true })
+}
+
+// Schrijft settings.json atomisch. false = het bestand veranderde of ontstond intussen: opnieuw lezen.
+function schrijfSettings(doel, gelezen, data) {
+  const tmp = path.join(path.dirname(doel), `.${path.basename(doel)}.futureflow-${process.pid}-${Date.now()}.tmp`)
+  if (!gelezen) {
+    fs.mkdirSync(path.dirname(doel), { recursive: true })
+    try {
+      fs.writeFileSync(tmp, JSON.stringify(data, null, 2) + '\n', { mode: 0o600, flag: 'wx' })
+      // link faalt als het bestand intussen wel bestaat; dan opnieuw lezen.
+      fs.linkSync(tmp, doel)
+      fs.rmSync(tmp, { force: true })
+      return true
+    } catch (err) {
+      fs.rmSync(tmp, { force: true })
+      if (err.code === 'EEXIST') return false
+      throw new Fout(`${BESTAND} niet geschreven (${err.code ?? err.message}); niets gewijzigd`, 2)
+    }
+  }
+  const { tekst, stat } = gelezen
+  const mode = stat.mode & 0o777
+  try {
+    fs.writeFileSync(tmp, opmaak(tekst, data), { mode, flag: 'wx' })
+    fs.chmodSync(tmp, mode)
+    // Tussendoor door Claude Code geschreven? Dan niet overschrijven maar opnieuw lezen.
+    let nu
+    try { nu = fs.statSync(doel) } catch { nu = undefined }
+    if (!nu || !zelfde(nu, stat)) {
+      fs.rmSync(tmp, { force: true })
+      if (!nu) throw new Fout(`${BESTAND} verdween tijdens het schrijven; niets gewijzigd`, 2)
+      return false
+    }
+    fs.renameSync(tmp, doel)
+    return true
+  } catch (err) {
+    fs.rmSync(tmp, { force: true })
+    if (err instanceof Fout) throw err
+    throw new Fout(`${BESTAND} niet geschreven (${err.code ?? err.message}); niets gewijzigd`, 2)
+  }
+}
+
+const isObject = v => !!v && typeof v === 'object' && !Array.isArray(v)
+
+// Staan de gewenste OpenRouter-waarden er al allemaal?
+function alGezet(data, gewenst) {
+  const env = isObject(data?.env) ? data.env : {}
+  return data?.apiKeyHelper === gewenst.apiKeyHelper && Object.entries(gewenst.env).every(([k, v]) => env[k] === v)
+}
+
+function vlagen(rest) {
+  const uit = {}
+  for (let i = 0; i < rest.length; i++) {
+    const a = rest[i]
+    if (a === '--ververs') uit.ververs = true
+    else if ((a === '--model' || a === '--snel') && i + 1 < rest.length) uit[a.slice(2)] = rest[++i]
+    else throw new Fout(`onbekend argument ${a.slice(0, 40)}`, 1)
+  }
+  return uit
+}
+
+function zetModus(naar, opties = {}) {
+  if (!MODI.includes(naar)) throw new Fout('kies: modus api|abonnement|openrouter', 1)
+  let gewenst
+  if (naar === 'openrouter') {
+    if (!geldigModel(opties.model) || !geldigModel(opties.snel)) throw new Fout('kies een model en een snel model (--model <id> --snel <id>)', 1)
+    gewenst = orInstellingen(opties.model, opties.snel)
+  }
   const doel = doelPad()
   for (let poging = 1; poging <= POGINGEN; poging++) {
     const gelezen = lees(doel)
-    const huidig = modusVan(gelezen?.data)
+    const data = gelezen?.data ?? {}
+    const oudeMarker = leesMarker()
+    const huidig = modusVan(data, eigenBasis(oudeMarker))
     if (huidig.vreemdeHelper) {
       throw new Fout(`in ${BESTAND} staat al een andere apiKeyHelper; futureflow laat die staan en wisselt niet`, 3)
     }
-    if (huidig.modus === naar) return { modus: naar, gewijzigd: false }
-    // Naar API alleen met een key, anders kan een nieuwe terminal-sessie niet inloggen.
+    if (huidig.vreemdeBasis && naar !== 'abonnement') {
+      throw new Fout(`in ${BESTAND} staat al een andere ANTHROPIC_BASE_URL; futureflow laat die staan en wisselt niet`, 3)
+    }
+    if (huidig.modus === naar && (naar !== 'openrouter' || alGezet(data, gewenst))) return { modus: naar, gewijzigd: false }
+    // Alleen met een key, anders kan een nieuwe terminal-sessie niet inloggen.
     if (naar === 'api' && leesKey() === undefined) throw new Fout('geen key in de sleutelhanger; bewaar eerst een key', 4)
-
-    if (!gelezen) {
-      // Geen settings.json: aanmaken met alleen onze helper (alleen voor modus api, abonnement stopte hierboven).
-      const tekst = JSON.stringify({ apiKeyHelper: HELPER }, null, 2) + '\n'
-      fs.mkdirSync(path.dirname(doel), { recursive: true })
-      const tmp = path.join(path.dirname(doel), `.${path.basename(doel)}.futureflow-${process.pid}-${Date.now()}.tmp`)
-      try {
-        fs.writeFileSync(tmp, tekst, { mode: 0o600, flag: 'wx' })
-        // link faalt als het bestand intussen wel bestaat; dan opnieuw lezen.
-        fs.linkSync(tmp, doel)
-        fs.rmSync(tmp, { force: true })
-        return { modus: naar, gewijzigd: true }
-      } catch (err) {
-        fs.rmSync(tmp, { force: true })
-        if (err.code === 'EEXIST') continue
-        throw new Fout(`${BESTAND} niet geschreven (${err.code ?? err.message}); niets gewijzigd`, 2)
-      }
+    if (naar === 'openrouter' && leesKey(OR_SERVICE, OR_ACCOUNT) === undefined) {
+      throw new Fout('geen OpenRouter-key in de sleutelhanger; bewaar eerst een key', 4)
     }
 
-    const { tekst, data, stat } = gelezen
-    if (naar === 'api') data.apiKeyHelper = HELPER
-    else delete data.apiKeyHelper
-    const mode = stat.mode & 0o777
-    const tmp = path.join(path.dirname(doel), `.${path.basename(doel)}.futureflow-${process.pid}-${Date.now()}.tmp`)
+    // Eerst alles van ons weg (OpenRouter volgens de marker, onze API-helper), dan het nieuwe erbij.
+    let nieuw = haalWeg(data, oudeMarker)
+    if (nieuw.apiKeyHelper === HELPER) delete nieuw.apiKeyHelper
+    let marker
+    if (naar === 'api') nieuw.apiKeyHelper = HELPER
+    if (naar === 'openrouter') {
+      const r = pasToe(nieuw, gewenst)
+      if (r.vreemd) throw new Fout(`${r.vreemd} in ${BESTAND} heeft al een andere waarde; futureflow laat die staan en wisselt niet`, 3)
+      nieuw = r.data
+      marker = r.marker
+    }
+    // Marker vóór settings: valt het schrijven daarna uit, dan de oude marker terug.
+    if (marker) zetMarker(marker)
+    let gelukt
     try {
-      fs.writeFileSync(tmp, opmaak(tekst, data), { mode, flag: 'wx' })
-      fs.chmodSync(tmp, mode)
-      // Tussendoor door Claude Code geschreven? Dan niet overschrijven maar opnieuw lezen.
-      let nu
-      try { nu = fs.statSync(doel) } catch { nu = undefined }
-      if (!nu || !zelfde(nu, stat)) {
-        fs.rmSync(tmp, { force: true })
-        if (!nu) throw new Fout(`${BESTAND} verdween tijdens het schrijven; niets gewijzigd`, 2)
-        continue
-      }
-      fs.renameSync(tmp, doel)
+      gelukt = schrijfSettings(doel, gelezen, nieuw)
     } catch (err) {
-      fs.rmSync(tmp, { force: true })
-      if (err instanceof Fout) throw err
-      throw new Fout(`${BESTAND} niet geschreven (${err.code ?? err.message}); niets gewijzigd`, 2)
+      if (marker) zetMarker(oudeMarker)
+      throw err
     }
+    if (!gelukt) {
+      if (marker) zetMarker(oudeMarker)
+      continue
+    }
+    if (!marker && oudeMarker !== undefined) zetMarker(undefined)
     return { modus: naar, gewijzigd: true }
   }
   throw new Fout(`${BESTAND} veranderde steeds tijdens het schrijven; niets gewijzigd, probeer het opnieuw`, 2)
+}
+
+// ---- modellijst en verbindingstest van OpenRouter ----
+
+async function modellen(opties) {
+  const cache = leesJson(CACHE)
+  const geldigeCache = isObject(cache) && Array.isArray(cache.modellen) && typeof cache.opgehaald === 'number'
+  const nu = Date.now()
+  if (geldigeCache && !opties.ververs && nu - cache.opgehaald < CACHE_MS && nu >= cache.opgehaald) {
+    return { modellen: cache.modellen, opgehaald: cache.opgehaald, uitCache: true }
+  }
+  let fout
+  try {
+    const r = await fetch(`${OR_BASIS}/v1/models?supported_parameters=tools`, { signal: AbortSignal.timeout(20_000), headers: { accept: 'application/json' } })
+    if (!r.ok) throw new Error(`HTTP ${r.status}`)
+    const lijst = modellenVan(await r.json())
+    if (!lijst.length) throw new Error('lege lijst')
+    schrijfJson(CACHE, { opgehaald: nu, modellen: lijst })
+    return { modellen: lijst, opgehaald: nu, uitCache: false }
+  } catch (err) {
+    fout = `lijst niet opgehaald (${String(err?.message ?? err).slice(0, 120)})`
+  }
+  if (geldigeCache) return { modellen: cache.modellen, opgehaald: cache.opgehaald, uitCache: true, fout }
+  throw new Fout(fout, 6)
+}
+
+// Eén kleine aanvraag met de key uit de sleutelhanger; alleen ok of een foutmelding terug, nooit de key.
+async function test(opties) {
+  if (!geldigModel(opties.model)) throw new Fout('kies een model (--model <id>)', 1)
+  const key = leesKey(OR_SERVICE, OR_ACCOUNT)
+  if (key === undefined) throw new Fout('geen OpenRouter-key in de sleutelhanger; bewaar eerst een key', 4)
+  const schoon = t => String(t ?? '').split(key).join('…').slice(0, 200)
+  try {
+    const r = await fetch(`${OR_BASIS}/v1/messages`, {
+      method: 'POST',
+      signal: AbortSignal.timeout(30_000),
+      headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json', 'anthropic-version': '2023-06-01' },
+      body: JSON.stringify({ model: opties.model, max_tokens: 1, messages: [{ role: 'user', content: 'ping' }] }),
+    })
+    if (r.ok) return { ok: true, status: r.status }
+    let bericht = ''
+    try {
+      const d = await r.json()
+      bericht = d?.error?.message ?? d?.message ?? ''
+    } catch {
+      bericht = ''
+    }
+    return { ok: false, status: r.status, fout: schoon(bericht) || `HTTP ${r.status}` }
+  } catch (err) {
+    return { ok: false, fout: `geen verbinding (${schoon(err?.cause?.code ?? err?.message ?? err)})` }
+  }
 }
 
 const takenlijstAan = data => !!data?.env && typeof data.env === 'object' && data.env[TODO_VAR] === 'true'
@@ -247,7 +398,7 @@ function takenlijst(actie) {
 
 // Status zonder te falen op één onderdeel: een fout komt in `fout`.
 function status() {
-  const uit = { heeftKey: false, staart: '', modus: 'abonnement', vreemdeHelper: false }
+  const uit = { heeftKey: false, staart: '', modus: 'abonnement', vreemdeHelper: false, vreemdeBasis: false, orHeeftKey: false, orStaart: '' }
   const fouten = []
   try {
     const key = leesKey()
@@ -259,24 +410,46 @@ function status() {
     fouten.push(err.message)
   }
   try {
-    const gelezen = lees(doelPad())
-    Object.assign(uit, modusVan(gelezen?.data))
+    const key = leesKey(OR_SERVICE, OR_ACCOUNT)
+    if (key) {
+      uit.orHeeftKey = true
+      uit.orStaart = key.slice(-4)
+    }
+  } catch (err) {
+    fouten.push(err.message)
+  }
+  try {
+    const data = lees(doelPad())?.data
+    Object.assign(uit, modusVan(data, eigenBasis(leesMarker())))
+    const env = isObject(data?.env) ? data.env : {}
+    if (uit.modus === 'openrouter') {
+      if (typeof env.ANTHROPIC_DEFAULT_OPUS_MODEL === 'string') uit.orModel = env.ANTHROPIC_DEFAULT_OPUS_MODEL
+      if (typeof env.ANTHROPIC_DEFAULT_HAIKU_MODEL === 'string') uit.orSnel = env.ANTHROPIC_DEFAULT_HAIKU_MODEL
+    }
   } catch (err) {
     fouten.push(err.message)
   }
   return fouten.length ? { ...uit, fout: fouten.join('; ') } : uit
 }
 
-export function main(args) {
+export async function main(args) {
   const [cmd, ...rest] = args
+  const [sub, ...vlag] = rest
   try {
     if (cmd === 'zet-key' && rest.length === 0) console.log(JSON.stringify(zetKey()))
     else if (cmd === 'wis-key' && rest.length === 0) console.log(JSON.stringify(wisKey()))
     else if (cmd === 'status' && rest.length === 0) console.log(JSON.stringify(status()))
-    else if (cmd === 'modus' && rest.length === 1) console.log(JSON.stringify(zetModus(rest[0])))
+    else if (cmd === 'modus' && rest.length >= 1) console.log(JSON.stringify(zetModus(sub, vlagen(vlag))))
     else if (cmd === 'takenlijst' && rest.length === 1) console.log(JSON.stringify(takenlijst(rest[0])))
+    else if (cmd === 'openrouter' && sub === 'zet-key' && vlag.length === 0) console.log(JSON.stringify(zetKey(true)))
+    else if (cmd === 'openrouter' && sub === 'wis-key' && vlag.length === 0) console.log(JSON.stringify(wisKey(true)))
+    else if (cmd === 'openrouter' && sub === 'modellen') console.log(JSON.stringify(await modellen(vlagen(vlag))))
+    else if (cmd === 'openrouter' && sub === 'test') console.log(JSON.stringify(await test(vlagen(vlag))))
     else {
-      console.error('Gebruik: api zet-key (key via stdin) | api wis-key | api status | api modus api|abonnement | api takenlijst aan|uit|status')
+      console.error(
+        'Gebruik: api zet-key (key via stdin) | api wis-key | api status | api modus api|abonnement | api modus openrouter --model <id> --snel <id>' +
+          ' | api takenlijst aan|uit|status | api openrouter zet-key|wis-key | api openrouter modellen [--ververs] | api openrouter test --model <id>',
+      )
       return 1
     }
     return 0
@@ -296,11 +469,12 @@ const isMain = (() => {
 })()
 
 if (isMain) {
-  try {
-    process.exitCode = main(process.argv.slice(2))
-  } catch (err) {
-    // Geen stack met mogelijke invoer: alleen de melding.
-    console.error(`[api] ${err?.message ?? err}`)
-    process.exitCode = 1
-  }
+  main(process.argv.slice(2)).then(
+    code => { process.exitCode = code },
+    err => {
+      // Geen stack met mogelijke invoer: alleen de melding.
+      console.error(`[api] ${err?.message ?? err}`)
+      process.exitCode = 1
+    },
+  )
 }
