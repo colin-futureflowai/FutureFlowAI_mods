@@ -22,9 +22,9 @@ export type KeuzeInvoer = {
   nu: number
   laatsteWissel: number
 }
-export type KettingInvoer = KeuzeInvoer & { api: Toestand; sessieLimieten: Limiet[] }
+export type KettingInvoer = KeuzeInvoer & { api: Toestand; sessieLimieten: Limiet[]; handmatigTot?: number }
 export type KettingBesluit =
-  | { soort: 'account'; naar: number; reden: string }
+  | { soort: 'account'; naar: number; reden: string; door?: Door }
   | { soort: 'api'; naar: 'api' | 'abonnement'; reden: string; door?: Door }
   | { soort: 'terug'; naar: number; reden: string }
 export type PollInvoer = {
@@ -78,6 +78,8 @@ export function maskEmail(e: unknown): string
 export function planLabel(o: { subscriptionType?: string; rateLimitTier?: string } | null | undefined): string
 export function ruimte(m: Meting | undefined, i: Instellingen, nu: number): number | null
 export function kiesAccount(s: KeuzeInvoer): { naar: number; reden: string } | null
+export function sessieMeting(limieten: Limiet[], nu: number): Meting | undefined
+export function handmatigTotVan(s: { nu: number; door?: Door; meting?: Meting }): number
 export function ketting(s: KettingInvoer): KettingBesluit | null
 export function pollPlan(p: PollInvoer): { volgende: number; interval: number }
 export function telBezig(p: { eigen: EigenSessie[]; claude: ClaudeRecord[]; ikzelf: string; nu: number }): { bezig: number; wie: string[] }

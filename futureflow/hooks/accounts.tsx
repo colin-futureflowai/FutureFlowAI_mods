@@ -7,7 +7,7 @@ import { apiToestand, wissel as apiWissel } from './api'
 import { accountsDir, failOpen, leesAccountsStaat } from './ctx'
 import { openDashboard, PANE } from './paneel'
 
-import { ketting, kettingAan, kettingInvoerVan, maskEmail, statusVan, VERS } from '../lib/accounts.mjs'
+import { handmatigTotVan, ketting, kettingAan, kettingInvoerVan, maskEmail, statusVan, VERS } from '../lib/accounts.mjs'
 import type { KettingBesluit } from '../lib/accounts.mjs'
 import { dagSleutel, limietenVan } from '../lib/api.mjs'
 
@@ -24,6 +24,8 @@ const versieAtom = atom({ plugin: 'futureflow', key: 'accounts.versie' } as cons
 const vraagAtom = atom({ plugin: 'futureflow', key: 'accounts.vraag' } as const, null as AccountsVraag | null)
 const wachtAtom = atom({ plugin: 'futureflow', key: 'accounts.wacht' } as const, null as AccountsWacht | null)
 const meldingAtom = atom({ plugin: 'futureflow', key: 'accounts.melding' } as const, null as AccountsMelding | null)
+// Tot wanneer auto een keuze met de hand laat staan (ms; null = geen); dezelfde waarde staat in $.store.
+const handmatigAtom = atom({ plugin: 'futureflow', key: 'accounts.handmatigTot' } as const, null as number | null)
 const desktopAtom = atom({ plugin: 'futureflow', key: 'accounts.desktop' } as const, false)
 const wegAtom = atom({ plugin: 'futureflow', key: 'accounts.weg' } as const, null as number | null)
 // Zelfde atom als in dashboard.tsx en paneel.ts: welke tab open staat.
@@ -49,6 +51,8 @@ const MELDING_MS = 10_000
 const NIET_NU_MS = 30 * 60_000
 const FOUT_PAUZE_MS = 30 * 60_000
 const NIET_NU = 'accounts.nietNuTot'
+const HANDMATIG = 'accounts.handmatigTot'
+const AUTO_DOOR = 'accounts.autoDoor' // venster van de laatste automatische account-wissel
 const SESSIE_ID = /^[A-Za-z0-9._-]{1,128}$/
 
 // `env` van $.process.run komt bovenop die van de host: zo bereiken testvariabelen of een eigen
@@ -141,7 +145,19 @@ async function leesStatus($: Engine): Promise<AccountsStatus> {
 async function ververs($: Engine): Promise<AccountsStatus> {
   const s = await leesStatus($)
   await update($, statusAtom, () => s)
+  const tot = await leesHandmatig($)
+  await update($, handmatigAtom, () => tot)
   return s
+}
+
+async function leesHandmatig($: Engine): Promise<number | null> {
+  const tot = Number(await $.store.get(HANDMATIG)) || 0
+  return tot > 0 ? tot : null
+}
+
+async function zetHandmatig($: Engine, tot: number | null): Promise<void> {
+  await $.store.set(HANDMATIG, tot ?? 0)
+  await update($, handmatigAtom, () => tot)
 }
 
 async function hertekenen($: Engine): Promise<void> {
@@ -293,7 +309,14 @@ async function accountsMeet($: Engine, rateLimits?: unknown): Promise<void> {
     if (status.fout || status.profiel !== 'standaard') return
     const api = await apiToestand($)
     const ruw = rateLimits ?? (await $.session.usage().then(u => u.rateLimits, () => []))
-    const besluit = ketting({ ...kettingInvoerVan(status), nu: await $.clock.now(), api, sessieLimieten: limietenVan(ruw) })
+    const handmatigTot = await leesHandmatig($)
+    const besluit = ketting({
+      ...kettingInvoerVan(status),
+      nu: await $.clock.now(),
+      api,
+      sessieLimieten: limietenVan(ruw),
+      ...(handmatigTot !== null ? { handmatigTot } : {}),
+    })
     await voerUit($, besluit, status)
   } finally {
     meetLoopt = false
@@ -328,7 +351,8 @@ async function voerUit($: Engine, besluit: KettingBesluit | null, status: Accoun
     }
     return
   }
-  await voerWisselUit($, vraag, { auto: true, maxWacht: status.instellingen.maxWacht })
+  const gelukt = await voerWisselUit($, vraag, { auto: true, maxWacht: status.instellingen.maxWacht })
+  if (gelukt && vraag.soort === 'account') await $.store.set(AUTO_DOOR, besluit.soort === 'account' && besluit.door ? besluit.door : null)
 }
 
 // De wissel zelf. `auto`: een besluit van de ketting (de CLI kijkt dan ook naar de wachttijd).
@@ -440,7 +464,25 @@ async function nietNu($: Engine): Promise<void> {
 
 async function wisselMetDeHand($: Engine, id: number): Promise<boolean> {
   const s = (await read($, statusAtom)) ?? (await ververs($))
-  return voerWisselUit($, { soort: 'account', naar: id, van: s.actief, reden: 'met de hand' }, { auto: false, maxWacht: s.instellingen.maxWacht })
+  const gelukt = await voerWisselUit($, { soort: 'account', naar: id, van: s.actief, reden: 'met de hand' }, { auto: false, maxWacht: s.instellingen.maxWacht })
+  if (gelukt && s.instellingen.auto) {
+    // Een keuze met de hand geldt tot de reset van het venster dat de laatste wissel veroorzaakte, anders
+    // van het hoogste venster van het gekozen account (zelfde regel als bij de API-wissel).
+    const nu = await $.clock.now()
+    const na = (await read($, statusAtom)) ?? s
+    const door = await $.store.get(AUTO_DOOR)
+    await zetHandmatig(
+      $,
+      handmatigTotVan({
+        nu,
+        ...(door && typeof door === 'object' ? { door: door as { label: string; resetsAt?: number } } : {}),
+        meting: kettingInvoerVan(na).metingen[id],
+      }),
+    )
+    await $.store.set(AUTO_DOOR, null)
+    await hertekenen($).catch(() => undefined)
+  }
+  return gelukt
 }
 
 async function voegToe($: Engine): Promise<string> {
@@ -478,6 +520,8 @@ async function zetInstelling($: Engine, deel: Record<string, unknown>, gelukt: s
 async function zetAuto($: Engine): Promise<void> {
   const s = (await read($, statusAtom)) ?? (await ververs($))
   const aan = !s.instellingen.auto
+  // Aan- of uitzetten beëindigt ook een keuze met de hand.
+  await zetHandmatig($, null)
   const inRotatie = s.accounts.filter(a => a.inRotatie).length
   const extra = aan && inRotatie < 2 ? ' Dat werkt vanaf twee accounts in de rotatie; tot dan geldt alleen de tab API.' : ''
   await zetInstelling(
@@ -578,6 +622,7 @@ export async function accountsTab($: Engine, e: any, k: Kleuren) {
     const s = (await read($, statusAtom)) ?? (await leesStatus($))
     const wegId = await read($, wegAtom)
     const wacht = await read($, wachtAtom)
+    const handmatig = await read($, handmatigAtom)
     const nu = await $.clock.now()
     const i = s.instellingen
     const kan = !desktop && s.profiel === 'standaard'
@@ -595,6 +640,9 @@ export async function accountsTab($: Engine, e: any, k: Kleuren) {
               <Text color={k.mut}>{s.accounts.length ? 'een login die futureflow niet beheert' : 'nog geen accounts toegevoegd'}</Text>
             )}
           </Text>
+          {i.auto && handmatig !== null && handmatig > nu ? (
+            <Text color={k.warn}>{`Jouw keuze geldt tot ${resetTekst('5u', handmatig, nu)}; automatisch wisselen wacht tot dan (of tot je het uit- en aanzet).`}</Text>
+          ) : null}
           {s.laatsteWissel ? (
             <Text color={k.mut}>{`Laatste wissel: ${resetTekst('5u', s.laatsteWissel.tijd, nu)} naar account ${s.laatsteWissel.naar}${s.laatsteWissel.auto ? ' (automatisch)' : ''}`}</Text>
           ) : null}

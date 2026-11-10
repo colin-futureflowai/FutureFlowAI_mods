@@ -3,7 +3,7 @@
 // Getallen en volgorde komen van claude-swap (MIT, github.com/realiti4/claude-swap, commit 5ac68bfb),
 // met de zuinigere poll-getallen die Colin op 10-11-2026 koos.
 
-import { beslis, WACHTTIJD } from './api.mjs'
+import { beslis, horizon, WACHTTIJD } from './api.mjs'
 
 // Sleutelhanger: het live item van Claude Code en futureflow's eigen items.
 export const LIVE = 'Claude Code-credentials'
@@ -91,6 +91,51 @@ export function ruimte(m, i, nu) {
 
 const rond = n => Math.round(n * 10) / 10
 
+// De eigen rate limits van de sessie (`limietenVan`) als verse meting van het actieve account; alleen
+// 5u en 7d. undefined als er geen venster met een percentage is.
+export function sessieMeting(limieten, nu) {
+  const vensters = []
+  for (const l of Array.isArray(limieten) ? limieten : []) {
+    if (!l || (l.label !== '5u' && l.label !== '7d') || !getal(l.percent)) continue
+    vensters.push({ label: l.label, pct: l.percent, ...(getal(l.resetsAt) ? { resetsAt: l.resetsAt } : {}) })
+  }
+  return vensters.length ? { vensters, gemetenOp: nu } : undefined
+}
+
+// Staat een venster van een verse meting echt op 100 % (limiet bereikt, reset nog niet voorbij)?
+function limietBereikt(m, nu) {
+  if (!m || !Array.isArray(m.vensters) || !getal(m.gemetenOp) || nu - m.gemetenOp > VERS) return false
+  return m.vensters.some(v => v && (v.label === '5u' || v.label === '7d') && getal(v.pct) && v.pct >= 100 && !(getal(v.resetsAt) && v.resetsAt <= nu))
+}
+
+// Het venster met de minste ruimte (het venster dat de wissel veroorzaakt).
+function beperkendVenster(m, i, nu) {
+  let best = null
+  for (const v of m?.vensters ?? []) {
+    if (!v || (v.label !== '5u' && v.label !== '7d') || !getal(v.pct)) continue
+    const pct = getal(v.resetsAt) && v.resetsAt <= nu ? 0 : v.pct
+    const r = (v.label === '5u' ? i.marge5u : i.marge7d) - pct
+    if (!best || r < best.r) best = { r, v }
+  }
+  return best ? { label: best.v.label, ...(getal(best.v.resetsAt) ? { resetsAt: best.v.resetsAt } : {}) } : undefined
+}
+
+// Een keuze met de hand terwijl auto aan staat: tot wanneer auto die laat staan. De reset van het
+// venster dat de laatste (automatische) wissel veroorzaakte (`door`); anders het hoogste venster (5u of
+// 7d) van `meting`; zonder resetsAt (of al voorbij) de lengte van het venster; zonder enig venster 5 u.
+// Zelfde regel als `handmatigTot` bij de API-wissel.
+export function handmatigTotVan(s) {
+  const nu = s.nu
+  const tot = v => (getal(v.resetsAt) && v.resetsAt > nu ? v.resetsAt : nu + horizon(v.label))
+  if (s.door && typeof s.door.label === 'string') return tot(s.door)
+  let hoogste = null
+  for (const v of s.meting?.vensters ?? []) {
+    if (!v || (v.label !== '5u' && v.label !== '7d') || !getal(v.pct)) continue
+    if (!hoogste || v.pct > hoogste.pct) hoogste = v
+  }
+  return hoogste ? tot(hoogste) : nu + horizon('5u')
+}
+
 // Strategie meeste ruimte: alleen met auto aan, buiten de wachttijd, en als het actieve account op of
 // boven een marge zit. Dan het account in de rotatie (status ok, verse meting) met de meeste ruimte,
 // mits dat minstens `hysterese` punten meer is dan het actieve.
@@ -117,6 +162,10 @@ export function kiesAccount(s) {
 export function ketting(s) {
   const { api, nu } = s
   const i = s.instellingen
+  // De eigen rate limits van de sessie zijn de verse meting van het actieve account.
+  const eigen = s.actief !== null && s.actief !== undefined ? sessieMeting(s.sessieLimieten, nu) : undefined
+  const metingen = eigen ? { ...s.metingen, [s.actief]: eigen } : s.metingen
+  const si = { ...s, metingen }
   const oud = () => {
     const b = beslis({ ...api, limieten: s.sessieLimieten, nu })
     return b ? { soort: 'api', naar: b.naar, reden: b.reden, ...(b.door ? { door: b.door } : {}) } : null
@@ -126,19 +175,27 @@ export function ketting(s) {
 
   // Een keuze met de hand en de wachttijd van beide gaan altijd voor.
   if (typeof api.handmatigTot === 'number' && nu < api.handmatigTot) return null
+  if (typeof s.handmatigTot === 'number' && nu < s.handmatigTot) return null
   if (nu - (api.laatsteWissel ?? 0) < WACHTTIJD) return null
   if (nu - (s.laatsteWissel ?? 0) < i.wachttijd) return null
 
   // Accounts in de rotatie met status ok en een verse meting; de rest telt niet mee.
   const bruikbaar = rotatie
     .filter(a => a.status === 'ok')
-    .map(a => ({ id: a.id, r: ruimte(s.metingen?.[a.id], i, nu) }))
+    .map(a => ({ id: a.id, r: ruimte(metingen?.[a.id], i, nu) }))
     .filter(x => x.r !== null)
 
   if (api.modus === 'abonnement') {
-    const k = kiesAccount(s)
-    if (k) return { soort: 'account', ...k }
+    const k = kiesAccount(si)
+    if (k) {
+      const door = beperkendVenster(metingen?.[s.actief], i, nu)
+      return { soort: 'account', ...k, ...(door ? { door } : {}) }
+    }
     if (bruikbaar.some(x => x.r > 0)) return null
+    // Wachten, niet naar de API op oude data: een kandidaat zonder verse meting kan ruimte hebben.
+    // Alleen als het actieve account echt op 100 % staat (limiet bereikt) mag het toch.
+    const onverse = rotatie.some(a => a.id !== s.actief && a.status === 'ok' && ruimte(metingen?.[a.id], i, nu) === null)
+    if (onverse && !limietBereikt(metingen?.[s.actief], nu)) return null
     return oud()
   }
   if (api.modus === 'api' && api.overgeschakeldDoor) {

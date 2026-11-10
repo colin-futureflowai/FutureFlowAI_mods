@@ -3,7 +3,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
-  instellingenVan, ketting, kettingAan, kettingInvoerVan, kiesAccount, maskEmail, planLabel, POLL, pollPlan, ruimte, STANDAARD_INSTELLINGEN,
+  instellingenVan, ketting, kettingAan, kettingInvoerVan, kiesAccount, maskEmail, planLabel, POLL, pollPlan, ruimte, handmatigTotVan, sessieMeting, STANDAARD_INSTELLINGEN,
   statusVan, telBezig, VERS,
 } from '../lib/accounts.mjs'
 import { beslis, STANDAARD } from '../lib/api.mjs'
@@ -91,8 +91,8 @@ test('kiesAccount en ketting: tabel', () => {
     ['handmatigTot in de toekomst → null', invoer({ api: { ...apiAbo, handmatigTot: NU + MIN } }), null],
     ['API-wissel net gebeurd → null', invoer({ api: { ...apiAbo, laatsteWissel: NU - MIN } }), null],
     ['7d boven marge en 5u laag → telt als vol', invoer({ metingen: { 1: meting(10, 95), 2: meting(30), 3: meting(50) } }), { soort: 'account', naar: 2 }],
-    ['venster met reset voorbij → 0 %', invoer({ metingen: { 1: { vensters: [{ label: '5u', pct: 99, resetsAt: NU - 1 }], gemetenOp: NU }, 2: meting(30), 3: meting(50) } }), null],
-    ['actief onder de marge → null', invoer({ metingen: { 1: meting(80), 2: meting(10), 3: meting(10) } }), null],
+    ['venster met reset voorbij → 0 %', invoer({ metingen: { 1: { vensters: [{ label: '5u', pct: 99, resetsAt: NU - 1 }], gemetenOp: NU }, 2: meting(30), 3: meting(50) }, sessieLimieten: [] }), null],
+    ['actief onder de marge → null', invoer({ metingen: { 1: meting(80), 2: meting(10), 3: meting(10) }, sessieLimieten: sess(80) }), null],
     ['in api met de hand (zonder door) → null', invoer({ api: { ...apiApi, overgeschakeldDoor: undefined }, metingen: { 1: meting(95), 2: meting(20), 3: meting(50) } }), null],
   ]
   for (const [naam, s, verwacht] of rijen) {
@@ -105,6 +105,73 @@ test('kiesAccount en ketting: tabel', () => {
       assert.equal(typeof uit.reden, 'string', naam)
     }
   }
+})
+
+test('ketting: oude meting van een kandidaat = wachten, niet naar de API', () => {
+  const oud = m => ({ ...m, gemetenOp: NU - 20 * MIN })
+  const vol = { 2: meting(95), 3: meting(95) }
+  const rijen = [
+    // [naam, invoer, verwacht soort of null]
+    ['alle kandidaten vol en vers, actief 92 % → api', invoer({ metingen: { 1: meting(92), ...vol } }), 'api'],
+    ['kandidaat zonder meting (429-backoff) → wachten', invoer({ metingen: { 1: meting(92), 2: meting(95) } }), null],
+    ['kandidaat 20 min oud → wachten', invoer({ metingen: { 1: meting(92), 2: oud(meting(10)), 3: meting(95) } }), null],
+    ['alle kandidaten oud → wachten', invoer({ metingen: { 1: meting(92), 2: oud(meting(95)), 3: oud(meting(95)) } }), null],
+    ['oude kandidaat maar actief op 100 % → api', invoer({ metingen: { 2: oud(meting(95)) }, sessieLimieten: sess(100) }), 'api'],
+    ['actief op 100 % met een oude meting en een kandidaat zonder meting → api', invoer({ metingen: { 1: oud(meting(100)) }, sessieLimieten: sess(100) }), 'api'],
+    ['100 % maar reset al voorbij telt niet → wachten', invoer({ metingen: { 2: meting(95) }, sessieLimieten: [{ label: '5u', percent: 100, resetsAt: NU - 1 }] }), null],
+    ['kandidaat met opnieuw-inloggen telt niet als onverse', invoer({ accounts: [acc(1), acc(2, { status: 'opnieuw-inloggen' }), acc(3)], metingen: { 3: meting(95) } }), 'api'],
+    ['actief oude meting, sessie zegt 92 %, B vers 30 → account B', invoer({ metingen: { 1: oud(meting(10)), 2: meting(30), 3: meting(50) }, sessieLimieten: sess(92) }), 'account'],
+    ['actief oude meting, sessie zegt 50 %, B vers → null', invoer({ metingen: { 1: oud(meting(92)), 2: meting(30), 3: meting(50) }, sessieLimieten: sess(50) }), null],
+    ['actief zonder meting, sessie 92 % → account', invoer({ metingen: { 2: meting(30), 3: meting(50) }, sessieLimieten: sess(92) }), 'account'],
+  ]
+  for (const [naam, s, verwacht] of rijen) {
+    const uit = ketting(s)
+    assert.equal(uit === null ? null : uit.soort, verwacht, naam)
+  }
+})
+
+test('ketting: een account-wissel noemt het venster dat hem veroorzaakte', () => {
+  const uit = ketting(invoer({ metingen: { 1: meting(10, 95), 2: meting(30), 3: meting(50) }, sessieLimieten: [] }))
+  assert.equal(uit.soort, 'account')
+  assert.equal(uit.door.label, '7d')
+})
+
+test('ketting: keuze met de hand (accounts.handmatigTot) houdt auto tegen', () => {
+  const rijen = [
+    ['in de toekomst → null', invoer({ handmatigTot: NU + MIN }), null],
+    ['precies nu → vrij', invoer({ handmatigTot: NU }), 'account'],
+    ['voorbij → vrij', invoer({ handmatigTot: NU - MIN }), 'account'],
+    ['geen → vrij', invoer(), 'account'],
+    ['ook naar de API geblokkeerd', invoer({ handmatigTot: NU + MIN, metingen: { 1: meting(92), 2: meting(95), 3: meting(95) } }), null],
+  ]
+  for (const [naam, s, verwacht] of rijen) {
+    const uit = ketting(s)
+    assert.equal(uit === null ? null : uit.soort, verwacht, naam)
+  }
+})
+
+test('handmatigTotVan: reset van het venster van de laatste wissel, anders hoogste venster, anders 5u / 7d', () => {
+  const uur = 60 * MIN
+  const rijen = [
+    ['door met resetsAt', { door: { label: '5u', resetsAt: NU + 2 * uur }, meting: meting(10, 90) }, NU + 2 * uur],
+    ['door zonder resetsAt 5u → 5 u', { door: { label: '5u' } }, NU + 5 * uur],
+    ['door zonder resetsAt 7d → 7 d', { door: { label: '7d' } }, NU + 7 * 24 * uur],
+    ['door met reset voorbij → lengte van het venster', { door: { label: '5u', resetsAt: NU - 1 } }, NU + 5 * uur],
+    ['geen door: hoogste venster 7d', { meting: meting(20, 80) }, NU + 3 * 24 * 60 * MIN],
+    ['geen door: hoogste venster 5u', { meting: meting(80, 20) }, NU + 60 * MIN],
+    ['hoogste venster zonder resetsAt 7d → 7 d', { meting: { vensters: [{ label: '5u', pct: 10 }, { label: '7d', pct: 60 }], gemetenOp: NU } }, NU + 7 * 24 * uur],
+    ['niets bekend → 5 u', {}, NU + 5 * uur],
+    ['per-model-venster telt niet', { meting: { vensters: [{ label: '7d opus', pct: 99 }], gemetenOp: NU } }, NU + 5 * uur],
+  ]
+  for (const [naam, s, verwacht] of rijen) assert.equal(handmatigTotVan({ nu: NU, ...s }), verwacht, naam)
+})
+
+test('sessieMeting: alleen 5u en 7d met percentage', () => {
+  assert.equal(sessieMeting([], NU), undefined)
+  assert.equal(sessieMeting(undefined, NU), undefined)
+  assert.equal(sessieMeting([{ label: '7d opus', percent: 90 }], NU), undefined)
+  const m = sessieMeting([{ label: '5u', percent: 40, resetsAt: NU + MIN }, { label: '7d opus', percent: 90 }], NU)
+  assert.deepEqual(m, { vensters: [{ label: '5u', pct: 40, resetsAt: NU + MIN }], gemetenOp: NU })
 })
 
 test('kiesAccount: auto uit, geen actief, actief zonder verse meting → null', () => {

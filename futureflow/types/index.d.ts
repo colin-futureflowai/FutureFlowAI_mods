@@ -235,6 +235,8 @@ declare module 'claude-code' {
       'accounts.melding': AccountsMelding | null
       /** Deze sessie is een desktop-sessie (CLAUDE_CODE_SDK_HAS_HOST_AUTH_REFRESH): de tab is alleen-lezen. */
       'accounts.desktop': boolean
+      /** Tot wanneer auto een keuze met de hand laat staan (ms); null = geen. */
+      'accounts.handmatigTot': number | null
       /** Het account waarvoor Verwijderen één keer is aangeklikt (tweede klik bevestigt); null = geen. */
       'accounts.weg': number | null
     }
