@@ -90,7 +90,7 @@ const PANE = (surface: 'terminal' | 'desktop') =>
 test('/futureflow connectors toont per server tools en tokens, gesorteerd', async ($, on) => {
   fake(on, { uit: ['claude.ai Canva'] })
   const r = await run($, 'futureflow', 'connectors')
-  expect(r.text).toContain('Connectors')
+  expect(r.text).toContain('Instellingen')
   const ui = await $.ui.mount(PANE('terminal'))
   expect(await ui.find({ type: 'Text', text: /MCP in context 3\.500 tokens/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /2% van het venster/ })).toBeDefined()
@@ -105,12 +105,12 @@ test('/futureflow connectors toont per server tools en tokens, gesorteerd', asyn
   await ui.unmount()
 })
 
-test('hotkey 5 opent de tab Connectors', async ($, on) => {
+test('hotkey 4 opent de tab Instellingen met de connectors', async ($, on) => {
   fake(on)
   await run($, 'futureflow', '')
   const ui = await $.ui.mount(PANE('desktop'))
-  expect(await ui.find({ type: 'Button', key: 'tab-connectors', hotkey: '5' } as any)).toBeDefined()
-  await ui.press({ key: 'tab-connectors' } as any)
+  expect(await ui.find({ type: 'Button', key: 'tab-instellingen', hotkey: '4' } as any)).toBeDefined()
+  await ui.press({ key: 'tab-instellingen' } as any)
   expect(await ui.find({ type: 'Button', key: 'conn-n8n-mcp' } as any)).toBeDefined()
   await ui.unmount()
 })
@@ -224,7 +224,7 @@ test('tekenen start geen CLI: lezen bij openen, na een klik en elke 30 s zolang 
   await f.clock.advance(30_000)
   expect(f.lijsten.length).toBe(3)
   // Andere tab: de 30 s-lus stopt.
-  await ui2.press({ key: 'tab-api' } as any)
+  await ui2.press({ key: 'tab-wisselen' } as any)
   const voor = f.lijsten.length
   await f.clock.advance(60_000)
   expect(f.lijsten.length).toBe(voor)

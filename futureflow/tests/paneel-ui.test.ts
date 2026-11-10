@@ -1,6 +1,6 @@
 import { expect, mock, test } from 'claude-code/testing'
 
-// Het dashboard in een smal (44) en breed (100) terminalpaneel: alle acht tabs zichtbaar, korte
+// Het dashboard in een smal (44) en breed (100) terminalpaneel: alle vier tabs zichtbaar, korte
 // namen als het smal is, en geen regel die breder is dan het paneel. De testkit tekent geen
 // tekens, dus schatten we per element hoe smal het minstens kan: tekst breekt af op woorden
 // (truncate-end tot 1 teken), een knop breekt nooit af, een rij zonder flexWrap telt op.
@@ -81,9 +81,9 @@ const run = ($: any, command: string, args: string) =>
 const PANE = (columns: number) =>
   ({ plugin: 'futureflow', surface: 'terminal', component: 'Pane', requestId: 'futureflow', props: {}, viewport: { columns, rows: 60 } }) as any
 
-const TABS = ['overzicht', 'slots', 'minify', 'stijl', 'connectors', 'api', 'accounts']
-const KORT = ['Over', 'Slots', 'Minify', 'Stijl', 'Conn', 'API', 'Acc']
-const LANG = ['Overzicht', 'Slots', 'Minify', 'Stijl', 'Connectors', 'API', 'Accounts']
+const TABS = ['overzicht', 'wisselen', 'zuinig', 'instellingen']
+const KORT = ['Over', 'Wissel', 'Zuinig', 'Instel']
+const LANG = ['Overzicht', 'Wisselen', 'Zuinig', 'Instellingen']
 
 type Knoop = { type?: string; props?: Record<string, any>; children?: unknown[] } | string | unknown[] | null | undefined
 
@@ -125,7 +125,7 @@ function minBreed(n: Knoop, fout: string[]): number {
 }
 
 for (const kolommen of [44, 100]) {
-  test(`terminal ${kolommen} kolommen: alle acht tabs, juiste namen, wrap-rij`, async ($, on) => {
+  test(`terminal ${kolommen} kolommen: alle vier tabs, juiste namen, wrap-rij`, async ($, on) => {
     fake(on)
     await run($, 'futureflow', '')
     const ui = await $.ui.mount(PANE(kolommen))
@@ -153,25 +153,32 @@ for (const kolommen of [44, 100]) {
       await $.session.start({ cwd: '/r', surface: 'terminal', isInteractive: true } as any)
       await run($, 'futureflow', tab)
       const ui = await $.ui.mount(PANE(kolommen))
-      const fout: string[] = []
-      const breed = minBreed((await ui.drawn()) as Knoop, fout)
-      // De tab tekende echt, geen terugvaltekst.
-      expect(await ui.find({ type: 'Text', text: /laden lukte niet|Laden…/ })).toBeUndefined()
-      expect(fout).toEqual([])
-      expect(breed).toBeLessThanOrEqual(kolommen)
+      // Ingeklapt en, als de tab dat heeft, met Meer ▸ open.
+      for (const stap of ['dicht', 'open']) {
+        if (stap === 'open') {
+          if (!(await ui.find({ type: 'Button', key: `meer-${tab}` }))) break
+          await ui.press({ key: `meer-${tab}` })
+        }
+        const fout: string[] = []
+        const breed = minBreed((await ui.drawn()) as Knoop, fout)
+        // De tab tekende echt, geen terugvaltekst.
+        expect(await ui.find({ type: 'Text', text: /laden lukte niet|Laden…/ })).toBeUndefined()
+        expect(fout).toEqual([])
+        expect(breed).toBeLessThanOrEqual(kolommen)
+      }
       await ui.unmount()
     })
   }
 }
 
-test('overzicht: vier kerncijfers die de breedte vullen en zelf afbreken', async ($, on) => {
+test('overzicht: zes kerncijfers (verbruik 5u en 7d erbij) die de breedte vullen en zelf afbreken', async ($, on) => {
   fake(on)
   await run($, 'futureflow', '')
   for (const kolommen of [100, 44]) {
     const ui = await $.ui.mount(PANE(kolommen))
     // De gemeten kolommen zijn die van de hele terminal: de kaarten groeien mee en breken zelf af.
     const kaart = (await ui.findAll({ type: 'Box' })).filter(b => b.props.flexGrow === 1 && typeof b.props.minWidth === 'number')
-    expect(kaart.length).toBe(4)
+    expect(kaart.length).toBe(6)
     expect(await ui.find({ type: 'Button', key: 'snel-slots' })).toBeUndefined()
     await ui.unmount()
   }

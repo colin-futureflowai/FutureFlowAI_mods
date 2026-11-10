@@ -57,29 +57,24 @@ export async function cli($: Engine, args: string[], stdin?: string) {
   return $.process.run(['/usr/bin/env', 'node', cliPath($), ...args], { ...init, env: { ...CLI_ENV, PATH } })
 }
 
-// Takenlijst in de terminal (tab Stijl): env CLAUDE_CODE_ENABLE_TODO_TOOLS in settings.json via
-// `cli/api.mjs takenlijst`. null = nog niet gelezen; de stand wordt één keer gelezen en daarna
-// alleen bij een klik bijgewerkt, nooit per tekenbeurt.
+// Takenlijst in de terminal (tab Instellingen): env CLAUDE_CODE_ENABLE_TODO_TOOLS in settings.json via
+// `cli/api.mjs takenlijst`. null = nog niet gelezen. Lezen gebeurt bij het openen van de tab
+// (`leesTakenlijst`, vanuit een handler) en na een klik; tekenen leest alleen de atom.
 const takenAtom = atom({ plugin: 'futureflow', key: 'stijl.takenlijst' } as const, null as boolean | null)
-let takenLeest = false
 
 export async function takenlijstStand($: Engine): Promise<boolean> {
-  const stand = await read($, takenAtom)
-  if (stand !== null) return stand
-  if (!takenLeest) {
-    takenLeest = true
-    void (async () => {
-      let aan = false
-      try {
-        const r = await cli($, ['takenlijst', 'status'])
-        if (r.exitCode === 0) aan = JSON.parse(r.stdout.trim().split('\n').pop() ?? '{}').aan === true
-      } catch (err) {
-        failOpen($, err)
-      }
-      await update($, takenAtom, () => aan)
-    })().catch(err => failOpen($, err)).finally(() => { takenLeest = false })
+  return (await read($, takenAtom)) === true
+}
+
+export async function leesTakenlijst($: Engine): Promise<void> {
+  let aan = false
+  try {
+    const r = await cli($, ['takenlijst', 'status'])
+    if (r.exitCode === 0) aan = JSON.parse(r.stdout.trim().split('\n').pop() ?? '{}').aan === true
+  } catch (err) {
+    failOpen($, err)
   }
-  return false
+  await update($, takenAtom, () => aan)
 }
 
 // Zet de takenlijst aan of uit en meldt het resultaat in één toast.
@@ -483,8 +478,10 @@ function wanneer(ms: number, nu: number): string {
   return `${dag} ${twee(d.getDate())}-${twee(d.getMonth() + 1)} ${tijd}`
 }
 
-// Inhoud van de tab API. Tekent alleen; schrijven gebeurt in onPress/onSubmit.
-export async function apiTab($: Engine, e: any, k: Kleuren, wisselKaart?: RenderElement | null) {
+// Onderdelen van de lijst Bronnen in de tab Wisselen: de regel Abonnement (terug naar het abonnement)
+// en Anthropic API. Tekent alleen; schrijven gebeurt in onPress/onSubmit.
+// `meer`: ook Key wissen, de key-invoer als er al een key is, de kosten en de uitleg (Meer ▸).
+export async function apiBron($: Engine, e: any, k: Kleuren, meer = true): Promise<{ abonnement: RenderElement[]; rijen: RenderElement[]; kaarten: RenderElement[] }> {
   const el = $.ui.resolve(e)
   const { Box, Text, Input } = el
   try {
@@ -495,67 +492,76 @@ export async function apiTab($: Engine, e: any, k: Kleuren, wisselKaart?: Render
     const nu = await $.clock.now()
     const geld = kostenOverzicht((await $.store.get('api.kosten')) as Record<string, number> | undefined, nu)
     const opApi = status.modus === 'api'
-    return (
-      <Box flexDirection="column" gap={1}>
-        {kaart(ui, 'API', [
-          <Text>
-            <Text color={k.mut}>Nieuwe terminal-sessies: </Text>
-            <Text bold color={opApi ? k.warn : k.ok}>{opApi ? 'API-key' : 'abonnement'}</Text>
-          </Text>,
-          <Text>
-            <Text color={k.mut}>{'Key: '}</Text>
-            {status.heeftKey ? <Text>{`sk-ant-…${status.staart}`}</Text> : <Text color={k.mut}>geen key</Text>}
-          </Text>,
-          t.overgeschakeldDoor && opApi ? (
-            <Text color={k.warn}>Automatisch naar API door het {t.overgeschakeldDoor.label}-venster; terug na de reset.</Text>
-          ) : '',
-          t.auto && t.handmatigTot !== undefined && t.handmatigTot > nu ? (
-            <Text color={k.warn}>Met de hand gekozen: automatisch wisselen wacht tot {wanneer(t.handmatigTot, nu)} (of tot je het uit- en aanzet).</Text>
-          ) : '',
-          t.auto && opApi && !t.overgeschakeldDoor ? (
-            <Text color={k.warn}>Met de hand op API: automatisch wisselen zet dit niet terug.</Text>
-          ) : '',
-          status.vreemdeHelper ? (
-            <Text color={k.err}>In ~/.claude/settings.json staat al een andere apiKeyHelper. futureflow laat die staan en wisselt niet.</Text>
-          ) : '',
-          status.vreemdeBasis ? (
-            <Text color={k.err}>In ~/.claude/settings.json staat al een andere ANTHROPIC_BASE_URL. futureflow laat die staan en wisselt niet naar API of OpenRouter.</Text>
-          ) : '',
-          status.fout ? <Text color={k.err} wrap="truncate-end">Status niet volledig gelezen: {status.fout}</Text> : '',
-        ], {
-          rechts: opApi ? 'API' : 'abonnement',
-          knoppen: knoppen(ui, [
-            knop(ui, 'api-abonnement', opApi ? 'Abonnement' : '● Abonnement', () => handmatig($, 'abonnement'), { primary: !opApi }),
-            knop(ui, 'api-api', opApi ? '● API' : 'API', () => handmatig($, 'api'), { primary: opApi }),
-          ]),
-        })}
-
-        {kaart(ui, 'Key', [
-          <Input key="api-key" label="Key " placeholder="sk-ant-…" value="" submitLabel="bewaar" onSubmit={(waarde: string) => bewaarKey($, waarde)} />,
-          uitleg(ui, INVOER_UITLEG),
-        ], {
-          knoppen: status.heeftKey ? knoppen(ui, [knop(ui, 'api-wis', 'Key wissen', () => wisKey($))]) : null,
-        })}
-
-        {wisselKaart ?? ''}
-
-        {kaart(ui, 'Geschatte kosten', [
-          <Text>
-            <Text color={k.mut}>vandaag </Text>
-            <Text bold>{usd(geld.vandaag)}</Text>
-            <Text color={k.mut}>  ·  deze maand </Text>
-            <Text bold>{usd(geld.maand)}</Text>
-          </Text>,
-          uitleg(ui, 'Schatting op basis van de prijslijst; geen harde stop.'),
-        ])}
-
-        <Box flexDirection="column">
-          {UITLEG.map((regel, i) => uitleg(ui, regel, `api-uitleg-${i}`))}
-        </Box>
-      </Box>
+    const opAbo = !opApi
+    const kop = (sleutel: string, naam: string, aan: boolean) => (
+      <Text key={sleutel} wrap="truncate-end">
+        <Text color={aan ? k.accent : k.fg}>{aan ? '● ' : '○ '}</Text>
+        <Text bold color={aan ? k.accent : k.fg}>{naam}</Text>
+        <Text color={k.mut}>{aan ? '  · in gebruik' : ''}</Text>
+      </Text>
     )
+
+    const abonnement: RenderElement[] = [
+      <Box key="api-bron-abonnement" flexDirection="column">
+        {kop('api-kop-abonnement', 'Abonnement', opAbo)}
+        {t.overgeschakeldDoor && !opAbo ? (
+          <Text color={k.warn} wrap="wrap">Automatisch naar API door het {t.overgeschakeldDoor.label}-venster; terug na de reset.</Text>
+        ) : ''}
+        {t.auto && t.handmatigTot !== undefined && t.handmatigTot > nu ? (
+          <Text color={k.warn} wrap="wrap">Met de hand gekozen: automatisch wisselen wacht tot {wanneer(t.handmatigTot, nu)} (of tot je het uit- en aanzet).</Text>
+        ) : ''}
+        {t.auto && !opAbo && !t.overgeschakeldDoor ? (
+          <Text color={k.warn} wrap="wrap">Met de hand op API: automatisch wisselen zet dit niet terug.</Text>
+        ) : ''}
+        {status.vreemdeHelper ? (
+          <Text color={k.err} wrap="wrap">In ~/.claude/settings.json staat al een andere apiKeyHelper. futureflow laat die staan en wisselt niet.</Text>
+        ) : ''}
+        {status.vreemdeBasis ? (
+          <Text color={k.err} wrap="wrap">In ~/.claude/settings.json staat al een andere ANTHROPIC_BASE_URL. futureflow laat die staan en wisselt niet naar API of OpenRouter.</Text>
+        ) : ''}
+        {status.fout ? <Text color={k.err} wrap="truncate-end">Status niet volledig gelezen: {status.fout}</Text> : ''}
+        {opAbo ? '' : <Box paddingLeft={2}>{knop(ui, 'api-abonnement', 'Gebruik nu', () => handmatig($, 'abonnement'))}</Box>}
+      </Box>,
+    ]
+
+    const rijen: RenderElement[] = [
+      <Box key="api-bron-api" flexDirection="column" marginTop={1}>
+        {kop('api-kop-api', 'Anthropic API', opApi)}
+        <Text wrap="truncate-end">
+          <Text color={k.mut}>{'  Key: '}</Text>
+          {status.heeftKey ? <Text>{`sk-ant-…${status.staart}`}</Text> : <Text color={k.mut}>geen key</Text>}
+        </Text>
+        {!status.heeftKey || meer ? (
+          <Input key="api-key" label="Key " placeholder="sk-ant-…" value="" submitLabel="bewaar" onSubmit={(waarde: string) => bewaarKey($, waarde)} />
+        ) : ''}
+        {!status.heeftKey || meer ? uitleg(ui, INVOER_UITLEG, 'api-invoer-uitleg') : ''}
+        {opApi && !meer ? '' : (
+          <Box flexDirection="row" flexWrap="wrap" columnGap={1} paddingLeft={2}>
+            {opApi ? '' : knop(ui, 'api-api', 'Gebruik nu', () => handmatig($, 'api'))}
+            {meer && status.heeftKey ? knop(ui, 'api-wis', 'Key wissen', () => wisKey($)) : ''}
+          </Box>
+        )}
+      </Box>,
+    ]
+
+    const kaarten: RenderElement[] = meer ? [
+      kaart(ui, 'Anthropic API: kosten en uitleg', [
+        <Text key="api-kosten">
+          <Text color={k.mut}>vandaag </Text>
+          <Text bold>{usd(geld.vandaag)}</Text>
+          <Text color={k.mut}>  ·  deze maand </Text>
+          <Text bold>{usd(geld.maand)}</Text>
+        </Text>,
+        uitleg(ui, 'Schatting op basis van de prijslijst; geen harde stop.', 'api-kosten-uitleg'),
+        <Box key="api-uitleg" flexDirection="column" marginTop={1}>
+          {UITLEG.map((regel, i) => uitleg(ui, regel, `api-uitleg-${i}`))}
+        </Box>,
+      ]),
+    ] : []
+
+    return { abonnement, rijen, kaarten }
   } catch (err) {
     failOpen($, err)
-    return <Text dimColor>API laden lukte niet; de fout staat in het logboek van de mod.</Text>
+    return { abonnement: [], rijen: [<Text key="api-kapot" dimColor>API laden lukte niet; de fout staat in het logboek van de mod.</Text>], kaarten: [] }
   }
 }

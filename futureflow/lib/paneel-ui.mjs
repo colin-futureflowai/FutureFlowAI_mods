@@ -1,8 +1,8 @@
 // Indeling van het dashboard /futureflow: breedtes, tabrijen en kolommen.
 // Pure functies, zonder Node-API's, zodat hooks/paneel-ui.tsx en de tests ze delen.
 
-export const LANG = ['Overzicht', 'Slots', 'Minify', 'Stijl', 'Connectors', 'API', 'Accounts', 'OpenRouter']
-export const KORT = ['Over', 'Slots', 'Minify', 'Stijl', 'Conn', 'API', 'Acc', 'OR']
+export const LANG = ['Overzicht', 'Wisselen', 'Zuinig', 'Instellingen']
+export const KORT = ['Over', 'Wissel', 'Zuinig', 'Instel']
 
 // Onder deze breedte (kolommen van het paneel) krijgen de tabs korte namen.
 export const KORT_ONDER = 50

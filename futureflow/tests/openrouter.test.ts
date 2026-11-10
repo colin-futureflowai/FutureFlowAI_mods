@@ -116,13 +116,13 @@ async function meet($: any, rateLimits: unknown[], clock: { settle(): Promise<vo
   await clock.settle()
 }
 
-test('hotkey 8 opent de tab OpenRouter: waarschuwingen, Claude-groep eerst, prijzen per Mtok', async ($, on) => {
+test('tab Wisselen: OpenRouter met waarschuwingen (onder Meer), Claude-groep eerst, prijzen per Mtok', async ($, on) => {
   const f = fake(on)
   await run($, 'futureflow', '')
   const ui = await $.ui.mount(PANE('terminal'))
-  expect(await ui.find({ type: 'Button', key: 'tab-openrouter', hotkey: '8' } as any)).toBeDefined()
-  await ui.press({ key: 'tab-openrouter' } as any)
+  await ui.press({ key: 'tab-wisselen' } as any)
   await f.clock.settle()
+  await ui.press({ key: 'meer-wisselen' } as any)
   expect(await ui.find({ type: 'Input', key: 'or-key' } as any)).toBeDefined()
   expect(await ui.find({ type: 'Input', key: 'or-zoek' } as any)).toBeDefined()
   for (const tekst of [/werken niet gegarandeerd/, /Webzoeken werkt niet/, /Start een OpenRouter-sessie met claude-or; andere sessies en de desktop-app blijven op je abonnement/, /claude\.ai-connectors niet/, /te klein voor Claude Code/]) {
@@ -168,6 +168,7 @@ test('zoeken filtert; Hoofd en Snel kiezen bewaart de keuze en de prijzen', asyn
   await run($, 'futureflow', 'openrouter')
   await f.clock.settle()
   const ui = await $.ui.mount(PANE('terminal'))
+  await ui.press({ key: 'meer-wisselen' } as any)
   await (ui as any).input({ key: 'or-zoek', text: 'mini' } as any)
   expect(await ui.find({ type: 'Text', text: 'openai/gpt-5-mini' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: 'anthropic/claude-sonnet-4.5' })).toBeUndefined()
@@ -213,6 +214,7 @@ test('model met te weinig context: waarschuwing in de lijst en bij kiezen', asyn
   await run($, 'futureflow', 'openrouter')
   await f.clock.settle()
   const ui = await $.ui.mount(PANE('terminal'))
+  await ui.press({ key: 'meer-wisselen' } as any)
   await (ui as any).input({ key: 'or-zoek', text: 'x/m-0' } as any)
   expect(await ui.find({ type: 'Text', text: 'te klein voor Claude Code' })).toBeDefined()
   await ui.press({ key: 'or-hoofd-0' } as any)
@@ -225,6 +227,7 @@ test('Test verbinding: één aanroep met het snelle model, uitkomst in de tab', 
   const f = fake(on, { orKey: true, test: { ok: false, status: 401, fout: 'User not found' }, store: { 'openrouter.keuze': { model: 'openai/gpt-5', snel: 'openai/gpt-5-mini' } } })
   await run($, 'futureflow', 'openrouter')
   const ui = await $.ui.mount(PANE('terminal'))
+  await ui.press({ key: 'meer-wisselen' } as any)
   expect(f.aanroepen.filter(a => a.args[1] === 'test')).toEqual([])
   await ui.press({ key: 'or-test' } as any)
   const t = f.aanroepen.filter(a => a.args[1] === 'test')
@@ -285,6 +288,7 @@ test('volgorde en stappen in de tab', async ($, on) => {
   const f = fake(on)
   await run($, 'futureflow', 'openrouter')
   const ui = await $.ui.mount(PANE('terminal'))
+  await ui.press({ key: 'meer-wisselen' } as any)
   expect(await ui.find({ type: 'Button', key: 'wissel-volgorde' } as any)).toBeUndefined()
   await ui.press({ key: 'wissel-stap-openrouter' } as any)
   expect((f.store.get('api.toestand') as any).stappen).toEqual(['api', 'openrouter'])
@@ -313,6 +317,7 @@ test('lange lijst: bladeren met Volgende (n) en Vorige (p) tekent op de terminal
   const f = fake(on, { veel: true })
   await run($, 'futureflow', 'openrouter')
   const ui = await $.ui.mount(PANE('terminal'))
+  await ui.press({ key: 'meer-wisselen' } as any)
   await f.clock.settle()
   expect(await ui.find({ type: 'Text', text: /Pagina 1 van 3/ })).toBeDefined()
   expect(await ui.find({ type: 'Button', key: 'or-volgende', hotkey: 'n' } as any)).toBeDefined()

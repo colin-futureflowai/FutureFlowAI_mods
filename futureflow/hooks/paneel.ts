@@ -8,7 +8,25 @@ import type { DashboardTab } from '../types'
 // Gedeeld door dashboard.tsx, slots.tsx en minify.tsx: zo hoeven die geen kringimport te maken.
 export const PANE = 'futureflow'
 export const TITEL = 'FutureFlowAI'
-export const TABS: readonly DashboardTab[] = ['overzicht', 'slots', 'minify', 'stijl', 'connectors', 'api', 'accounts', 'openrouter']
+export const TABS: readonly DashboardTab[] = ['overzicht', 'wisselen', 'zuinig', 'instellingen']
+
+// Oude tabnamen (tot 0.8) wijzen naar de nieuwe tab.
+export const OUDE_TABS: Readonly<Record<string, DashboardTab>> = {
+  slots: 'zuinig',
+  minify: 'zuinig',
+  stijl: 'instellingen',
+  connectors: 'instellingen',
+  api: 'wisselen',
+  accounts: 'wisselen',
+  openrouter: 'wisselen',
+}
+
+// Tabnaam (nieuw of oud) → tab; onbekend = null.
+export function tabVan(naam: unknown): DashboardTab | null {
+  if (typeof naam !== 'string') return null
+  if ((TABS as readonly string[]).includes(naam)) return naam as DashboardTab
+  return OUDE_TABS[naam] ?? null
+}
 
 const tabAtom = atom({ plugin: 'futureflow', key: 'dashboard.tab' } as const, null as DashboardTab | null)
 

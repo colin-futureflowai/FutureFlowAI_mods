@@ -108,19 +108,23 @@ async function meet($: any, rateLimits: unknown[], clock: { settle(): Promise<vo
   await clock.settle()
 }
 
-test('hotkey 6 opent de tab API met uitleg over terminal, desktop-app en connectors', async ($, on) => {
+test('hotkey 2 opent de tab Wisselen: API met Gebruik nu; uitleg over terminal, desktop-app en connectors onder Meer', async ($, on) => {
   fake(on)
   await run($, 'futureflow', '')
   const ui = await $.ui.mount(PANE('terminal'))
-  expect(await ui.find({ type: 'Button', key: 'tab-api', hotkey: '6' } as any)).toBeDefined()
-  await ui.press({ key: 'tab-api' } as any)
+  expect(await ui.find({ type: 'Button', key: 'tab-wisselen', hotkey: '2' } as any)).toBeDefined()
+  await ui.press({ key: 'tab-wisselen' } as any)
   expect(await ui.find({ type: 'Input', key: 'api-key' } as any)).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /geen key/ })).toBeDefined()
+  // Op het abonnement: geen knop Gebruik nu bij Abonnement.
+  expect(await ui.find({ type: 'Button', key: 'api-abonnement' } as any)).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /desktop-app regelt zijn eigen login/ })).toBeUndefined()
+  await ui.press({ key: 'meer-wisselen' } as any)
   expect(await ui.find({ type: 'Text', text: /geldt voor nieuwe terminal-sessies/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /desktop-app regelt zijn eigen login/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /claude\.ai-connectors niet/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /zichtbaar tot je op Enter drukt; daarna bewaart futureflow alleen de laatste 4 tekens/ })).toBeDefined()
-  for (const key of ['api-abonnement', 'api-api', 'wissel-auto']) expect(await ui.find({ type: 'Button', key } as any)).toBeDefined()
+  for (const key of ['api-api', 'wissel-auto']) expect(await ui.find({ type: 'Button', key } as any)).toBeDefined()
   for (const key of ['wissel-hoog', 'wissel-laag']) expect(await ui.find({ type: 'Input', key } as any)).toBeDefined()
   await ui.unmount()
 })
@@ -321,6 +325,7 @@ test('kosten tellen alleen als deze sessie op de API draait', async ($, on) => {
   expect(Math.abs(bedrag! - (2000 * 5 + 2000 * 25) / 1e6)).toBeLessThan(1e-9)
   await run($, 'futureflow', 'api')
   const ui = await $.ui.mount(PANE('terminal'))
+  await ui.press({ key: 'meer-wisselen' } as any)
   expect(await ui.find({ type: 'Text', text: /^\$ 0,06$/ })).toBeDefined()
   await ui.unmount()
 })

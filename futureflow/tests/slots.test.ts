@@ -164,6 +164,11 @@ test('dashboard: /agent-slots opent het paneel met geheugen, slots en weigeringe
     expect(await ui.find({ type: 'Text', text: /bezet 1\/2|bezet/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /1\/2/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /~\/orca\/workspaces\/a · pnpm dev/ })).toBeDefined()
+    // Weigeringen staan onder Meer ▸ (ingeklapt is de standaard; de stand blijft per tab).
+    if (surface === 'terminal') {
+      expect(await ui.find({ type: 'Text', text: /PORT=6001 pnpm dev/ })).toBeUndefined()
+      await ui.press({ key: 'meer-zuinig' } as any)
+    }
     expect(await ui.find({ type: 'Text', text: /PORT=6001 pnpm dev/ })).toBeDefined()
     await ui.unmount()
   }

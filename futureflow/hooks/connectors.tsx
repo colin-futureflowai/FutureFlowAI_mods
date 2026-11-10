@@ -94,7 +94,7 @@ export async function openConnectors($: Engine): Promise<void> {
     ticker?.cancel()
     ticker = $.clock.every(VERS_MS, () => {
       void (async () => {
-        const open = (await $.ui.panes()).some(p => p.id === PANE) && (await read($, tabAtom)) === 'connectors'
+        const open = (await $.ui.panes()).some(p => p.id === PANE) && (await read($, tabAtom)) === 'instellingen'
         if (!open) {
           ticker?.cancel()
           ticker = undefined

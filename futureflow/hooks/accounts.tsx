@@ -197,7 +197,7 @@ export async function startAccounts($: Engine): Promise<void> {
   sessieStatus = undefined
   await $.command.register({
     name: 'accounts',
-    description: 'Wisselen tussen je eigen Claude-abonnementen in de terminal (tab Accounts van /futureflow)',
+    description: 'Wisselen tussen je eigen Claude-abonnementen in de terminal (tab Wisselen van /futureflow)',
     argumentHint: '[lijst | toevoegen | wissel <n>]',
   })
   const id = await $.session.id()
@@ -562,7 +562,7 @@ export async function openAccounts($: Engine): Promise<void> {
     ticker?.cancel()
     ticker = $.clock.every(VERS_MS, () => {
       void (async () => {
-        const open = (await $.ui.panes()).some(p => p.id === PANE) && (await read($, tabAtom)) === 'accounts'
+        const open = (await $.ui.panes()).some(p => p.id === PANE) && (await read($, tabAtom)) === 'wisselen'
         if (!open) {
           ticker?.cancel()
           ticker = undefined
@@ -611,9 +611,13 @@ function vensterTekst(a: AccountsAccount, label: '5u' | '7d', nu: number): strin
   return `${label} ${blokjes(pct)} ${pct}%${reset}`
 }
 
-// Inhoud van de tab Accounts. Tekent alleen; schrijven gebeurt in onPress/onSubmit. Zonder gelezen
-// status (paneel hersteld zonder openen) leest hij hem één keer zelf, zonder iets te bewaren.
-export async function accountsTab($: Engine, e: any, k: Kleuren, wisselKaart?: RenderElement | null) {
+// Onderdeel van de lijst Bronnen in de tab Wisselen: de abonnementen. Tekent alleen; schrijven gebeurt
+// in onPress/onSubmit. Zonder gelezen status (paneel hersteld zonder openen) leest hij hem één keer zelf,
+// zonder iets te bewaren. `rijen` gaan in de kaart Bronnen, `knoppen` onder die kaart, `kaarten` eronder.
+// `meer`: ook rotatie, verwijderen, meetmoment, marges, stand en uitleg (Meer ▸).
+export type Bron = { rijen: RenderElement[]; knoppen: RenderElement[]; kaarten: RenderElement[] }
+
+export async function accountsBron($: Engine, e: any, k: Kleuren, meer = true): Promise<Bron> {
   const el = $.ui.resolve(e)
   const { Box, Text, Input } = el
   try {
@@ -626,7 +630,6 @@ export async function accountsTab($: Engine, e: any, k: Kleuren, wisselKaart?: R
     const nu = await $.clock.now()
     const i = s.instellingen
     const kan = !desktop && s.profiel === 'standaard'
-    const actief = s.accounts.find(a => a.id === s.actief)
 
     const ui = paneelVan(el, e, k)
     const toevoegen = async () => { try { $.ui.toast(await voegToe($)) } catch (err) { failOpen($, err) } finally { await hertekenen($).catch(() => undefined) } }
@@ -635,104 +638,91 @@ export async function accountsTab($: Engine, e: any, k: Kleuren, wisselKaart?: R
       return fouten ? `Verbruik opgehaald; ${fouten} account(s) gaven een fout (zie de tab).` : 'Verbruik opgehaald.'
     })
 
-    return (
-      <Box flexDirection="column" gap={1}>
-        {kaart(ui, 'Nu in de terminal', [
-          <Text>
-            <Text color={k.mut}>Nu in de terminal: </Text>
-            {actief ? (
-              <Text bold color={k.accent}>{`account ${actief.id} (${actief.email})`}</Text>
-            ) : (
-              <Text color={k.mut}>{s.accounts.length ? 'een login die futureflow niet beheert' : 'nog geen accounts toegevoegd'}</Text>
-            )}
-          </Text>,
-          i.auto && handmatig !== null && handmatig > nu ? (
-            <Text color={k.warn}>{`Jouw keuze geldt tot ${resetTekst('5u', handmatig, nu)}; automatisch wisselen wacht tot dan (of tot je het uit- en aanzet).`}</Text>
-          ) : '',
-          s.laatsteWissel ? (
-            <Text color={k.mut}>{`Laatste wissel: ${resetTekst('5u', s.laatsteWissel.tijd, nu)} naar account ${s.laatsteWissel.naar}${s.laatsteWissel.auto ? ' (automatisch)' : ''}`}</Text>
-          ) : '',
-          wacht ? (
-            <Text color={k.warn}>{`Wissel naar account ${wacht.naar} wacht op ${wacht.wie.length || 'een'} sessie(s) die midden in een beurt zitten.`}</Text>
-          ) : '',
-          desktop ? <Text color={k.warn}>{DESKTOP_ZIN}</Text> : '',
-          !desktop && s.profiel === 'eigen' ? <Text color={k.warn}>{EIGEN_ZIN}</Text> : '',
-          s.fout ? <Text color={k.err} wrap="truncate-end">Status niet volledig gelezen: {s.fout}</Text> : '',
-        ])}
-
-        {kaart(ui, 'Accounts', [
-          s.accounts.length === 0 ? leeg(ui, 'Nog geen accounts — voeg de login toe waarmee je nu bent ingelogd.') : '',
-          ...s.accounts.map((a, n) => {
-            const isActief = a.id === s.actief
-            const kleur = a.status === 'opnieuw-inloggen' ? k.err : isActief ? k.accent : k.fg
-            const oud = a.gemetenOp !== undefined && nu - a.gemetenOp > VERS
-            return (
-              <Box key={`acc-rij-${a.id}`} flexDirection="column" marginTop={n === 0 ? 0 : 1}>
-                <Text wrap="truncate-end">
-                  <Text color={kleur}>{isActief ? '● ' : '○ '}</Text>
-                  <Text bold color={kleur}>{`${a.id}  ${a.email}`}</Text>
-                </Text>
-                <Text color={k.mut} wrap="truncate-end">
-                  {`  ${a.plan}`}{a.label ? `  ${a.label}` : ''}{a.inRotatie ? '' : '  (niet in de rotatie)'}
-                </Text>
-                {a.status === 'opnieuw-inloggen' ? (
-                  <Text color={k.err}>{`  Opnieuw inloggen nodig: ${OPNIEUW_ZIN}.`}</Text>
-                ) : a.status === 'onbekend' ? (
-                  <Text color={k.warn} wrap="truncate-end">{`  Status onbekend${a.statusUitleg ? `: ${a.statusUitleg}` : ''}; voeg het opnieuw toe.`}</Text>
-                ) : ''}
-                <Text wrap="truncate-end">{`  ${vensterTekst(a, '5u', nu)}`}</Text>
-                <Text wrap="truncate-end">{`  ${vensterTekst(a, '7d', nu)}`}</Text>
-                <Text color={oud ? k.warn : k.mut} wrap="truncate-end">
-                  {a.gemetenOp === undefined ? '  nog niet gemeten' : `  ${leeftijd(a.gemetenOp, nu)}${oud ? ' (te oud voor automatisch wisselen)' : ''}`}
-                </Text>
-                {a.fout ? <Text color={k.warn} wrap="truncate-end">{`  Laatste meting mislukt: ${a.fout}`}</Text> : ''}
-                {kan ? (
-                  <Box flexDirection="row" flexWrap="wrap" columnGap={1} paddingLeft={2}>
-                    {isActief ? '' : knop(ui, `acc-wissel-${a.id}`, 'Wissel hierheen', async () => { try { await wisselMetDeHand($, a.id) } catch (err) { failOpen($, err) } }, { primary: true })}
-                    {vinkje(ui, `acc-rotatie-${a.id}`, a.inRotatie, 'In de rotatie', () => actie($, ['zet', String(a.id), 'rotatie', a.inRotatie ? 'uit' : 'aan'], () => (a.inRotatie ? `Account ${a.id} uit de rotatie.` : `Account ${a.id} weer in de rotatie.`)))}
-                    {knop(ui, `acc-weg-${a.id}`, wegId === a.id ? <Text color={k.err}>Zeker? Klik nog eens</Text> : 'Verwijderen', () => weg($, a.id))}
-                  </Box>
-                ) : ''}
+    const rijen: RenderElement[] = [
+      i.auto && handmatig !== null && handmatig > nu ? (
+        <Text key="acc-handmatig" color={k.warn} wrap="wrap">{`Jouw keuze geldt tot ${resetTekst('5u', handmatig, nu)}; automatisch wisselen wacht tot dan (of tot je het uit- en aanzet).`}</Text>
+      ) : '',
+      meer && s.laatsteWissel ? (
+        <Text key="acc-laatste" color={k.mut} wrap="wrap">{`Laatste wissel: ${resetTekst('5u', s.laatsteWissel.tijd, nu)} naar account ${s.laatsteWissel.naar}${s.laatsteWissel.auto ? ' (automatisch)' : ''}`}</Text>
+      ) : '',
+      wacht ? (
+        <Text key="acc-wacht" color={k.warn} wrap="wrap">{`Wissel naar account ${wacht.naar} wacht op ${wacht.wie.length || 'een'} sessie(s) die midden in een beurt zitten.`}</Text>
+      ) : '',
+      desktop ? <Text key="acc-desktop" color={k.warn} wrap="wrap">{DESKTOP_ZIN}</Text> : '',
+      !desktop && s.profiel === 'eigen' ? <Text key="acc-eigen" color={k.warn} wrap="wrap">{EIGEN_ZIN}</Text> : '',
+      s.fout ? <Text key="acc-fout" color={k.err} wrap="truncate-end">Status niet volledig gelezen: {s.fout}</Text> : '',
+      s.accounts.length === 0 ? <Box key="acc-leeg">{leeg(ui, 'Nog geen accounts — voeg de login toe waarmee je nu bent ingelogd.')}</Box> : '',
+      ...s.accounts.map(a => {
+        const isActief = a.id === s.actief
+        const kleur = a.status === 'opnieuw-inloggen' ? k.err : isActief ? k.accent : k.fg
+        const oud = a.gemetenOp !== undefined && nu - a.gemetenOp > VERS
+        return (
+          <Box key={`acc-rij-${a.id}`} flexDirection="column" marginTop={1}>
+            <Text wrap="truncate-end">
+              <Text color={kleur}>{isActief ? '● ' : '○ '}</Text>
+              <Text bold color={kleur}>{`Account ${a.id}  ${a.email}`}</Text>
+            </Text>
+            <Text color={k.mut} wrap="truncate-end">
+              {`  ${a.plan}`}{a.label ? `  ${a.label}` : ''}{a.inRotatie ? '' : '  (niet in de rotatie)'}{isActief ? '  · actief' : ''}
+            </Text>
+            {a.status === 'opnieuw-inloggen' ? (
+              <Text color={k.err} wrap="wrap">{`  Opnieuw inloggen nodig: ${OPNIEUW_ZIN}.`}</Text>
+            ) : a.status === 'onbekend' ? (
+              <Text color={k.warn} wrap="truncate-end">{`  Status onbekend${a.statusUitleg ? `: ${a.statusUitleg}` : ''}; voeg het opnieuw toe.`}</Text>
+            ) : ''}
+            <Text wrap="truncate-end">{`  ${vensterTekst(a, '5u', nu)}`}</Text>
+            <Text wrap="truncate-end">{`  ${vensterTekst(a, '7d', nu)}`}</Text>
+            {meer || oud ? (
+              <Text color={oud ? k.warn : k.mut} wrap="truncate-end">
+                {a.gemetenOp === undefined ? '  nog niet gemeten' : `  ${leeftijd(a.gemetenOp, nu)}${oud ? ' (te oud voor automatisch wisselen)' : ''}`}
+              </Text>
+            ) : ''}
+            {a.fout ? <Text color={k.warn} wrap="truncate-end">{`  Laatste meting mislukt: ${a.fout}`}</Text> : ''}
+            {kan && (!isActief || meer) ? (
+              <Box flexDirection="row" flexWrap="wrap" columnGap={1} paddingLeft={2}>
+                {isActief ? '' : knop(ui, `acc-wissel-${a.id}`, 'Gebruik nu', async () => { try { await wisselMetDeHand($, a.id) } catch (err) { failOpen($, err) } })}
+                {meer ? vinkje(ui, `acc-rotatie-${a.id}`, a.inRotatie, 'In de rotatie', () => actie($, ['zet', String(a.id), 'rotatie', a.inRotatie ? 'uit' : 'aan'], () => (a.inRotatie ? `Account ${a.id} uit de rotatie.` : `Account ${a.id} weer in de rotatie.`))) : ''}
+                {meer ? knop(ui, `acc-weg-${a.id}`, wegId === a.id ? <Text color={k.err}>Zeker? Klik nog eens</Text> : 'Verwijderen', () => weg($, a.id)) : ''}
               </Box>
-            )
-          }),
-        ], {
-          rechts: `${s.accounts.length}`,
-          knoppen: kan ? knoppen(ui, [
-            knop(ui, 'acc-toevoegen', 'Huidige login toevoegen', toevoegen, { primary: s.accounts.length === 0 }),
-            s.accounts.length ? knop(ui, 'acc-ververs', 'Verbruik ophalen', ophalen) : null,
-          ]) : null,
-        })}
+            ) : ''}
+          </Box>
+        )
+      }),
+    ]
 
-        {wisselKaart ?? ''}
+    const knoppenLijst: RenderElement[] = kan ? [
+      knop(ui, 'acc-toevoegen', 'Huidige login toevoegen', toevoegen, { primary: s.accounts.length === 0 }),
+      ...(s.accounts.length ? [knop(ui, 'acc-ververs', 'Verbruik ophalen', ophalen)] : []),
+    ] : []
 
-        {kaart(ui, 'Geavanceerd', [
-          uitleg(ui, 'Aparte grens per venster voor het wisselen tussen accounts. "Wissel vanaf %" hierboven zet ze allebei.'),
-          kan ? (
-            <Input key="acc-marge5u" label="Marge 5u %  " value={String(i.marge5u)} submitLabel="zet" onSubmit={(waarde: string) => zetMarge($, 'marge5u', waarde)} />
-          ) : '',
-          kan ? (
-            <Input key="acc-marge7d" label="Marge 7d %  " value={String(i.marge7d)} submitLabel="zet" onSubmit={(waarde: string) => zetMarge($, 'marge7d', waarde)} />
-          ) : (
-            <Text color={k.mut}>{`Marges: 5u ${i.marge5u}%, 7d ${i.marge7d}%`}</Text>
-          ),
-          uitleg(ui, `Strategie: meeste ruimte · wachttijd tussen wissels ${Math.round(i.wachttijd / 60_000)} min · alleen metingen jonger dan 15 min`),
-          kan ? '' : <Text color={k.mut}>{`Stand: ${i.stand === 'vragen' ? 'eerst vragen' : 'stil'}`}</Text>,
-        ], {
-          knoppen: kan ? knoppen(ui, [
-            knop(ui, 'acc-stil', i.stand === 'stil' ? '● Stil' : 'Stil', () => zetInstelling($, { stand: 'stil' }, 'Stand stil: futureflow wisselt tussen beurten en meldt het.'), { primary: i.stand === 'stil' }),
-            knop(ui, 'acc-vragen', i.stand === 'vragen' ? '● Eerst vragen' : 'Eerst vragen', () => zetInstelling($, { stand: 'vragen' }, 'Stand eerst vragen: futureflow vraagt boven de prompt voor het wisselt.'), { primary: i.stand === 'vragen' }),
-          ]) : null,
-        })}
-
-        <Box flexDirection="column">
+    const kaarten: RenderElement[] = meer ? [
+      kaart(ui, 'Abonnementen: geavanceerd', [
+        uitleg(ui, 'Aparte grens per venster voor het wisselen tussen accounts. "Wissel vanaf %" hierboven zet ze allebei.'),
+        kan ? (
+          <Input key="acc-marge5u" label="Marge 5u %  " value={String(i.marge5u)} submitLabel="zet" onSubmit={(waarde: string) => zetMarge($, 'marge5u', waarde)} />
+        ) : '',
+        kan ? (
+          <Input key="acc-marge7d" label="Marge 7d %  " value={String(i.marge7d)} submitLabel="zet" onSubmit={(waarde: string) => zetMarge($, 'marge7d', waarde)} />
+        ) : (
+          <Text color={k.mut}>{`Marges: 5u ${i.marge5u}%, 7d ${i.marge7d}%`}</Text>
+        ),
+        uitleg(ui, `Strategie: meeste ruimte · wachttijd tussen wissels ${Math.round(i.wachttijd / 60_000)} min · alleen metingen jonger dan 15 min`),
+        kan ? '' : <Text color={k.mut}>{`Stand: ${i.stand === 'vragen' ? 'eerst vragen' : 'stil'}`}</Text>,
+        <Box key="acc-uitleg" flexDirection="column" marginTop={1}>
           {UITLEG.map((regel, n) => uitleg(ui, regel, `acc-uitleg-${n}`))}
-        </Box>
-      </Box>
-    )
+        </Box>,
+      ], {
+        knoppen: kan ? knoppen(ui, [
+          knop(ui, 'acc-stil', i.stand === 'stil' ? '● Stil' : 'Stil', () => zetInstelling($, { stand: 'stil' }, 'Stand stil: futureflow wisselt tussen beurten en meldt het.')),
+          knop(ui, 'acc-vragen', i.stand === 'vragen' ? '● Eerst vragen' : 'Eerst vragen', () => zetInstelling($, { stand: 'vragen' }, 'Stand eerst vragen: futureflow vraagt boven de prompt voor het wisselt.')),
+        ]) : null,
+      }),
+    ] : []
+
+    return { rijen, knoppen: knoppenLijst, kaarten }
   } catch (err) {
     failOpen($, err)
-    return <Text dimColor>Accounts laden lukte niet; de fout staat in het logboek van de mod.</Text>
+    return { rijen: [<Text key="acc-kapot" dimColor>Accounts laden lukte niet; de fout staat in het logboek van de mod.</Text>], knoppen: [], kaarten: [] }
   }
 }
 
@@ -791,8 +781,8 @@ export const registerAccounts = (on: Parameters<Register>[0]): void => {
       const woord = (woorden[0] ?? '').toLowerCase()
       if (!woord) {
         await openAccounts($)
-        await openDashboard($, 'accounts')
-        return { text: 'Dashboard geopend op de tab Accounts.' }
+        await openDashboard($, 'wisselen')
+        return { text: 'Dashboard geopend op de tab Wisselen.' }
       }
       if (woord === 'lijst') return { text: lijstTekst(await ververs($), await $.clock.now()) }
       if (woord === 'toevoegen') {

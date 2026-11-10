@@ -10,12 +10,12 @@ test('tabNamen: kort onder 50 kolommen, lang daarboven en zonder meting', () => 
   assert.deepEqual(tabNamen(undefined), LANG)
 })
 
-test('tabRijen: elke rij past, volgorde blijft, alle acht tabs', () => {
+test('tabRijen: elke rij past, volgorde blijft, alle vier tabs', () => {
   for (const kolommen of [20, 30, 44, 50, 60, 80, 100, 200]) {
     const breedte = binnenBreedte(kolommen)
     const namen = tabNamen(kolommen)
     const rijen = tabRijen(namen, breedte)
-    assert.deepEqual(rijen.flat(), [0, 1, 2, 3, 4, 5, 6, 7])
+    assert.deepEqual(rijen.flat(), [0, 1, 2, 3])
     for (const rij of rijen) assert.ok(rijBreedte(namen, rij) <= breedte, `${kolommen}: ${rijBreedte(namen, rij)} > ${breedte}`)
   }
 })
@@ -29,8 +29,8 @@ test('onderstreping: ▔ precies onder de naam van de gekozen tab', () => {
   const rij = [0, 1, 2]
   const streep = onderstreping(LANG, rij, 1)
   const regel = rij.map(i => tabTekst(i, LANG[i])).join(' · ')
-  const begin = regel.indexOf('Slots')
-  assert.equal(streep, ' '.repeat(begin) + '▔'.repeat(5))
+  const begin = regel.indexOf('Wisselen')
+  assert.equal(streep, ' '.repeat(begin) + '▔'.repeat(8))
   assert.equal(onderstreping(LANG, rij, 4), '')
 })
 

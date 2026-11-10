@@ -182,8 +182,10 @@ function regelVan(ui: ReturnType<typeof paneelVan>, $: Engine, m: OrModel, i: nu
   )
 }
 
-// Inhoud van de tab OpenRouter. Tekent alleen; schrijven gebeurt in onPress/onSubmit.
-export async function openrouterTab($: Engine, e: any, k: Kleuren, wisselKaart?: RenderElement | null) {
+// Onderdeel van de lijst Bronnen in de tab Wisselen: OpenRouter, met daaronder de kaart Modellen.
+// Tekent alleen; schrijven gebeurt in onPress/onSubmit.
+// `meer`: ook zoeken, bladeren, verversen, Test verbinding, Key wissen, kosten en waarschuwingen (Meer ▸).
+export async function orBron($: Engine, e: any, k: Kleuren, meer = true): Promise<{ rijen: RenderElement[]; kaarten: RenderElement[] }> {
   const el = $.ui.resolve(e)
   const { Box, Text, Input } = el
   try {
@@ -191,107 +193,106 @@ export async function openrouterTab($: Engine, e: any, k: Kleuren, wisselKaart?:
     const ui = paneelVan(el, e, k)
     const status = (await read($, statusAtom)) ?? (await leesStatus($))
     const lijst = await read($, modellenAtom)
-    const zoekTekst = await read($, zoekAtom)
+    const zoekTekst = meer ? await read($, zoekAtom) : ''
     const test = await read($, testAtom)
     const keuze = await orKeuze($)
     const geld = kostenOverzicht((await $.store.get('openrouter.kosten')) as Record<string, number> | undefined, await $.clock.now())
     const klaar = status.orKlaar === true
     const gekozen = (lijst?.modellen ?? []).filter(m => m.id === kaal(keuze.model) || m.id === kaal(keuze.snel))
+    const anders = klaar && !!status.orModel && (status.orModel !== keuze.model || status.orSnel !== keuze.snel)
 
     const gevonden = sorteer(lijst?.modellen ?? [], zoekTekst)
     const paginas = Math.max(1, Math.ceil(gevonden.length / TOON))
-    const pagina = Math.min(paginas - 1, Math.max(0, await read($, paginaAtom)))
+    const pagina = meer ? Math.min(paginas - 1, Math.max(0, await read($, paginaAtom))) : 0
     const getoond = gevonden.slice(pagina * TOON, (pagina + 1) * TOON)
     const claude = getoond.filter(m => isClaude(m.id))
     const andere = getoond.filter(m => !isClaude(m.id))
     const index = (m: OrModel) => getoond.indexOf(m)
 
-    return (
-      <Box flexDirection="column" gap={1}>
-        {kaart(ui, 'OpenRouter', [
-          <Text wrap="wrap">
-            <Text color={k.mut}>{'Start: '}</Text>
-            <Text bold color={klaar ? k.ok : k.mut}>{klaar ? START : `${START} (nog niet klaargezet)`}</Text>
-          </Text>,
-          uitleg(ui, `Start een OpenRouter-sessie met ${START}; andere sessies en de desktop-app blijven op je abonnement.`, 'or-start-uitleg'),
-          <Text>
-            <Text color={k.mut}>{'Key: '}</Text>
-            {status.orHeeftKey ? <Text>{`sk-or-…${status.orStaart ?? ''}`}</Text> : <Text color={k.mut}>geen key</Text>}
-          </Text>,
-          <Text wrap="wrap">
-            <Text color={k.mut}>{'Hoofdmodel: '}</Text>
-            {keuze.model ? <Text>{keuze.model}</Text> : <Text color={k.mut}>nog niet gekozen</Text>}
-          </Text>,
-          <Text wrap="wrap">
-            <Text color={k.mut}>{'Snel model: '}</Text>
-            {keuze.snel ? <Text>{keuze.snel}</Text> : <Text color={k.mut}>nog niet gekozen</Text>}
-          </Text>,
-          klaar && status.orModel && (status.orModel !== keuze.model || status.orSnel !== keuze.snel) ? (
-            <Text color={k.warn} wrap="wrap">{START} start nog met {status.orModel}; klik Zet klaar om je keuze te gebruiken.</Text>
-          ) : '',
-          klaar && !status.orOpPad ? (
-            <Text color={k.warn} wrap="wrap">~/.local/bin staat niet op je PATH: start met ~/.local/bin/{START}.</Text>
-          ) : '',
-          ...gekozen.filter(m => teKlein(m)).map(m => (
-            <Text key={`or-klein-${m.id}`} color={k.err} wrap="wrap">{m.id} heeft {contextTekst(m.context)} context: te klein voor Claude Code.</Text>
-          )),
-          status.oudeOr ? <Text color={k.warn} wrap="wrap">In ~/.claude/settings.json staan nog oude OpenRouter-regels; futureflow haalt ze bij de volgende sessiestart weg.</Text> : '',
-          test ? <Text color={test.startsWith('Verbinding werkt (') ? k.ok : test.startsWith('Bezig') ? k.mut : k.err} wrap="wrap">{test}</Text> : '',
-          status.fout ? <Text color={k.err} wrap="truncate-end">Status niet volledig gelezen: {status.fout}</Text> : '',
-        ], {
-          rechts: klaar ? 'klaar' : 'niet klaar',
-          knoppen: knoppen(ui, [
-            knop(ui, 'or-naar', 'Zet klaar', () => handmatig($, 'openrouter'), { primary: !klaar }),
-            status.orHeeftKey ? knop(ui, 'or-test', 'Test verbinding', () => testVerbinding($)) : null,
-          ]),
-        })}
+    const rijen: RenderElement[] = [
+      <Box key="or-bron" flexDirection="column" marginTop={1}>
+        <Text wrap="truncate-end">
+          <Text color={klaar ? k.accent : k.fg}>{klaar ? '● ' : '○ '}</Text>
+          <Text bold color={klaar ? k.accent : k.fg}>OpenRouter</Text>
+          <Text color={k.mut}>{klaar ? `  · klaar: start met ${START}` : `  · alleen via ${START}`}</Text>
+        </Text>
+        {uitleg(ui, `Start een OpenRouter-sessie met ${START}; andere sessies en de desktop-app blijven op je abonnement.`, 'or-start-uitleg')}
+        <Text wrap="truncate-end">
+          <Text color={k.mut}>{'  Key: '}</Text>
+          {status.orHeeftKey ? <Text>{`sk-or-…${status.orStaart ?? ''}`}</Text> : <Text color={k.mut}>geen key</Text>}
+        </Text>
+        <Text wrap="wrap">
+          <Text color={k.mut}>{'  Hoofdmodel: '}</Text>
+          {keuze.model ? <Text>{keuze.model}</Text> : <Text color={k.mut}>nog niet gekozen</Text>}
+        </Text>
+        <Text wrap="wrap">
+          <Text color={k.mut}>{'  Snel model: '}</Text>
+          {keuze.snel ? <Text>{keuze.snel}</Text> : <Text color={k.mut}>nog niet gekozen</Text>}
+        </Text>
+        {anders ? (
+          <Text color={k.warn} wrap="wrap">{START} start nog met {status.orModel}; klik Zet klaar om je keuze te gebruiken.</Text>
+        ) : ''}
+        {klaar && !status.orOpPad ? (
+          <Text color={k.warn} wrap="wrap">~/.local/bin staat niet op je PATH: start met ~/.local/bin/{START}.</Text>
+        ) : ''}
+        {gekozen.filter(m => teKlein(m)).map(m => (
+          <Text key={`or-klein-${m.id}`} color={k.err} wrap="wrap">{m.id} heeft {contextTekst(m.context)} context: te klein voor Claude Code.</Text>
+        ))}
+        {status.oudeOr ? <Text color={k.warn} wrap="wrap">In ~/.claude/settings.json staan nog oude OpenRouter-regels; futureflow haalt ze bij de volgende sessiestart weg.</Text> : ''}
+        {test ? <Text color={test.startsWith('Verbinding werkt (') ? k.ok : test.startsWith('Bezig') ? k.mut : k.err} wrap="wrap">{test}</Text> : ''}
+        {!status.orHeeftKey || meer ? (
+          <Input key="or-key" label="Key " placeholder="sk-or-…" value="" submitLabel="bewaar" onSubmit={(waarde: string) => bewaarKey($, waarde)} />
+        ) : ''}
+        {!status.orHeeftKey || meer ? uitleg(ui, INVOER_UITLEG, 'or-invoer-uitleg') : ''}
+        {klaar && !meer && !anders ? '' : (
+          <Box flexDirection="row" flexWrap="wrap" columnGap={1} paddingLeft={2}>
+            {klaar && !anders ? '' : knop(ui, 'or-naar', 'Zet klaar', () => handmatig($, 'openrouter'))}
+            {meer && status.orHeeftKey ? knop(ui, 'or-test', 'Test verbinding', () => testVerbinding($)) : ''}
+            {meer && status.orHeeftKey ? knop(ui, 'or-wis', 'Key wissen', () => wisKey($)) : ''}
+          </Box>
+        )}
+      </Box>,
+    ]
 
-        {kaart(ui, 'Key', [
-          <Input key="or-key" label="Key " placeholder="sk-or-…" value="" submitLabel="bewaar" onSubmit={(waarde: string) => bewaarKey($, waarde)} />,
-          uitleg(ui, INVOER_UITLEG),
-        ], {
-          knoppen: status.orHeeftKey ? knoppen(ui, [knop(ui, 'or-wis', 'Key wissen', () => wisKey($))]) : null,
-        })}
-
-        {kaart(ui, 'Modellen', [
-          <Input key="or-zoek" label="Zoek " placeholder="naam of id" value={zoekTekst} submitLabel="zoek" onSubmit={(waarde: string) => zoek($, waarde)} />,
-          lijst === null ? leeg(ui, 'Lijst laden…') : '',
-          lijst?.fout ? <Text color={k.err} wrap="wrap">{lijst.fout}</Text> : '',
-          lijst !== null && !gevonden.length && !lijst.fout ? leeg(ui, 'Geen model gevonden.') : '',
-          claude.length ? <Text key="or-groep-claude" bold color={k.mut}>Claude via OpenRouter</Text> : '',
-          ...claude.map(m => regelVan(ui, $, m, index(m), keuze)),
-          andere.length ? <Text key="or-groep-andere" bold color={k.mut}>Andere modellen</Text> : '',
-          ...andere.map(m => regelVan(ui, $, m, index(m), keuze)),
-          paginas > 1 ? uitleg(ui, `Pagina ${pagina + 1} van ${paginas} · ${gevonden.length} modellen`, 'or-meer') : '',
-          paginas > 1 ? knoppen(ui, [
-            pagina > 0 ? knop(ui, 'or-vorige', '◂ Vorige', () => blader($, -1, paginas - 1), { hotkey: 'p' }) : null,
-            pagina < paginas - 1 ? knop(ui, 'or-volgende', 'Volgende ▸', () => blader($, 1, paginas - 1), { hotkey: 'n' }) : null,
-          ]) : '',
-          uitleg(ui, 'Hoofd = het model waarmee Claude Code met je praat en het werk doet. Snel = het goedkopere model voor bijtaken: samenvattingen, titels, achtergrondwerk en subagents. Alleen modellen die tools kunnen gebruiken.', 'or-rollen'),
-        ], {
-          rechts: lijst?.modellen.length ? `${lijst.modellen.length} met tools` : '',
-          knoppen: knoppen(ui, [knop(ui, 'or-ververs', 'Lijst verversen', () => laadModellen($, true))]),
-        })}
-
-        {wisselKaart ?? ''}
-
-        {kaart(ui, 'Geschatte kosten', [
-          <Text>
-            <Text color={k.mut}>vandaag </Text>
-            <Text bold>{usd(geld.vandaag)}</Text>
-            <Text color={k.mut}>  ·  deze maand </Text>
-            <Text bold>{usd(geld.maand)}</Text>
-          </Text>,
-          uitleg(ui, 'Schatting met de prijzen van het gekozen model; cache telt als gewone input. Geen harde stop.'),
-        ])}
-
-        <Box flexDirection="column">
+    const kaarten: RenderElement[] = []
+    if (status.orHeeftKey || meer) {
+      kaarten.push(kaart(ui, 'OpenRouter-modellen', [
+        meer ? <Input key="or-zoek" label="Zoek " placeholder="naam of id" value={zoekTekst} submitLabel="zoek" onSubmit={(waarde: string) => zoek($, waarde)} /> : '',
+        lijst === null ? leeg(ui, 'Lijst laden…') : '',
+        lijst?.fout ? <Text color={k.err} wrap="wrap">{lijst.fout}</Text> : '',
+        lijst !== null && !gevonden.length && !lijst.fout ? leeg(ui, 'Geen model gevonden.') : '',
+        claude.length ? <Text key="or-groep-claude" bold color={k.mut}>Claude via OpenRouter</Text> : '',
+        ...claude.map(m => regelVan(ui, $, m, index(m), keuze)),
+        andere.length ? <Text key="or-groep-andere" bold color={k.mut}>Andere modellen</Text> : '',
+        ...andere.map(m => regelVan(ui, $, m, index(m), keuze)),
+        paginas > 1 ? uitleg(ui, meer ? `Pagina ${pagina + 1} van ${paginas} · ${gevonden.length} modellen` : `${gevonden.length} modellen; zoeken en bladeren onder Meer ▸`, 'or-meer') : '',
+        meer && paginas > 1 ? knoppen(ui, [
+          pagina > 0 ? knop(ui, 'or-vorige', '◂ Vorige', () => blader($, -1, paginas - 1), { hotkey: 'p' }) : null,
+          pagina < paginas - 1 ? knop(ui, 'or-volgende', 'Volgende ▸', () => blader($, 1, paginas - 1), { hotkey: 'n' }) : null,
+        ]) : '',
+        uitleg(ui, 'Hoofd = het model waarmee Claude Code met je praat en het werk doet. Snel = het goedkopere model voor bijtaken: samenvattingen, titels, achtergrondwerk en subagents. Alleen modellen die tools kunnen gebruiken.', 'or-rollen'),
+      ], {
+        rechts: lijst?.modellen.length ? `${lijst.modellen.length} met tools` : '',
+        knoppen: meer ? knoppen(ui, [knop(ui, 'or-ververs', 'Lijst verversen', () => laadModellen($, true))]) : null,
+      }))
+    }
+    if (meer) {
+      kaarten.push(kaart(ui, 'OpenRouter: kosten en uitleg', [
+        <Text key="or-kosten">
+          <Text color={k.mut}>vandaag </Text>
+          <Text bold>{usd(geld.vandaag)}</Text>
+          <Text color={k.mut}>  ·  deze maand </Text>
+          <Text bold>{usd(geld.maand)}</Text>
+        </Text>,
+        uitleg(ui, 'Schatting met de prijzen van het gekozen model; cache telt als gewone input. Geen harde stop.', 'or-kosten-uitleg'),
+        <Box key="or-uitleg" flexDirection="column" marginTop={1}>
           {WAARSCHUWINGEN.map((regel, i) => uitleg(ui, regel, `or-uitleg-${i}`))}
-        </Box>
-      </Box>
-    )
+        </Box>,
+      ]))
+    }
+    return { rijen, kaarten }
   } catch (err) {
     failOpen($, err)
-    return <Text dimColor>OpenRouter laden lukte niet; de fout staat in het logboek van de mod.</Text>
+    return { rijen: [<Text key="or-kapot" dimColor>OpenRouter laden lukte niet; de fout staat in het logboek van de mod.</Text>], kaarten: [] }
   }
 }

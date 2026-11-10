@@ -27,7 +27,7 @@ Settings live in the plugin store under `skins.prefs`. What changed against upst
 
 ## Dashboard
 
-`/futureflow` opens the dashboard with eight tabs (hotkeys 1-8): Overview, Slots, Minify, Stijl (style), Connectors, API, Accounts and OpenRouter. `/futureflow <tab>` opens a tab directly.
+`/futureflow` opens the dashboard with four tabs (hotkeys 1-4): **Overzicht** (overview, read-only), **Wisselen** (the *Automatisch wisselen* card and one *Bronnen* list: subscription, other accounts, Anthropic API and OpenRouter, each with *Gebruik nu*; keys, models and advanced settings under *Meer ▸*), **Zuinig** (Slots and Minify) and **Instellingen** (style and connectors). *Meer ▸* (hotkey `m`) shows the details of a tab. `/futureflow <tab>` opens a tab directly; the old tab names (`api`, `accounts`, `openrouter`, `slots`, `minify`, `stijl`, `connectors`) still work and open the tab that now holds them.
 
 ## Progress
 
@@ -43,7 +43,7 @@ Only servers `/mcp` can turn off get a button: claude.ai connectors, plugin serv
 
 ## API
 
-The API tab switches new terminal sessions between your Claude subscription and an Anthropic API key.
+The API part of the Wisselen tab switches new terminal sessions between your Claude subscription and an Anthropic API key.
 
 - The key lives in the macOS keychain (service `futureflow-anthropic-api`, account `futureflow`). It goes from the input straight to the keychain over stdin and is never stored, logged or shown; the tab only shows `sk-ant-…` plus the last 4 characters. While you type, the key is visible in the input. Like any `apiKeyHelper`, the keychain item can be read by other processes running as you.
 - Switching to API sets `apiKeyHelper` in `~/.claude/settings.json` to `/usr/bin/security find-generic-password -s futureflow-anthropic-api -a futureflow -w`; switching back removes exactly that value. An `apiKeyHelper` of your own is never touched; futureflow then refuses to switch.
@@ -54,18 +54,18 @@ The API tab switches new terminal sessions between your Claude subscription and 
 
 ## Automatic switching (one card)
 
-The API, Accounts and OpenRouter tabs show the same card *Automatisch wisselen*: one on/off switch (it turns automatic switching for the API and for the accounts on or off together), where new terminal sessions run now, and the chain as a numbered list with live state — 1. your subscription (5h and 7d usage), 2. another subscription (account and its room), 3. Anthropic API (key), 4. OpenRouter (model). The current step is marked `← nu`; steps that are off say `(uit)`, steps that cannot run say why. Each step after the first has its own checkbox (API and OpenRouter can be reordered). One threshold, *Wissel vanaf %*, sets both the API threshold and the 5h/7d margins of the accounts; *Terug onder %* sets when to go back. Separate 5h/7d margins stay in the Accounts tab under *Geavanceerd*. Settings from before 0.8.0 migrate: if accounts switching was on, the switch is on.
+The Wisselen tab shows the card *Automatisch wisselen*: one on/off switch (it turns automatic switching for the API and for the accounts on or off together), where new terminal sessions run now, and the chain as a numbered list with live state — 1. your subscription (5h and 7d usage), 2. another subscription (account and its room), 3. Anthropic API (key), 4. OpenRouter (model). The current step is marked `← nu`; steps that are off say `(uit)`, steps that cannot run say why. Each step after the first has its own checkbox (API and OpenRouter can be reordered). One threshold, *Wissel vanaf %*, sets both the API threshold and the 5h/7d margins of the accounts; *Terug onder %* sets when to go back. Separate 5h/7d margins are under *Meer ▸* in *Abonnementen: geavanceerd*. Settings from before 0.8.0 migrate: if accounts switching was on, the switch is on.
 
 ## Accounts
 
-The Accounts tab (`/accounts`, or hotkey 7 in `/futureflow`) switches terminal sessions between your own Claude subscriptions. Each account is a separately paid subscription that you added yourself; futureflow never logs in for you.
+The accounts part of the Wisselen tab (`/accounts`, or hotkey 2 in `/futureflow`) switches terminal sessions between your own Claude subscriptions. Each account is a separately paid subscription that you added yourself; futureflow never logs in for you.
 
 - **Adding an account.** Log in with `/login` in a terminal session, then press *Huidige login toevoegen* (or `/accounts toevoegen`). futureflow checks with Anthropic that the token belongs to the identity in `~/.claude.json` and stores a copy. **Never use `/logout` between accounts**: it can revoke the stored login of the account you leave. To add a second account, just `/login` again.
 - **Secrets stay in the macOS keychain**, under futureflow's own items: `futureflow-accounts` (the copy per account), `futureflow-accounts-vorige` (the previous generation) and `futureflow-accounts-redding` (a live login that belonged to no known account), keyed `<accountUuid>:<organizationUuid>`. The copy excludes the machine-wide keys (`mcpOAuth`, `pluginSecrets`, …) and goes to `security -i` over stdin. Only the live item `Claude Code-credentials` (about 12 KB with MCP logins) is too long for one stdin line; it goes hex-encoded via argv, the way Claude Code itself writes it. Nothing secret is written to a file, the plugin store, a log, a toast or the screen; e-mail addresses are masked (`co…@domain`).
 - **State** lives in `~/.claude/futureflow/accounts/` (folder 700; the CLI writes its files 600): `accounts.json`, `gebruik.json` (usage and poll plan), `config/` (a copy of `oauthAccount` per account), `sessies/` (one busy/idle file per terminal session) and `log.jsonl`.
 - **Usage** per account comes from Anthropic's OAuth usage endpoint. The accounts are also used on other machines, so futureflow polls sparingly: at most once per 6 minutes per account, 15 minutes for an idle account, 20 minutes for an exhausted one, and at least 10 minutes (×1.5 up to 30 minutes) after a 429. The tab shows the age of every measurement; automatic switching only decides on measurements younger than 15 minutes.
 - **Switching by hand**: *Wissel hierheen* on a row, or `/accounts wissel <n>`. New terminal sessions use the new account; running terminal sessions pick it up within about 30 seconds. The desktop app keeps its own login: there the tab is read-only.
-- **Automatic switching** (off by default) before a limit: when the active account reaches its margin (90% of the 5-hour or 7-day window, adjustable 50-99), futureflow first switches to another account in the rotation with the most room (at least 10 points more). Only when every account in the rotation is over its margin does it switch to your API key, through the API tab (its own thresholds and settings apply). Back from the API to a subscription as soon as one has room again. At least 5 minutes between switches; a manual choice in the API tab wins. Mode *Stil* switches between turns with a toast; *Eerst vragen* shows a question above the prompt with *Wissel* / *Niet nu* (not again for 30 minutes).
+- **Automatic switching** (off by default) before a limit: when the active account reaches its margin (90% of the 5-hour or 7-day window, adjustable 50-99), futureflow first switches to another account in the rotation with the most room (at least 10 points more). Only when every account in the rotation is over its margin does it switch to your API key, through the API part (its own thresholds and settings apply). Back from the API to a subscription as soon as one has room again. At least 5 minutes between switches; a manual choice wins. Mode *Stil* switches between turns with a toast; *Eerst vragen* shows a question above the prompt with *Wissel* / *Niet nu* (not again for 30 minutes).
 - **Never mid-turn.** A switch waits until no terminal session is in the middle of a turn: futureflow's own session files plus Claude Code's own `~/.claude/sessions/<pid>.json` (so sessions without futureflow count too). After 10 minutes of waiting it gives up with a notice and tries again after the next turn.
 - **Terminal only, standard profile only.** Sessions with `CLAUDE_CONFIG_DIR` or `CLAUDE_SECURESTORAGE_CONFIG_DIR` can only look.
 
@@ -73,7 +73,7 @@ The keychain, `~/.claude.json`, Claude Code's locks and the network are handled 
 
 ## OpenRouter
 
-The OpenRouter tab (hotkey 8 in `/futureflow`, or `/futureflow openrouter`) runs Claude Code on another model through [OpenRouter](https://openrouter.ai), **only in sessions you start with `claude-or`**. Other sessions and the desktop app stay on your subscription.
+The OpenRouter part of the Wisselen tab (hotkey 2 in `/futureflow`, or `/futureflow openrouter`) runs Claude Code on another model through [OpenRouter](https://openrouter.ai), **only in sessions you start with `claude-or`**. Other sessions and the desktop app stay on your subscription.
 
 - **Key** in the macOS keychain (service `futureflow-openrouter`, account `futureflow`), passed to `security -i` over stdin; it must look like `sk-or-…`. Only the last 4 characters are ever shown.
 - **Models.** The tab lists OpenRouter's models that support tools (`GET /api/v1/models?supported_parameters=tools`, public, cached for 6 hours in `~/.claude/futureflow/openrouter/modellen.json`; *Lijst verversen* fetches again). Search by id or name; Claude models come first under "Claude via OpenRouter"; 15 are shown with context size and price in/out per million tokens. Pick a main model (*Hoofd*: opus, sonnet and fable) and a fast model (*Snel*: haiku, background tasks and subagents).

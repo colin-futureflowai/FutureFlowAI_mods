@@ -41,7 +41,7 @@ export type SlotsSnapshot = {
   error?: string
 }
 
-export type DashboardTab = 'overzicht' | 'slots' | 'minify' | 'stijl' | 'connectors' | 'api' | 'accounts' | 'openrouter'
+export type DashboardTab = 'overzicht' | 'wisselen' | 'zuinig' | 'instellingen'
 
 /** `cli/connectors.mjs list` voor de projectsleutel (git-root van de sessiemap, anders die map zelf). */
 export type ConnectorsLijst = {
@@ -225,6 +225,8 @@ declare module 'claude-code' {
       'skins.lastReply': string
       'slots.snapshot': SlotsSnapshot | null
       'dashboard.tab': DashboardTab | null
+      /** Per tab of Meer ▸ open staat; null = alles ingeklapt. */
+      'dashboard.meer': Record<string, boolean> | null
       'minify.niveau': MinifyNiveau | null
       'minify.teller': MinifyTeller | null
       /** Output-tokens per beurt van deze sessie, de laatste 60. */

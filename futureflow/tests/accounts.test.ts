@@ -207,15 +207,19 @@ async function meet($: any, clock: { settle(): Promise<void> }, percent = 92) {
   await clock.settle()
 }
 
-test('hotkey 7 opent de tab Accounts: rijen met gemaskeerd e-mailadres, verbruik, leeftijd en uitleg', async ($, on) => {
+test('hotkey 2 opent de tab Wisselen: accounts met gemaskeerd e-mailadres, verbruik; leeftijd en uitleg onder Meer', async ($, on) => {
   const f = fake(on)
   await $.session.start(START)
   await run($, 'futureflow', '')
   const ui = await $.ui.mount(PANE('terminal'))
-  expect(await ui.find({ type: 'Button', key: 'tab-accounts', hotkey: '7' } as any)).toBeDefined()
-  await ui.press({ key: 'tab-accounts' } as any)
-  expect(await ui.find({ type: 'Text', text: /1  a1…@futureflowai\.com/ })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: /2  a2…@futureflowai\.com/ })).toBeDefined()
+  expect(await ui.find({ type: 'Button', key: 'tab-wisselen', hotkey: '2' } as any)).toBeDefined()
+  await ui.press({ key: 'tab-wisselen' } as any)
+  expect(await ui.find({ type: 'Text', text: /Account 1  a1…@futureflowai\.com/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Account 2  a2…@futureflowai\.com/ })).toBeDefined()
+  // Ingeklapt: geen rotatie of verwijderen; Gebruik nu wel.
+  expect(await ui.find({ type: 'Button', key: 'acc-rotatie-1' } as any)).toBeUndefined()
+  expect(await ui.find({ type: 'Button', key: 'acc-wissel-2' } as any)).toBeDefined()
+  await ui.press({ key: 'meer-wisselen' } as any)
   expect(await ui.find({ type: 'Text', text: /Max 20x/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /5u ▰▰▰▱▱ 62% \(reset \d\d:\d\d\)/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /7d ▰▱▱▱▱ 18% \(\w\w \d\d-\d\d\)/ })).toBeDefined()
@@ -274,7 +278,8 @@ test('klik Wissel hierheen: switch <id> --van <actief> --ikzelf <sessie>, met va
     for (const k of ['ACCOUNTS_HOME', 'CLAUDE_JSON', 'CLAUDE_HOME', 'ACCOUNTS_API', 'KEYCHAIN_USER', 'ACCOUNTS_TEST_NU', 'ACCOUNTS_TEST_LOCK_WACHT']) expect(a.env?.[k]).toBe('')
   }
   // De tab toont nu account 2 als actief; de eigen wissel geeft geen tweede melding boven de prompt.
-  expect(await ui.find({ type: 'Text', text: /Nu in de terminal: account 2/ })).toBeDefined()
+  expect(await ui.find({ type: 'Button', key: 'acc-wissel-1' } as any)).toBeDefined()
+  expect(await ui.find({ type: 'Button', key: 'acc-wissel-2' } as any)).toBeUndefined()
   await ui.unmount()
   const band = await $.ui.mount(BAND())
   expect(await band.find({ type: 'Text', text: /Gewisseld naar account 2/ })).toBeUndefined()
@@ -463,6 +468,7 @@ test('tab-acties: toevoegen, rotatie, marge, stand en verwijderen met een tweede
   await $.session.start(START)
   await run($, 'futureflow', 'accounts')
   const ui = await $.ui.mount(PANE('terminal'))
+  await ui.press({ key: 'meer-wisselen' } as any)
   await ui.press({ key: 'acc-toevoegen' } as any)
   expect(f.toasts.at(-1)).toBe('Toegevoegd: account 3 (ni…@x.nl, Pro).')
   expect(await ui.find({ type: 'Text', text: /3  ni…@x\.nl/ })).toBeDefined()
@@ -561,7 +567,10 @@ test('kaart Automatisch wisselen in de tab Accounts: stap 2 met ruimte, schakela
   await ui.press({ key: 'wissel-auto' } as any)
   expect(f.cli.instellingen.auto).toBe(false)
   expect((f.store.get('api.toestand') as any).auto).toBe(false)
-  // De 5u/7d-marges staan alleen hier, onder Geavanceerd.
-  expect(await ui.find({ type: 'Text', text: /^Geavanceerd$/ })).toBeDefined()
+  // De 5u/7d-marges staan alleen onder Meer ▸, in Abonnementen: geavanceerd.
+  expect(await ui.find({ type: 'Input', key: 'acc-marge5u' } as any)).toBeUndefined()
+  await ui.press({ key: 'meer-wisselen' } as any)
+  expect(await ui.find({ type: 'Text', text: /^Abonnementen: geavanceerd$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Input', key: 'acc-marge5u' } as any)).toBeDefined()
   await ui.unmount()
 })

@@ -180,9 +180,9 @@ export const registerSlots = (on: Parameters<Register>[0]): void => {
     if ((await oud($)).slots) return next(e)
     const arg = (e.args ?? '').trim()
     if (!arg || arg === 'dashboard') {
-      await openDashboard($, 'slots')
+      await openDashboard($, 'zuinig')
       await startSlotsTicker($)
-      return { text: 'Dashboard geopend op de tab Slots. Tekst-versie: /agent-slots status' }
+      return { text: 'Dashboard geopend op de tab Zuinig. Tekst-versie: /agent-slots status' }
     }
     const args = arg === 'install' ? ['install', '--shim'] : arg === 'kill-idle' ? ['kill-idle'] : ['status']
     const r = await cli($, args)
@@ -302,7 +302,8 @@ function slotsKaartenSvg(inv: KaartInvoer, c: KaartKleuren): string {
 }
 
 // Inhoud van de tab Slots in het dashboard (was het losse paneel agent-slots), in kaarten.
-export async function slotsTab($: Engine, e: any) {
+// `meer`: ook de Svg-kaarten, weigeringen, cloud-workers en de bijwerkregel (Meer ▸ in tab Zuinig).
+export async function slotsTab($: Engine, e: any, meer = true) {
     const el = $.ui.resolve(e)
     const { Box, Text } = el
     // Alleen de desktop tekent kaarten (Svg); de terminal krijgt tekst. `'Svg' in el` zegt in de terminal niets.
@@ -332,7 +333,7 @@ export async function slotsTab($: Engine, e: any) {
 
     return (
       <Box flexDirection="column" gap={1}>
-        {Svg ? (
+        {meer && Svg ? (
           <Svg
             source={slotsKaartenSvg({ vrij: free, totaalGB: memory.totalGB, toonKleur, slots: kaartSlots }, k)}
             alt={`Geheugen: ${meterTekst(free, memory.totalGB)}. Slots: ${kaartSlots.map(c => `${c.kind} ${c.n}/${c.limit}`).join(', ')}`}
@@ -359,13 +360,13 @@ export async function slotsTab($: Engine, e: any) {
           )
         }))}
 
-        {kaart(ui, 'Laatste weigeringen', refusals.length === 0 ? leeg(ui, 'Geen — alles mocht door.') : [...refusals].reverse().map(r => (
+        {!meer ? null : kaart(ui, 'Laatste weigeringen', refusals.length === 0 ? leeg(ui, 'Geen — alles mocht door.') : [...refusals].reverse().map(r => (
           <Text wrap="truncate-end">
             <Text color={k.mut}>{clock(r.t)}  {(r.kind ?? r.tool ?? '').padEnd(8)}</Text><Text color={k.warn}>{r.reason ?? ''}</Text><Text color={k.mut}>  {r.command ?? ''}</Text>
           </Text>
         )))}
 
-        {(snap.overflow ?? []).length > 0 ? kaart(ui, 'Cloud-workers', [...(snap.overflow ?? [])].reverse().slice(0, 5).map(job => (
+        {meer && (snap.overflow ?? []).length > 0 ? kaart(ui, 'Cloud-workers', [...(snap.overflow ?? [])].reverse().slice(0, 5).map(job => (
           <Box flexDirection="column">
             <Text wrap="truncate-end">
               <Text color={job.status === 'done' ? k.ok : k.warn}>{job.status === 'done' ? '✓' : '…'}</Text>
@@ -391,9 +392,9 @@ export async function slotsTab($: Engine, e: any) {
           </Text>,
         ])}
 
-        <Text color={k.mut}>
+        {!meer ? null : <Text color={k.mut}>
           Bijgewerkt {clock(snap.at)}{snap.error ? ` · fout: ${snap.error.slice(0, 80)}` : ''} · /agent-slots status voor tekst
-        </Text>
+        </Text>}
       </Box>
     )
 }

@@ -80,12 +80,14 @@ test('/futureflow met onbekende tab geeft uitleg en opent niets', async ($, on) 
   expect(f.opened.length).toBe(0)
 })
 
-test('tabknop 3 schakelt naar minify', async ($, on) => {
+test('tabknop 3 schakelt naar Zuinig (slots en minify)', async ($, on) => {
   fake(on)
   await $.session.start(START)
   await run($, 'futureflow', '')
   const ui = await $.ui.mount(PANE('desktop'))
-  await ui.press({ key: 'tab-minify' } as any)
+  expect(await ui.find({ type: 'Button', key: 'tab-zuinig', hotkey: '3' } as any)).toBeDefined()
+  await ui.press({ key: 'tab-zuinig' } as any)
+  expect(await ui.find({ type: 'Text', text: /40% vrij/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /^Uitvoer ingekort$/ })).toBeDefined()
   await ui.unmount()
 })
@@ -136,21 +138,36 @@ test('desktop tekent geen woordmerk; het paneel begint met de tabs', async ($, o
   await ui.unmount()
 })
 
-test('een tab waarvan het tekenen faalt valt terug op next, met één toast', async ($, on) => {
+test('een onderdeel waarvan het tekenen faalt toont één regel; de rest van de tab blijft, één toast', async ($, on) => {
   CLI.stdout = JSON.stringify({ config: {}, slots: [], refusals: [] }) + '\n' // zonder memory: slotsTab gooit
   const { toasts } = fake(on)
-  let viaNext = 0
-  on('ui.render', () => { viaNext++; throw new Error('terugval') })
   await $.session.start(START)
   await run($, 'futureflow', 'slots')
-  try {
-    const ui = await $.ui.mount(PANE('desktop'))
-    await ui.unmount()
-  } catch {
-    // zonder tekenaar onder de plugins mag mounten falen
-  }
-  expect(viaNext).toBeGreaterThan(0)
+  const ui = await $.ui.mount(PANE('desktop'))
+  expect(await ui.find({ type: 'Text', text: /Slots laden lukte niet/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^Uitvoer ingekort$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Button', key: 'tab-overzicht' } as any)).toBeDefined()
+  await ui.unmount()
   expect(toasts.length).toBe(1)
+  CLI.stdout = JSON.stringify({ memory: { freePercent: 40, totalGB: 16 }, config: { limits: { dev: 2 }, floorPercent: 25, criticalPercent: 10 }, slots: [], refusals: [] }) + '\n'
+})
+
+test('oude tabnamen wijzen naar de nieuwe tabs; geen hotkey buiten cijfer of kleine letter', async ($, on) => {
+  fake(on)
+  await $.session.start(START)
+  for (const [oud, nieuw] of [['slots', 'Zuinig'], ['minify', 'Zuinig'], ['stijl', 'Instellingen'], ['connectors', 'Instellingen'], ['api', 'Wisselen'], ['accounts', 'Wisselen'], ['openrouter', 'Wisselen']]) {
+    const r = await run($, 'futureflow', oud!)
+    expect(r.text).toBe(`Dashboard geopend op de tab ${nieuw}.`)
+  }
+  for (const tab of ['overzicht', 'wisselen', 'zuinig', 'instellingen']) {
+    await run($, 'futureflow', tab)
+    for (const surface of ['terminal', 'desktop'] as const) {
+      const ui = await $.ui.mount(PANE(surface))
+      const boom = JSON.stringify(await ui.drawn())
+      for (const m of boom.matchAll(/"hotkey":"([^"]*)"/g)) expect(m[1]).toMatch(/^[0-9a-z]$/)
+      await ui.unmount()
+    }
+  }
 })
 
 test('de minify-tab tekent zonder session.start en schrijft niets', async ($, on) => {

@@ -385,8 +385,8 @@ export const registerMinify = (on: Parameters<Register>[0]): void => {
     const c = leesCommando(e.args)
     switch (c.soort) {
       case 'dashboard': {
-        await openDashboard($, 'minify')
-        return { text: 'Dashboard geopend op de tab Minify. Tekstversie: /minify status' }
+        await openDashboard($, 'zuinig')
+        return { text: 'Dashboard geopend op de tab Zuinig. Tekstversie: /minify status' }
       }
       case 'status':
         return { text: await statusTekst($) }
@@ -416,7 +416,8 @@ export const registerMinify = (on: Parameters<Register>[0]): void => {
 
 // Inhoud van de tab Minify in het dashboard (was het losse paneel minify), in kaarten.
 // Leest de atoms, dus elke beurt en elke inkorting tekent het opnieuw. Svg op desktop, tekstbalken in de terminal.
-export async function minifyTab($: Engine, e: any) {
+// `meer`: ook de grafiek, de meting per niveau, de laatste inkortingen en de commando's (Meer ▸ in tab Zuinig).
+export async function minifyTab($: Engine, e: any, meer = true) {
     const el = $.ui.resolve(e)
     const { Box, Text } = el
     const ui = paneelVan(el, e, await actieveKleuren($))
@@ -460,7 +461,7 @@ export async function minifyTab($: Engine, e: any) {
           stat(ui, 'Niet gelezen', bespaard ? `~${kort(bespaard / 4)}` : '–', 'tokens (schatting: 4 tekens per token)', { kleur: ui.k.accent }),
         ])}
 
-        {kaart(ui, 'Output-tokens per beurt', lijnSvg && Svg ? (
+        {!meer ? null : kaart(ui, 'Output-tokens per beurt', lijnSvg && Svg ? (
           <Svg source={lijnSvg} alt={`Output-tokens per beurt, ${reeks.length} beurten, gemiddeld ${kort(gem)}`} />
         ) : reeks.length ? (
           <Text color={ui.k.accent} tabular>{reeks.slice(-vonk).map(v => '▁▂▃▄▅▆▇█'[Math.min(7, Math.floor((v / Math.max(...reeks)) * 7.99))]).join('')}</Text>
@@ -468,7 +469,7 @@ export async function minifyTab($: Engine, e: any) {
           leeg(ui, 'Nog geen meting — verschijnt na je eerste beurt.')
         ), reeks.length ? { rechts: `⌀ ${kort(gem)}` } : {})}
 
-        {kaart(ui, 'Per niveau, alle sessies', [
+        {!meer ? null : kaart(ui, 'Per niveau, alle sessies', [
           stavenSvg && Svg ? (
             <Svg source={stavenSvg} alt={niveauRijen.map(r => `${r.label}: ${r.tekst}`).join(', ')} />
           ) : niveauRijen.length ? (
@@ -485,7 +486,7 @@ export async function minifyTab($: Engine, e: any) {
           uitleg(ui, 'Geen A/B-test: beurten verschillen per taak. Vergelijk pas bij veel beurten per niveau.'),
         ])}
 
-        {kaart(ui, 'Laatst ingekort', recent.length === 0 ? leeg(ui, 'Nog niets ingekort — lange uitvoer van Bash en MCP verschijnt hier.') : recent.map(r => (
+        {!meer ? null : kaart(ui, 'Laatst ingekort', recent.length === 0 ? leeg(ui, 'Nog niets ingekort — lange uitvoer van Bash en MCP verschijnt hier.') : recent.map(r => (
           <Text wrap="truncate-end">
             <Text color={ui.k.accent} tabular>{tekstBalk(r.na, r.voor, 8)}</Text>
             <Text tabular>{` ${`${kort(r.voor)} → ${kort(r.na)}`.padEnd(13)}`}</Text>
@@ -493,7 +494,7 @@ export async function minifyTab($: Engine, e: any) {
           </Text>
         )))}
 
-        {uitleg(ui, '/minify status · /minify stats · /minify bestand <pad> · originelen in ~/.claude/minify/uitvoer/')}
+        {!meer ? null : uitleg(ui, '/minify status · /minify stats · /minify bestand <pad> · originelen in ~/.claude/minify/uitvoer/')}
       </Box>
     )
 }

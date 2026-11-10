@@ -83,7 +83,7 @@ async function zetStapAccount($: Engine): Promise<void> {
     const aan = !acc.instellingen.auto
     const fout = await zetAccountsInstellingen($, { auto: aan })
     if (fout) $.ui.toast(`Niet aangepast: ${fout}.`)
-    else if (aan && acc.accounts.filter(a => a.inRotatie).length < 2) $.ui.toast('Ander abonnement staat aan; dat werkt vanaf twee accounts in de rotatie (tab Accounts).')
+    else if (aan && acc.accounts.filter(a => a.inRotatie).length < 2) $.ui.toast('Ander abonnement staat aan; dat werkt vanaf twee accounts in de rotatie (tab Wisselen).')
   } catch (err) {
     failOpen($, err)
   } finally {
@@ -156,35 +156,47 @@ async function zetTerug($: Engine, invoer: string): Promise<void> {
   }
 }
 
+// De ketting met de stand van nu; gedeeld door deze kaart en de tab Overzicht. Leest alleen.
+async function overzichtVan($: Engine) {
+  const t = toestandVan((await read($, toestandAtom)) ?? (await $.store.get('api.toestand')))
+  const status = await read($, apiStatusAtom)
+  const acc = await leesAccounts($)
+  const nu = await $.clock.now()
+  const limieten = await $.session.usage().then(u => limietenVan(u.rateLimits), () => [])
+  const keuze = await orKeuze($)
+  const o = wisselOverzicht({
+    modus: status && !status.fout ? status.modus : t.modus,
+    apiAuto: t.auto,
+    stappen: t.stappen,
+    hoog: t.hoog,
+    laag: t.laag,
+    accounts: acc as any,
+    limieten,
+    // Onbekend telt als wel, zoals in de ketting (`beschikbaarheid`).
+    apiKey: status ? status.heeftKey : (await $.store.get('api.heeftKey')) !== false,
+    orKey: status ? status.orHeeftKey === true : (await $.store.get('openrouter.heeftKey')) === true,
+    ...(keuze.model ? { orModel: keuze.model } : {}),
+    ...(keuze.snel ? { orSnel: keuze.snel } : {}),
+    ...(status?.orModel ? { orNu: status.orModel } : {}),
+  } as any)
+  return { t, o }
+}
+
+// Waar nieuwe terminal-sessies nu op werken, in één regel (tab Overzicht). Leest alleen.
+export async function nuOpTekst($: Engine): Promise<string> {
+  return (await overzichtVan($)).o.nuOp
+}
+
 // ---- tekenen ----
 
-export async function wisselKaart($: Engine, e: any, k: PaneelKleuren): Promise<RenderElement> {
+// `meer`: ook de knop voor de volgorde van de ketting (Meer ▸ in tab Wisselen).
+export async function wisselKaart($: Engine, e: any, k: PaneelKleuren, meer = true): Promise<RenderElement> {
   const el = $.ui.resolve(e)
   const { Box, Text, Input } = el
   try {
     await read($, versieAtom) // opnieuw tekenen na een actie
     const ui = paneelVan(el, e, k)
-    const t = toestandVan((await read($, toestandAtom)) ?? (await $.store.get('api.toestand')))
-    const status = await read($, apiStatusAtom)
-    const acc = await leesAccounts($)
-    const nu = await $.clock.now()
-    const limieten = await $.session.usage().then(u => limietenVan(u.rateLimits), () => [])
-    const keuze = await orKeuze($)
-    const o = wisselOverzicht({
-      modus: status && !status.fout ? status.modus : t.modus,
-      apiAuto: t.auto,
-      stappen: t.stappen,
-      hoog: t.hoog,
-      laag: t.laag,
-      accounts: acc as any,
-      limieten,
-      // Onbekend telt als wel, zoals in de ketting (`beschikbaarheid`).
-      apiKey: status ? status.heeftKey : (await $.store.get('api.heeftKey')) !== false,
-      orKey: status ? status.orHeeftKey === true : (await $.store.get('openrouter.heeftKey')) === true,
-      ...(keuze.model ? { orModel: keuze.model } : {}),
-      ...(keuze.snel ? { orSnel: keuze.snel } : {}),
-      ...(status?.orModel ? { orNu: status.orModel } : {}),
-    } as any)
+    const { t, o } = await overzichtVan($)
     const stapAan = (x: Stap) => t.stappen.includes(x)
 
     return kaart(ui, 'Automatisch wisselen', [
@@ -218,7 +230,7 @@ export async function wisselKaart($: Engine, e: any, k: PaneelKleuren): Promise<
       <Input key="wissel-laag" label="Terug onder %  " value={String(t.laag)} submitLabel="zet" onSubmit={(waarde: string) => zetTerug($, waarde)} />,
     ], {
       rechts: o.aan ? 'aan' : 'uit',
-      knoppen: t.stappen.length === 2
+      knoppen: meer && t.stappen.length === 2
         ? <Box marginTop={1}>{knop(ui, 'wissel-volgorde', t.stappen[0] === 'api' ? 'OpenRouter vóór API' : 'API vóór OpenRouter', () => draaiVolgorde($))}</Box>
         : null,
     })

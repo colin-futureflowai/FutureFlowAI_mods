@@ -193,6 +193,12 @@ test('dashboard: kaarten, grafiek op desktop, tekst in de terminal, niveauknop w
   await $.tool.call({ tool: 'Bash', command: 'pnpm test' } as any)
 
   await minify($, '')
+  // Ingeklapt: kerncijfers wel, grafiek pas onder Meer ▸ (hotkey m).
+  const dicht = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(JSON.stringify(await dicht.drawn())).not.toContain('▄█▆')
+  expect(await dicht.find({ type: 'Button', key: 'meer-zuinig', hotkey: 'm' } as any)).toBeDefined()
+  await dicht.press({ key: 'meer-zuinig' } as any)
+  await dicht.unmount()
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ ...PANE, surface })
     expect((await ui.find({ type: 'Text', text: /^Uitvoer ingekort$/ }))?.text).toBe('Uitvoer ingekort')

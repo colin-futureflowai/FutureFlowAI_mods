@@ -30,7 +30,7 @@ export function paneelVan(el: Ui, e: any, k: PaneelKleuren): Paneel {
   return { el, k, breedte, binnen: kaartBreedte(breedte), kolommen, terminal: e?.surface === 'terminal' }
 }
 
-// Tabs als plain knoppen "1: Naam" (hotkey 1-8), gescheiden door " · ". In de terminal verdeeld
+// Tabs als plain knoppen "1: Naam" (hotkey 1-4), gescheiden door " · ". In de terminal verdeeld
 // over rijen die passen, met ▔ onder de gekozen tab en een lijn eronder; smal = korte namen.
 export function tabs(p: Paneel, sleutels: readonly string[], gekozen: number, kies: (i: number) => () => Promise<void> | void): RenderElement {
   const { Box, Text, Button } = p.el
@@ -182,5 +182,15 @@ export function raster(p: Paneel, kaarten: readonly RenderElement[]): RenderElem
     <Box flexDirection="row" flexWrap="wrap" columnGap={1}>
       {kaarten as any}
     </Box>
+  )
+}
+
+// Schakelaar "Meer ▸" / "Minder ▾" onder een tab: plain knop met hotkey m. Ingeklapt is de standaard.
+export function meerKnop(p: Paneel, key: string, open: boolean, onPress: () => unknown): RenderElement {
+  const { Button, Text } = p.el
+  return (
+    <Button key={key} plain hotkey="m" onPress={onPress as any}>
+      <Text color={p.k.mut}>{open ? 'Minder ▾' : 'Meer ▸'}</Text>
+    </Button>
   )
 }
