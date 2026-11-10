@@ -48,4 +48,22 @@ with these changes by FutureFlowAI (each marked with a "futureflow:" comment):
 hooks/skins/vendor/mermaid-ascii.js bundles beautiful-mermaid 1.1.3 (MIT,
 Copyright (c) 2026 Craft Docs); its licence is in the file's header.
 
+The part of this plugin called Accounts follows claude-swap
+(https://github.com/realiti4/claude-swap), commit 5ac68bfb (10 November 2026),
+licensed under the MIT License (see LICENSES/MIT-claude-swap.txt):
+
+  claude-swap
+  Copyright (c) 2026 Onur Cetinkol
+
+Taken from it (reimplemented in JavaScript, no code copied verbatim): the lock
+protocol for Claude Code's credential and config locks (directory locks, 60 s /
+10 s staleness, takeover via a sibling directory, touching every 3 s, 9 s wait),
+the Keychain write shape (hex value via `security -i`, argv only for a line that
+does not fit), the order of a switch, the list of machine-wide credential keys,
+the public OAuth client id and endpoints, and the shape of the usage poll
+policy (with FutureFlowAI's own, slower numbers). Files:
+  lib/accounts.mjs, lib/accounts.d.mts
+  cli/accounts.mjs
+  tests/accounts-lib.test.mjs, tests/accounts-cli.test.mjs, tests/fixtures/nep-security.mjs
+
 All other files in this plugin are licensed under the MIT License.
