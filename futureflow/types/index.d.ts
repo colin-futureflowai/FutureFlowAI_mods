@@ -249,6 +249,7 @@ declare module 'claude-code' {
       'openrouter.modellen': OrModellen | null
       /** Zoektekst in de tab OpenRouter. */
       'openrouter.zoek': string
+      'openrouter.pagina': number
       /** Telt op na een actie in de tab OpenRouter, zodat die opnieuw tekent. */
       'openrouter.versie': number
       /** Uitkomst van de laatste verbindingstest (één regel); null = nog niet getest. */

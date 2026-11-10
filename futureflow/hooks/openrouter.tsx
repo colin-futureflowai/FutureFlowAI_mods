@@ -21,6 +21,8 @@ const statusAtom = atom({ plugin: 'futureflow', key: 'api.status' } as const, nu
 const toestandAtom = atom({ plugin: 'futureflow', key: 'api.toestand' } as const, null as ApiToestand | null)
 const modellenAtom = atom({ plugin: 'futureflow', key: 'openrouter.modellen' } as const, null as OrModellen | null)
 const zoekAtom = atom({ plugin: 'futureflow', key: 'openrouter.zoek' } as const, '')
+// Welke pagina van de modellenlijst open staat (0 = eerste).
+const paginaAtom = atom({ plugin: 'futureflow', key: 'openrouter.pagina' } as const, 0)
 const versieAtom = atom({ plugin: 'futureflow', key: 'openrouter.versie' } as const, 0)
 const testAtom = atom({ plugin: 'futureflow', key: 'openrouter.test' } as const, null as string | null)
 
@@ -189,6 +191,11 @@ async function draaiVolgorde($: Engine): Promise<void> {
 
 async function zoek($: Engine, tekst: string): Promise<void> {
   await update($, zoekAtom, () => tekst.trim().slice(0, 60))
+  await update($, paginaAtom, () => 0)
+}
+
+async function blader($: Engine, stap: number, laatste: number): Promise<void> {
+  await update($, paginaAtom, p => Math.min(laatste, Math.max(0, p + stap)))
 }
 
 // ---- tekenen ----
@@ -226,7 +233,9 @@ export async function openrouterTab($: Engine, e: any, k: Kleuren) {
     const opOr = status.modus === 'openrouter'
 
     const gevonden = sorteer(lijst?.modellen ?? [], zoekTekst)
-    const getoond = gevonden.slice(0, TOON)
+    const paginas = Math.max(1, Math.ceil(gevonden.length / TOON))
+    const pagina = Math.min(paginas - 1, Math.max(0, await read($, paginaAtom)))
+    const getoond = gevonden.slice(pagina * TOON, (pagina + 1) * TOON)
     const claude = getoond.filter(m => isClaude(m.id))
     const andere = getoond.filter(m => !isClaude(m.id))
     const index = (m: OrModel) => getoond.indexOf(m)
@@ -285,8 +294,12 @@ export async function openrouterTab($: Engine, e: any, k: Kleuren) {
           ...claude.map(m => regelVan(ui, $, m, index(m), keuze)),
           andere.length ? <Text key="or-groep-andere" bold color={k.mut}>Andere modellen</Text> : '',
           ...andere.map(m => regelVan(ui, $, m, index(m), keuze)),
-          gevonden.length > TOON ? uitleg(ui, `${TOON} van ${gevonden.length}; zoek om te verfijnen.`, 'or-meer') : '',
-          uitleg(ui, 'Hoofd = opus, sonnet en fable; Snel = haiku, achtergrondtaken en subagents. Alleen modellen met tools.', 'or-rollen'),
+          paginas > 1 ? uitleg(ui, `Pagina ${pagina + 1} van ${paginas} · ${gevonden.length} modellen`, 'or-meer') : '',
+          paginas > 1 ? knoppen(ui, [
+            pagina > 0 ? knop(ui, 'or-vorige', '◂ Vorige', () => blader($, -1, paginas - 1), { hotkey: '[' }) : null,
+            pagina < paginas - 1 ? knop(ui, 'or-volgende', 'Volgende ▸', () => blader($, 1, paginas - 1), { hotkey: ']' }) : null,
+          ]) : '',
+          uitleg(ui, 'Hoofd = het model waarmee Claude Code met je praat en het werk doet. Snel = het goedkopere model voor bijtaken: samenvattingen, titels, achtergrondwerk en subagents. Alleen modellen die tools kunnen gebruiken.', 'or-rollen'),
         ], {
           rechts: lijst?.modellen.length ? `${lijst.modellen.length} met tools` : '',
           knoppen: knoppen(ui, [knop(ui, 'or-ververs', 'Lijst verversen', () => laadModellen($, true))]),

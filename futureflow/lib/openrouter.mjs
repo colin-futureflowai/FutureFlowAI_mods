@@ -9,7 +9,7 @@ export const OR_ACCOUNT = 'futureflow'
 // Hoogstens één keer per 6 uur de lijst opnieuw ophalen (behalve op de knop).
 export const CACHE_MS = 6 * 3_600_000
 // Zoveel modellen toont de tab.
-export const TOON = 15
+export const TOON = 20
 
 const KEY = /^sk-or-[A-Za-z0-9_-]{20,}$/
 const MODEL = /^[A-Za-z0-9~][A-Za-z0-9._~-]*\/[A-Za-z0-9._:~-]+(\[1m\])?$/
