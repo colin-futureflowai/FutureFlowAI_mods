@@ -145,12 +145,14 @@ test('klaarzetten: eigen settings-bestand en shim; ~/.claude/settings.json blijf
     env: {
       ANTHROPIC_BASE_URL: 'https://openrouter.ai/api',
       ANTHROPIC_API_KEY: '',
+      ANTHROPIC_MODEL: 'openai/gpt-5',
       ANTHROPIC_DEFAULT_OPUS_MODEL: 'openai/gpt-5',
       ANTHROPIC_DEFAULT_SONNET_MODEL: 'openai/gpt-5',
       ANTHROPIC_DEFAULT_FABLE_MODEL: 'openai/gpt-5',
       ANTHROPIC_DEFAULT_HAIKU_MODEL: 'openai/gpt-5-mini',
       CLAUDE_CODE_SUBAGENT_MODEL: 'openai/gpt-5-mini',
       CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS: '1',
+      ENABLE_TOOL_SEARCH: 'true',
     },
   })
   assert.equal(fs.statSync(shim).mode & 0o777, 0o755)

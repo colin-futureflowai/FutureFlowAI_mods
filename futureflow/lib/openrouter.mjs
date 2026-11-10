@@ -73,12 +73,17 @@ export function orInstellingen(model, snel) {
     env: {
       ANTHROPIC_BASE_URL: OR_URL,
       ANTHROPIC_API_KEY: '',
+      // Wint van een vast model-id in ~/.claude/settings.json (bv. claude-fable-5-1[1m]); de DEFAULT_*-sleutels
+      // vervangen alleen aliassen.
+      ANTHROPIC_MODEL: model,
       ANTHROPIC_DEFAULT_OPUS_MODEL: model,
       ANTHROPIC_DEFAULT_SONNET_MODEL: model,
       ANTHROPIC_DEFAULT_FABLE_MODEL: model,
       ANTHROPIC_DEFAULT_HAIKU_MODEL: snel,
       CLAUDE_CODE_SUBAGENT_MODEL: snel,
       CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS: '1',
+      // Met een eigen base-URL laadt Claude Code anders alle tool-schema's vooraf (~660k tokens gemeten).
+      ENABLE_TOOL_SEARCH: 'true',
     },
   }
 }
