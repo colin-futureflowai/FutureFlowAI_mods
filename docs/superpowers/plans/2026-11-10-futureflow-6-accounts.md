@@ -181,7 +181,8 @@ Alleen uitvoeren met Colins eigen tweede account bij de hand (Colin logt zelf in
 - [ ] Live terminal-check (met Colin, twee echte accounts): toevoegen ×2, lijst met verbruik, wissel met de hand en `/status` in een nieuwe sessie, één automatische wissel met een lage testmarge (50 %), "bezig" in een tweede terminal houdt de wissel tegen, desktop-tab alleen-lezen. Geen tweede account → alleen de checks zonder wissel en dat noteren.
 - [ ] Commit.
 
-## Open vragen voor Colin
+## Besluiten van Colin (10-11-2026)
 
-1. Het live Keychain-item is ~12 KB (vooral `mcpOAuth`). Schrijven via `security -i` kan dan niet; claude-swap en Claude Code zelf zetten het dan hex-gecodeerd in argv (heel kort zichtbaar voor `ps` op deze Mac). Akkoord, of alleen wisselen als het past (dan werkt wisselen nu niet)?
-2. Gebruik je een van de accounts ook tegelijk op een andere machine? (Verbruik telt dan mee in hetzelfde venster; het usage-endpoint deelt zijn budget per account.)
+1. Live Keychain-item te groot voor stdin: **akkoord** om het, net als Claude Code en claude-swap, hex-gecodeerd via argv aan `/usr/bin/security` te geven. Alleen voor dat ene schrijfmoment; kopieën (~1 KB) blijven via `security -i` op stdin.
+2. De accounts worden **ook op andere machines** gebruikt. Daarom zuiniger ophalen dan claude-swap: vloer per account 360 s (niet 180 s), stil 900 s, uitgeput 1200 s; na een 429 minstens 600 s, ×1,5 tot 1800 s. Het verbruik kan tussen twee metingen door andere machines oplopen: de tab toont de leeftijd van elke meting, en auto-wissel beslist alleen op metingen jonger dan 15 min.
+3. Task 1 (spike) wordt overgeslagen bij het bouwen; de aannames onderaan Task 1 gelden. Colin doet de live test met zijn tweede account na de bouw.
