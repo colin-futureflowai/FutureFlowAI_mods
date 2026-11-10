@@ -215,7 +215,9 @@ export async function openrouterTab($: Engine, e: any, k: Kleuren) {
     await read($, versieAtom) // opnieuw tekenen na een actie
     const ui = paneelVan(el, e, k)
     const status = (await read($, statusAtom)) ?? (await leesStatus($))
-    const t = (await read($, toestandAtom)) ?? (await toestand($))
+    // Een toestand uit een sessie van vóór 0.7 heeft nog geen `stappen`: dan de standaard.
+    const t0 = (await read($, toestandAtom)) ?? (await toestand($))
+    const t = { ...t0, stappen: Array.isArray(t0.stappen) ? t0.stappen : ['api'] }
     const lijst = await read($, modellenAtom)
     const zoekTekst = await read($, zoekAtom)
     const test = await read($, testAtom)
