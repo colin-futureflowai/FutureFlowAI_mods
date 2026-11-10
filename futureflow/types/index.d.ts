@@ -41,7 +41,7 @@ export type SlotsSnapshot = {
   error?: string
 }
 
-export type DashboardTab = 'overzicht' | 'slots' | 'minify' | 'stijl' | 'connectors' | 'api'
+export type DashboardTab = 'overzicht' | 'slots' | 'minify' | 'stijl' | 'connectors' | 'api' | 'accounts'
 
 /** `cli/connectors.mjs list` voor de projectsleutel (git-root van de sessiemap, anders die map zelf). */
 export type ConnectorsLijst = {
@@ -76,6 +76,56 @@ export type ApiToestand = {
   /** Met de hand gekozen: tot dit moment (epoch ms) wisselt auto niet. */
   handmatigTot?: number
 }
+
+/** Eén venster van een account (5u of 7d): percentage en reset (epoch ms). */
+export type AccountsVenster = { pct?: number; resetsAt?: number }
+
+/** Eén account uit `cli/accounts.mjs status --json`; het e-mailadres is gemaskeerd (`co…@domein`). */
+export type AccountsAccount = {
+  id: number
+  email: string
+  plan: string
+  inRotatie: boolean
+  status: 'ok' | 'opnieuw-inloggen' | 'onbekend'
+  statusUitleg?: string
+  label?: string
+  gebruik: { '5u'?: AccountsVenster; '7d'?: AccountsVenster }
+  /** Epoch ms van de laatste geslaagde meting. */
+  gemetenOp?: number
+  fout?: string
+}
+
+/** Uitkomst van `cli/accounts.mjs status --json` (zelfde vorm als Status in lib/accounts.d.mts). */
+export type AccountsStatus = {
+  /** Het account dat nu in de terminal ingelogd is; null = geen bekend account. */
+  actief: number | null
+  profiel: 'standaard' | 'eigen'
+  accounts: AccountsAccount[]
+  instellingen: {
+    auto: boolean
+    marge5u: number
+    marge7d: number
+    strategie: 'meeste-ruimte'
+    wachttijd: number
+    hysterese: number
+    stand: 'stil' | 'vragen'
+    maxWacht: number
+  }
+  laatsteWissel?: { tijd: number; van: number | null; naar: number; auto: boolean }
+  wacht?: { sinds: number; wie: string[] }
+  fout?: string
+  /** Epoch ms van het lezen. */
+  gelezen: number
+}
+
+/** Stand *vragen*: de wissel die futureflow voorstelt, met knoppen boven de prompt. */
+export type AccountsVraag = { soort: 'account' | 'terug'; naar: number; van: number | null; reden: string }
+
+/** Een wissel die wacht op sessies die midden in een beurt zitten. */
+export type AccountsWacht = { sinds: number; wie: string[]; naar: number }
+
+/** Groene regel boven de prompt na een wissel (ook uit een andere sessie), tot `tot` (epoch ms). */
+export type AccountsMelding = { tekst: string; tot: number }
 
 export type MinifyNiveau = 'O1' | 'O2' | 'O3' | 'uit'
 
@@ -173,6 +223,20 @@ declare module 'claude-code' {
       'api.versie': number
       /** Takenlijst-tools in de terminal aan (env in settings.json); null = nog niet gelezen. */
       'stijl.takenlijst': boolean | null
+      /** Laatst gelezen status van de tab Accounts (bij openen, na een klik, elke 30 s en na een meting); null = nog niet gelezen. */
+      'accounts.status': AccountsStatus | null
+      /** Telt op na een actie in de tab Accounts, zodat die opnieuw tekent. */
+      'accounts.versie': number
+      /** Stand vragen: de voorgestelde wissel; null = geen vraag. */
+      'accounts.vraag': AccountsVraag | null
+      /** Een wissel die wacht op bezige sessies; null = niets. */
+      'accounts.wacht': AccountsWacht | null
+      /** Wisselmelding boven de prompt; null = geen. */
+      'accounts.melding': AccountsMelding | null
+      /** Deze sessie is een desktop-sessie (CLAUDE_CODE_SDK_HAS_HOST_AUTH_REFRESH): de tab is alleen-lezen. */
+      'accounts.desktop': boolean
+      /** Het account waarvoor Verwijderen één keer is aangeklikt (tweede klik bevestigt); null = geen. */
+      'accounts.weg': number | null
     }
   }
 }

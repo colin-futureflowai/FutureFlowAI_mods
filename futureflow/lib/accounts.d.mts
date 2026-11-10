@@ -81,3 +81,31 @@ export function kiesAccount(s: KeuzeInvoer): { naar: number; reden: string } | n
 export function ketting(s: KettingInvoer): KettingBesluit | null
 export function pollPlan(p: PollInvoer): { volgende: number; interval: number }
 export function telBezig(p: { eigen: EigenSessie[]; claude: ClaudeRecord[]; ikzelf: string; nu: number }): { bezig: number; wie: string[] }
+
+export type StatusVenster = { pct?: number; resetsAt?: number }
+export type StatusAccount = {
+  id: number
+  email: string
+  plan: string
+  inRotatie: boolean
+  status: AccountStatus
+  statusUitleg?: string
+  label?: string
+  gebruik: { '5u'?: StatusVenster; '7d'?: StatusVenster }
+  gemetenOp?: number
+  fout?: string
+}
+export type Status = {
+  actief: number | null
+  profiel: 'standaard' | 'eigen'
+  accounts: StatusAccount[]
+  instellingen: Instellingen
+  laatsteWissel?: { tijd: number; van: number | null; naar: number; auto: boolean }
+  wacht?: { sinds: number; wie: string[] }
+  fout?: string
+  gelezen: number
+}
+
+export function kettingAan(staat: unknown): boolean
+export function statusVan(ruw: unknown, gelezen: number): Status
+export function kettingInvoerVan(status: Status): Omit<KeuzeInvoer, 'nu'>

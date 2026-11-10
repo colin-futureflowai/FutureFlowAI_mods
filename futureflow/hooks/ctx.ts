@@ -21,6 +21,20 @@ export async function stateDir($: Engine): Promise<string | undefined> {
   return home ? `${home}/.claude/futureflow` : undefined
 }
 
+// Map van de tab Accounts: dezelfde als de standaard van cli/accounts.mjs (~/.claude/futureflow/accounts).
+// Niet onder FUTUREFLOW_HOME: de CLI kent die variabele niet, en beide moeten dezelfde map lezen.
+export async function accountsDir($: Engine): Promise<string | undefined> {
+  const home = await $.env.get('HOME')
+  return home ? `${home}/.claude/futureflow/accounts` : undefined
+}
+
+// accounts.json zonder de CLI (geen Node-proces), voor de vraag of de ketting beslist en voor de
+// wisselmelding; undefined als het bestand ontbreekt of onleesbaar is. Bevat geen geheimen.
+export async function leesAccountsStaat($: Engine): Promise<unknown> {
+  const dir = await accountsDir($)
+  return dir ? leesJson($, `${dir}/accounts.json`) : undefined
+}
+
 async function leesJson($: Engine, pad: string): Promise<unknown> {
   try {
     const tekst = await $.fs.read(pad)
@@ -80,7 +94,8 @@ export function oud($: Engine): Promise<OudePlugins> {
 // Eén toast per sessie; de rest alleen in mod.log.
 export function failOpen($: Engine, err: unknown): void {
   const tekst = err instanceof Error ? err.message : String(err)
-  void log($, `fout: ${tekst}`)
+  // Ook na het einde van de sessie (losse taken): een log die niet lukt is geen nieuwe fout.
+  void log($, `fout: ${tekst}`).catch(() => undefined)
   if (warned) return
   warned = true
   $.ui.toast(`futureflow werkt niet (alles gaat door): ${tekst}`)

@@ -3,10 +3,11 @@ import type { EngineInterface as Engine } from 'claude-code'
 
 import type { ApiStatus, ApiToestand } from '../types'
 
-import { failOpen } from './ctx'
+import { failOpen, leesAccountsStaat } from './ctx'
 
 import { beslis, dagSleutel, geldigeKey, HELPER, houdTot, kosten, kostenOverzicht, limietenVan, telOp, toestandVan, usd } from '../lib/api.mjs'
 import type { Door } from '../lib/api.mjs'
+import { kettingAan } from '../lib/accounts.mjs'
 
 // Tab API: de API-key in de macOS-sleutelhanger en wisselen tussen abonnement en API, met de hand
 // of automatisch op de rate limits. Alles buiten de plugin (settings.json, sleutelhanger) gaat via
@@ -124,6 +125,11 @@ async function leesToestand($: Engine): Promise<ApiToestand> {
   return toestandVan(await $.store.get('api.toestand'))
 }
 
+// Voor de ketting in hooks/accounts.tsx: de bewaarde API-toestand (alleen lezen).
+export async function apiToestand($: Engine): Promise<ApiToestand> {
+  return leesToestand($)
+}
+
 async function bewaarToestand($: Engine, t: ApiToestand): Promise<void> {
   await $.store.set('api.toestand', t)
   await update($, toestandAtom, () => t)
@@ -186,7 +192,8 @@ export async function startApi($: Engine): Promise<void> {
 // Wisselt via de CLI en bewaart de toestand. `door` = het venster bij een automatische wissel naar API;
 // `handmatigTot` = tot wanneer auto een keuze met de hand laat staan.
 // Faalt een automatische wissel (andere helper, geen key), dan gaat auto uit: geen melding elke 5 minuten.
-async function wissel(
+// Ook gebruikt door de ketting in hooks/accounts.tsx (naar API als alle accounts vol zitten, en terug).
+export async function wissel(
   $: Engine,
   naar: 'abonnement' | 'api',
   reden: string,
@@ -243,10 +250,13 @@ async function wissel(
 
 // Na een meting (session.measure, via de skin) en na een beurt: automatisch wisselen of niet.
 // Zonder auto en zonder automatische wissel om terug te draaien gebeurt hier niets (ook geen CLI).
+// Met accounts-auto aan en twee of meer accounts in de rotatie beslist de ketting in hooks/accounts.tsx
+// (eerst een ander abonnement, dan de API, en terug); dan doet deze functie niets.
 export async function apiMeet($: Engine, rateLimits?: unknown): Promise<void> {
   try {
     const t = await leesToestand($)
     if (!t.auto && !t.overgeschakeldDoor) return
+    if (kettingAan(await leesAccountsStaat($))) return
     const ruw = rateLimits ?? (await $.session.usage()).rateLimits
     const besluit = beslis({ ...t, limieten: limietenVan(ruw), nu: await $.clock.now() })
     if (besluit) await wissel($, besluit.naar, besluit.reden, { door: besluit.door, auto: true })

@@ -1,5 +1,6 @@
 import type { Register } from 'claude-code'
 
+import { registerAccounts, startAccounts } from './accounts'
 import { startApi } from './api'
 import { failOpen, oud, stateDir, vergeetOud } from './ctx'
 import { registerDashboard, startDashboard } from './dashboard'
@@ -16,6 +17,7 @@ export const register: Register = (on, options) => {
   registerDashboard(on)
   registerSkins(on)
   registerVoortgang(on)
+  registerAccounts(on)
 
   // Schrijft welke oude plugins aanwezig zijn naar <state>/oud, voor regels.sh.
   on('session.start', async ($, e, next) => {
@@ -35,6 +37,8 @@ export const register: Register = (on, options) => {
     await startDashboard($)
     // Tab API: modus uit settings.json (geen CLI); faalt open.
     await startApi($).catch(err => failOpen($, err))
+    // Tab Accounts: /accounts, desktop of terminal, eigen sessiebestand (geen CLI); faalt open.
+    await startAccounts($).catch(err => failOpen($, err))
     // Skin (claude-skins): mag nooit de start van de sessie breken.
     await startSkins($).catch(err => failOpen($, err))
     return next(e)

@@ -3,6 +3,7 @@ import type { EngineInterface as Engine, Register } from 'claude-code'
 
 import type { DashboardTab, MinifyTeller, SlotsSnapshot } from '../types'
 
+import { accountsTab, openAccounts } from './accounts'
 import { apiTab, takenlijstStand, verversApi, zetTakenlijst } from './api'
 import { connectorsTab, openConnectors } from './connectors'
 import { failOpen, oud } from './ctx'
@@ -30,12 +31,13 @@ const NAMEN: Record<DashboardTab, string> = {
   stijl: 'Stijl',
   connectors: 'Connectors',
   api: 'API',
+  accounts: 'Accounts',
 }
 
 // Start van het dashboard; register.tsx roept dit aan vanuit zijn ene session.start.
 export async function startDashboard($: Engine): Promise<void> {
   try {
-    await $.command.register({ name: 'futureflow', description: 'Dashboard van FutureFlowAI: overzicht, slots, minify, stijl, connectors, api' })
+    await $.command.register({ name: 'futureflow', description: 'Dashboard van FutureFlowAI: overzicht, slots, minify, stijl, connectors, api, accounts' })
   } catch (err) {
     failOpen($, err)
   }
@@ -203,6 +205,7 @@ export const registerDashboard = (on: Parameters<Register>[0]): void => {
       const tab = (woord || undefined) as DashboardTab | undefined
       if (tab === 'api') await verversApi($)
       if (tab === 'connectors') await openConnectors($)
+      if (tab === 'accounts') await openAccounts($)
       await openDashboard($, tab)
       if (!(await oud($)).slots) await startSlotsTicker($)
       return { text: `Dashboard geopend${tab ? ` op de tab ${NAMEN[tab]}` : ''}.` }
@@ -228,6 +231,7 @@ export const registerDashboard = (on: Parameters<Register>[0]): void => {
       : tab === 'overzicht' ? await overzichtTab($, e, p)
       : tab === 'connectors' ? await connectorsTab($, e)
       : tab === 'api' ? await apiTab($, e, await actieveKleuren($))
+      : tab === 'accounts' ? await accountsTab($, e, await actieveKleuren($))
       : await stijlTab($, e, p)
 
     return (
@@ -251,6 +255,7 @@ export const registerDashboard = (on: Parameters<Register>[0]): void => {
                   if ((t === 'slots' || t === 'overzicht') && !(await oud($)).slots) await startSlotsTicker($)
                   if (t === 'api') await verversApi($)
                   if (t === 'connectors') await openConnectors($)
+                  if (t === 'accounts') await openAccounts($)
                 }}
               >
                 {t === tab ? <Text color={p.groen} bold>{NAMEN[t]}</Text> : NAMEN[t]}

@@ -216,3 +216,76 @@ export function telBezig(p) {
   }
   return { bezig: wie.size, wie: [...wie] }
 }
+
+// ---- voor de mod (hooks/accounts.tsx en hooks/api.tsx) ----
+
+const geldigAccount = a => a && typeof a === 'object' && Number.isInteger(a.id) && a.id > 0
+
+// Of de ketting (accounts eerst, dan de API) het besluit neemt: accounts-auto aan en minstens twee
+// accounts in de rotatie, zoals `ketting` dat ook bepaalt. `staat` = accounts.json zoals de CLI hem
+// schrijft (of onzin: dan niet, en blijft het oude API-gedrag). Rotatie ontbreekt = aan, zoals in de CLI.
+export function kettingAan(staat) {
+  if (!staat || typeof staat !== 'object' || !Array.isArray(staat.accounts)) return false
+  const rotatie = staat.accounts.filter(a => geldigAccount(a) && typeof a.sleutel === 'string' && a.sleutel.includes(':') && a.inRotatie !== false)
+  return rotatie.length >= 2 && instellingenVan(staat.instellingen).auto
+}
+
+const STATUSSEN = new Set(['ok', 'opnieuw-inloggen', 'onbekend'])
+const tekst = (v, max = 200) => (typeof v === 'string' ? v.slice(0, max) : undefined)
+const venster = v => {
+  if (!v || typeof v !== 'object') return undefined
+  return { ...(getal(v.pct) ? { pct: v.pct } : {}), ...(getal(v.resetsAt) ? { resetsAt: v.resetsAt } : {}) }
+}
+
+// Uitvoer van `cli/accounts.mjs status --json`, nagekeken: alleen bekende velden, zodat de tab en het
+// besluit nooit iets anders zien dan wat de CLI belooft (gemaskeerde e-mail, getallen, tijden).
+export function statusVan(ruw, gelezen) {
+  const d = ruw && typeof ruw === 'object' ? ruw : {}
+  const accounts = (Array.isArray(d.accounts) ? d.accounts : []).filter(geldigAccount).map(a => {
+    const g = a.gebruik && typeof a.gebruik === 'object' ? a.gebruik : {}
+    const v5 = venster(g['5u'])
+    const v7 = venster(g['7d'])
+    return {
+      id: a.id,
+      email: tekst(a.email, 120) ?? '…',
+      plan: tekst(a.plan, 40) ?? '?',
+      inRotatie: a.inRotatie !== false,
+      status: STATUSSEN.has(a.status) ? a.status : 'onbekend',
+      ...(tekst(a.statusUitleg) ? { statusUitleg: tekst(a.statusUitleg) } : {}),
+      ...(tekst(a.label, 60) ? { label: tekst(a.label, 60) } : {}),
+      gebruik: { ...(v5 ? { '5u': v5 } : {}), ...(v7 ? { '7d': v7 } : {}) },
+      ...(getal(a.gemetenOp) ? { gemetenOp: a.gemetenOp } : {}),
+      ...(tekst(a.fout) ? { fout: tekst(a.fout) } : {}),
+    }
+  })
+  const lw = d.laatsteWissel
+  const w = d.wacht
+  return {
+    actief: Number.isInteger(d.actief) ? d.actief : null,
+    profiel: d.profiel === 'eigen' ? 'eigen' : 'standaard',
+    accounts,
+    instellingen: instellingenVan(d.instellingen),
+    ...(lw && getal(lw.tijd) && Number.isInteger(lw.naar)
+      ? { laatsteWissel: { tijd: lw.tijd, van: Number.isInteger(lw.van) ? lw.van : null, naar: lw.naar, auto: lw.auto === true } }
+      : {}),
+    ...(w && getal(w.sinds) ? { wacht: { sinds: w.sinds, wie: Array.isArray(w.wie) ? w.wie.filter(x => typeof x === 'string').slice(0, 10) : [] } } : {}),
+    ...(tekst(d.fout) ? { fout: tekst(d.fout) } : {}),
+    gelezen,
+  }
+}
+
+// Invoer voor `ketting` uit een nagekeken status: accounts en metingen (alleen 5u en 7d).
+export function kettingInvoerVan(status) {
+  const accounts = status.accounts.map(a => ({ id: a.id, sleutel: String(a.id), email: a.email, plan: a.plan, inRotatie: a.inRotatie, status: a.status }))
+  const metingen = {}
+  for (const a of status.accounts) {
+    if (!getal(a.gemetenOp)) continue
+    const vensters = []
+    for (const label of ['5u', '7d']) {
+      const v = a.gebruik[label]
+      if (v) vensters.push({ label, ...v })
+    }
+    metingen[a.id] = { vensters, gemetenOp: a.gemetenOp }
+  }
+  return { accounts, actief: status.actief, metingen, instellingen: status.instellingen, laatsteWissel: status.laatsteWissel?.tijd ?? 0 }
+}

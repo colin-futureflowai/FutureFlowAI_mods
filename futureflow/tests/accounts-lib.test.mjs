@@ -3,7 +3,8 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
-  instellingenVan, ketting, kiesAccount, maskEmail, planLabel, POLL, pollPlan, ruimte, STANDAARD_INSTELLINGEN, telBezig, VERS,
+  instellingenVan, ketting, kettingAan, kettingInvoerVan, kiesAccount, maskEmail, planLabel, POLL, pollPlan, ruimte, STANDAARD_INSTELLINGEN,
+  statusVan, telBezig, VERS,
 } from '../lib/accounts.mjs'
 import { beslis, STANDAARD } from '../lib/api.mjs'
 
@@ -181,4 +182,46 @@ test('telBezig: dode pid, desktop, eigen sessie, oude hartslag, waiting, onleesb
   assert.deepEqual(r.wie.sort(), ['c3', 'c5', 'pid 17', 's1'])
   assert.equal(r.bezig, 4)
   assert.deepEqual(telBezig({ eigen: [], claude: [], ikzelf: 'x', nu: NU }), { bezig: 0, wie: [] })
+})
+
+test('kettingAan: accounts-auto aan en twee of meer geldige accounts in de rotatie', () => {
+  const a = (id, extra = {}) => ({ id, sleutel: `u${id}:o${id}`, ...extra })
+  assert.equal(kettingAan(undefined), false)
+  assert.equal(kettingAan('onzin'), false)
+  assert.equal(kettingAan({ accounts: [a(1), a(2)], instellingen: { auto: false } }), false)
+  assert.equal(kettingAan({ accounts: [a(1), a(2)], instellingen: { auto: true } }), true)
+  // Rotatie ontbreekt = aan, zoals in de CLI; uit telt niet; kapotte rijen tellen niet.
+  assert.equal(kettingAan({ accounts: [a(1), a(2, { inRotatie: false })], instellingen: { auto: true } }), false)
+  assert.equal(kettingAan({ accounts: [a(1), { id: 0, sleutel: 'x:y' }, { id: 3, sleutel: 'geen-dubbelepunt' }], instellingen: { auto: true } }), false)
+})
+
+test('statusVan: alleen bekende velden; kettingInvoerVan maakt metingen uit 5u en 7d', () => {
+  const ruw = {
+    actief: 1,
+    profiel: 'standaard',
+    accounts: [
+      { id: 1, email: 'co…@x.nl', plan: 'Max 20x', inRotatie: true, status: 'ok', gebruik: { '5u': { pct: 92, resetsAt: NU + MIN }, '7d': { pct: 10 } }, gemetenOp: NU - MIN, token: 'GEHEIM' },
+      { id: 2, email: 'ab…@x.nl', plan: 'Pro', status: 'raar', gebruik: {} },
+      { id: 'x' },
+    ],
+    instellingen: { auto: true, marge5u: 80 },
+    laatsteWissel: { tijd: NU - 10 * MIN, van: null, naar: 1, auto: true },
+    wacht: { sinds: NU, wie: ['s2', 4] },
+  }
+  const s = statusVan(ruw, NU)
+  assert.equal(JSON.stringify(s).includes('GEHEIM'), false)
+  assert.equal(s.accounts.length, 2)
+  assert.equal(s.accounts[1].status, 'onbekend')
+  assert.equal(s.accounts[1].inRotatie, true)
+  assert.deepEqual(s.laatsteWissel, { tijd: NU - 10 * MIN, van: null, naar: 1, auto: true })
+  assert.deepEqual(s.wacht, { sinds: NU, wie: ['s2'] })
+  assert.equal(s.instellingen.marge5u, 80)
+  assert.equal(s.gelezen, NU)
+  const k = kettingInvoerVan(s)
+  assert.equal(k.actief, 1)
+  assert.equal(k.laatsteWissel, NU - 10 * MIN)
+  assert.deepEqual(k.metingen[1], { vensters: [{ label: '5u', pct: 92, resetsAt: NU + MIN }, { label: '7d', pct: 10 }], gemetenOp: NU - MIN })
+  assert.equal(k.metingen[2], undefined)
+  assert.equal(statusVan(null, NU).actief, null)
+  assert.equal(statusVan({ profiel: 'eigen' }, NU).profiel, 'eigen')
 })

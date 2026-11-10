@@ -3,6 +3,7 @@ import type { EngineInterface as Engine, Register } from 'claude-code'
 
 import type { OverflowJob, SlotsHolder, SlotsSnapshot } from '../types'
 
+import { accountsSessieEinde } from './accounts'
 import { failOpen, log, oud } from './ctx'
 import { openDashboard, PANE } from './paneel'
 import { actieveKleuren, stopSkins } from './skins/register'
@@ -265,6 +266,8 @@ export const registerSlots = (on: Parameters<Register>[0]): void => {
   // Browser-slot van deze sessie vrijgeven als de sessie stopt.
   on('session.end', async ($, e, next) => {
     stopSkins() // tikkers van de skin
+    // Tab Accounts: eigen sessiebestand op weg (faalt open).
+    await accountsSessieEinde($).catch(err => failOpen($, err))
     if ((await oud($)).slots) return next(e)
     if (sessionId) await cli($, ['release-session', '--session', sessionId]).catch(() => undefined)
     return next(e)

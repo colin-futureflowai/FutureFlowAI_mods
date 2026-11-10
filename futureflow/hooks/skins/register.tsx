@@ -36,6 +36,8 @@ import { hyperlinksFrom, touchOf } from './links'
 import { STANDAARD_KLEUREN, voortgangRij } from '../voortgang'
 // futureflow: de tab API kijkt na elke meting of er tussen abonnement en API gewisseld moet worden.
 import { apiMeetLos } from '../api'
+// futureflow: de tab Accounts houdt bij of deze sessie bezig is, meldt wissels boven de prompt en beslist na een meting.
+import { accountsBeurtStart, accountsMeetLos, accountsRij } from '../accounts'
 
 const SETTINGS = 'skins-settings'
 const GALLERY = 'skins-gallery'
@@ -758,6 +760,19 @@ async function alleenVoortgang($: EngineInterface, e: any, next: any, voortgang:
   )
 }
 
+// futureflow: de voortgangsrij en de regel van de tab Accounts samen boven de prompt; elk kan null zijn.
+function bovenRij($: EngineInterface, e: any, a: RenderElement | null, b: RenderElement | null): RenderElement | null {
+  if (a === null) return b
+  if (b === null) return a
+  const { Box } = $.ui.resolve(e)
+  return (
+    <Box flexDirection="column">
+      {a}
+      {b}
+    </Box>
+  )
+}
+
 // futureflow: een fout in een skin-hook laat de gebeurtenis gewoon door (fail-open), zoals bij slots en minify.
 function laatDoor($: EngineInterface, e: any, next: any) {
   if (next.error?.kind !== 're-entry') $.ui.log(`skins: ${next.error?.message ?? next.error?.kind}`, { to: 'debug' })
@@ -781,6 +796,8 @@ export const registerSkins = (on: Parameters<Register>[0]): void => {
   }).catch(laatDoor as any)
 
   on('turn.start', async ($, e, next) => {
+    // futureflow: sessiebestand op bezig (tab Accounts), vóór de skin; faalt open binnen de functie.
+    await accountsBeurtStart($, e)
     stats = NO_STATS
     isWorking = true
     // A worktree can move the session between turns.
@@ -810,6 +827,8 @@ export const registerSkins = (on: Parameters<Register>[0]): void => {
     const result = await next(e)
     // futureflow: automatisch wisselen (tab API), los van de meting; faalt open en raakt de verbruiksbalk niet.
     apiMeetLos($, e.rateLimits)
+    // futureflow: idem voor de tab Accounts (ketting: ander abonnement, dan API); doet niets in de desktop-app.
+    accountsMeetLos($, e.rateLimits)
 
     return result
   }).catch(laatDoor as any)
@@ -1278,7 +1297,13 @@ export const registerSkins = (on: Parameters<Register>[0]): void => {
     const countdowns = active?.prefs.countdown === true ? (await read($, countdownsAtom), countdownsOf(usage, await $.clock.now())) : {}
     const meters = metersOf(usage, countdowns)
     // futureflow: de voortgangsrij (null zonder takenlijst), in de kleuren van de skin of anders die van FutureFlowAI.
-    const voortgang = await voortgangRij($, e, active === null ? STANDAARD_KLEUREN : kleurenVan(lookOf($.ui.resolve(e), active, e.surface)))
+    // futureflow: plus de regel van de tab Accounts (wisselmelding, vraag of wacht), in de kleuren van de skin.
+    const voortgang = bovenRij(
+      $,
+      e,
+      await voortgangRij($, e, active === null ? STANDAARD_KLEUREN : kleurenVan(lookOf($.ui.resolve(e), active, e.surface))),
+      await accountsRij($, e, await actieveKleuren($)),
+    )
 
     if (active === null || !active.prefs.band || meters.length === 0) {
       // futureflow: zonder verbruiksbalk staat alleen de voortgangsrij boven wat eronder tekent.
@@ -1332,7 +1357,7 @@ export const registerSkins = (on: Parameters<Register>[0]): void => {
     }
 
     $.ui.log(`skins: ${next.error?.message ?? next.error?.kind}`, { to: 'debug' })
-    const voortgang = e.props?.hasSurvey ? null : await voortgangRij($, e, STANDAARD_KLEUREN)
+    const voortgang = e.props?.hasSurvey ? null : bovenRij($, e, await voortgangRij($, e, STANDAARD_KLEUREN), await accountsRij($, e, await actieveKleuren($).catch(() => ({ ...STANDAARD_KLEUREN, ok: STANDAARD_KLEUREN.accent, warn: '#e0a030', err: '#e05050' }))))
     return voortgang === null ? next(e) : alleenVoortgang($, e, next, voortgang)
   }) as any)
 

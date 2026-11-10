@@ -3,6 +3,7 @@ import type { EngineInterface as Engine, Register } from 'claude-code'
 
 import type { MinifyInkorting, MinifyNiveau, MinifyTeller } from '../types'
 
+import { accountsBeurtKlaar } from './accounts'
 import { apiMeetLos, apiTurnComplete } from './api'
 import { failOpen, log, oud } from './ctx'
 import { openDashboard } from './paneel'
@@ -360,6 +361,8 @@ export const registerMinify = (on: Parameters<Register>[0]): void => {
     const result = await next(e)
     // Tab API: wisselen of niet, los van de beurt (de CLI kan seconden duren).
     apiMeetLos($)
+    // Tab Accounts: sessiebestand op tussen en kijken of er gewisseld moet worden, los van de beurt.
+    void accountsBeurtKlaar($, e).catch(() => undefined)
     if (minifyOud) return result
     if (e.agentId || !e.usage || e.isAborted) return result
     const out = e.usage.output_tokens
