@@ -326,3 +326,37 @@ test('lange lijst: bladeren met Volgende (n) en Vorige (p) tekent op de terminal
   expect(await ui.find({ type: 'Button', key: 'or-vorige', hotkey: 'p' } as any)).toBeDefined()
   await ui.unmount()
 })
+
+test('per /model-stand een eigen model onder Meer: Opus kiezen, nog eens = leeg; Gebruik nu geeft --opus mee', async ($, on) => {
+  const f = fake(on, { orKey: true, store: { 'openrouter.keuze': { model: 'openai/gpt-5', snel: 'openai/gpt-5-mini' } } })
+  await $.session.start(START)
+  await run($, 'futureflow', 'openrouter')
+  await f.clock.settle()
+  const ui = await $.ui.mount(PANE('terminal'))
+  expect(await ui.find({ type: 'Button', key: 'or-opus-0' } as any)).toBeUndefined()
+  await ui.press({ key: 'meer-wisselen' } as any)
+  // Rij 0 is het Claude-model (1M context): met [1m].
+  await ui.press({ key: 'or-opus-0' } as any)
+  expect(f.store.get('openrouter.keuze')).toEqual({ model: 'openai/gpt-5', snel: 'openai/gpt-5-mini', opus: 'anthropic/claude-sonnet-4.5[1m]' })
+  expect(await ui.find({ type: 'Text', text: /Sonnet: = hoofdmodel/ })).toBeDefined()
+  await ui.press({ key: 'or-naar' } as any)
+  expect(f.modusAanroepen().at(-1)).toBe('openrouter --model openai/gpt-5 --snel openai/gpt-5-mini --opus anthropic/claude-sonnet-4.5[1m]')
+  await ui.press({ key: 'or-opus-0' } as any)
+  expect(f.store.get('openrouter.keuze')).toEqual({ model: 'openai/gpt-5', snel: 'openai/gpt-5-mini' })
+  await ui.unmount()
+})
+
+test('oude of kapotte keuze in de store crasht de tab niet', async ($, on) => {
+  const f = fake(on, { orKey: true })
+  for (const keuze of [{ model: 'openai/gpt-5', snel: 'openai/gpt-5-mini' }, { model: 'openai/gpt-5', opus: 42, sonnet: null }, 'onzin', ['a/b']]) {
+    f.store.set('openrouter.keuze', keuze)
+    await run($, 'futureflow', 'openrouter')
+    await f.clock.settle()
+    const ui = await $.ui.mount(PANE('terminal'))
+    await ui.press({ key: 'meer-wisselen' } as any)
+    expect(await ui.find({ type: 'Text', text: /laden lukte niet/ })).toBeUndefined()
+    expect(await ui.find({ type: 'Text', text: /Opus: / })).toBeDefined()
+    await ui.press({ key: 'meer-wisselen' } as any)
+    await ui.unmount()
+  }
+})

@@ -67,7 +67,12 @@ export function shimTekst(settingsPad) {
 
 // Wat futureflow voor OpenRouter in het eigen settings-bestand zet: hoofdmodel voor opus/sonnet/fable, het snelle
 // model voor haiku (ook achtergrondtaken) en subagents.
-export function orInstellingen(model, snel) {
+// De standen van /model met een eigen model (0.12.0). Haiku is het snelle model.
+export const STANDEN = ['opus', 'sonnet', 'fable']
+
+// `standen`: per stand een eigen model-id; een lege of ongeldige stand valt terug op het hoofdmodel.
+export function orInstellingen(model, snel, standen = {}) {
+  const per = s => (standen && geldigModel(standen[s]) ? standen[s] : model)
   return {
     apiKeyHelper: OR_HELPER,
     env: {
@@ -76,9 +81,9 @@ export function orInstellingen(model, snel) {
       // Wint van een vast model-id in ~/.claude/settings.json (bv. claude-fable-5-1[1m]); de DEFAULT_*-sleutels
       // vervangen alleen aliassen.
       ANTHROPIC_MODEL: model,
-      ANTHROPIC_DEFAULT_OPUS_MODEL: model,
-      ANTHROPIC_DEFAULT_SONNET_MODEL: model,
-      ANTHROPIC_DEFAULT_FABLE_MODEL: model,
+      ANTHROPIC_DEFAULT_OPUS_MODEL: per('opus'),
+      ANTHROPIC_DEFAULT_SONNET_MODEL: per('sonnet'),
+      ANTHROPIC_DEFAULT_FABLE_MODEL: per('fable'),
       ANTHROPIC_DEFAULT_HAIKU_MODEL: snel,
       CLAUDE_CODE_SUBAGENT_MODEL: snel,
       CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS: '1',

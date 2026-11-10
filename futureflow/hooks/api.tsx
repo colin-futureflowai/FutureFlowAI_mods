@@ -119,6 +119,9 @@ export async function leesStatus($: Engine): Promise<ApiStatus> {
       orStaart: typeof d.orStaart === 'string' ? d.orStaart.slice(-4) : '',
       ...(geldigModel(d.orModel) ? { orModel: d.orModel } : {}),
       ...(geldigModel(d.orSnel) ? { orSnel: d.orSnel } : {}),
+      ...(geldigModel(d.orOpus) ? { orOpus: d.orOpus } : {}),
+      ...(geldigModel(d.orSonnet) ? { orSonnet: d.orSonnet } : {}),
+      ...(geldigModel(d.orFable) ? { orFable: d.orFable } : {}),
       orKlaar: d.orKlaar === true,
       orShim: d.orShim === true,
       orOpPad: d.orOpPad !== false,
@@ -228,13 +231,16 @@ export async function startApi($: Engine): Promise<void> {
   }
 }
 
-// De gekozen OpenRouter-modellen (store `openrouter.keuze`); alleen geldige ids.
-export async function orKeuze($: Engine): Promise<{ model?: string; snel?: string }> {
-  const k = (await $.store.get('openrouter.keuze')) as { model?: unknown; snel?: unknown } | undefined
-  return {
-    ...(geldigModel(k?.model) ? { model: k!.model as string } : {}),
-    ...(geldigModel(k?.snel) ? { snel: k!.snel as string } : {}),
-  }
+// De gekozen OpenRouter-modellen (store `openrouter.keuze`); alleen geldige ids. Sinds 0.12.0 ook een
+// eigen model per /model-stand (opus, sonnet, fable); een oude keuze zonder die velden werkt gewoon,
+// onzin (geen object, verkeerd type) telt als niet gekozen.
+export type OrKeuze = { model?: string; snel?: string; opus?: string; sonnet?: string; fable?: string }
+export async function orKeuze($: Engine): Promise<OrKeuze> {
+  const ruw = await $.store.get('openrouter.keuze')
+  const k = (ruw && typeof ruw === 'object' && !Array.isArray(ruw) ? ruw : {}) as Record<string, unknown>
+  const uit: OrKeuze = {}
+  for (const veld of ['model', 'snel', 'opus', 'sonnet', 'fable'] as const) if (geldigModel(k[veld])) uit[veld] = k[veld] as string
+  return uit
 }
 
 // Welke stappen van de ketting kunnen (zonder CLI): de API tenzij de laatste status zei dat er geen
@@ -325,7 +331,8 @@ async function zetOrKlaar($: Engine, reden: string, opties: { door?: Door; auto?
     if (!opties.auto) $.ui.toast('Kies eerst een hoofdmodel en een snel model in de lijst.')
     return false
   }
-  const r = await cli($, ['modus', 'openrouter', '--model', k.model, '--snel', k.snel])
+  const standen = (['opus', 'sonnet', 'fable'] as const).flatMap(s => (k[s] ? [`--${s}`, k[s]!] : []))
+  const r = await cli($, ['modus', 'openrouter', '--model', k.model, '--snel', k.snel, ...standen])
   await verversApi($)
   if (r.exitCode !== 0) {
     const uitleg = r.exitCode === 4 ? 'er staat nog geen OpenRouter-key in de sleutelhanger.' : `${foutVan(r)}.`

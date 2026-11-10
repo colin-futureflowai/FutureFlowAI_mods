@@ -309,3 +309,21 @@ test('test: één POST /v1/messages met Bearer uit de sleutelhanger; uitvoer zon
   assert.deepEqual(json(f), { ok: false, status: 401, fout: 'User not found for …' })
   assert.ok(!f.stdout.includes(ORKEY) && !f.stderr.includes(ORKEY))
 })
+
+test('modus openrouter met --opus/--sonnet/--fable: per stand in het eigen bestand, status meldt ze; ongeldig = exit 1', async () => {
+  await cli(['openrouter', 'zet-key'], ORKEY)
+  const r = await cli(['modus', 'openrouter', ...MODEL, '--opus', 'anthropic/claude-opus-4.5', '--fable', 'x/fable'])
+  assert.equal(r.status, 0, r.stderr)
+  const env = JSON.parse(fs.readFileSync(path.join(ordir, 'settings.json'), 'utf8')).env
+  assert.equal(env.ANTHROPIC_MODEL, 'openai/gpt-5')
+  assert.equal(env.ANTHROPIC_DEFAULT_OPUS_MODEL, 'anthropic/claude-opus-4.5')
+  assert.equal(env.ANTHROPIC_DEFAULT_SONNET_MODEL, 'openai/gpt-5')
+  assert.equal(env.ANTHROPIC_DEFAULT_FABLE_MODEL, 'x/fable')
+  const s = json(await cli(['status']))
+  assert.equal(s.orModel, 'openai/gpt-5')
+  assert.equal(s.orOpus, 'anthropic/claude-opus-4.5')
+  assert.equal(s.orSonnet, 'openai/gpt-5')
+  assert.equal(s.orFable, 'x/fable')
+  assert.equal((await cli(['modus', 'openrouter', ...MODEL, '--sonnet', 'geen model'])).status, 1)
+  assert.equal(fs.existsSync(bestand), false)
+})

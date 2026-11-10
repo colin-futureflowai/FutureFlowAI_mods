@@ -4,6 +4,7 @@ import type { EngineInterface as Engine, RenderElement } from 'claude-code'
 import type { ApiStatus, OrModel, OrModellen } from '../types'
 
 import { cli, foutVan, handmatig, laatsteJson, leesStatus, orKeuze, verversApi, wissel } from './api'
+import type { OrKeuze } from './api'
 import { failOpen } from './ctx'
 import { herstartOpOr } from './herstart'
 import { kaart, knop, knoppen, leeg, paneelVan, uitleg } from './paneel-ui'
@@ -109,15 +110,22 @@ async function wisKey($: Engine): Promise<void> {
   }
 }
 
-// Kiest het hoofd- of snelle model (met `[1m]` bij ≥ 1M context) en bewaart zijn prijzen (voor de
-// kostenschatting). Staat claude-or al klaar, dan meteen de nieuwe modellen in het eigen bestand.
-async function kies($: Engine, rol: 'model' | 'snel', m: OrModel): Promise<void> {
+type Rol = 'model' | 'snel' | 'opus' | 'sonnet' | 'fable'
+const STAND_NAAM: Record<'opus' | 'sonnet' | 'fable', string> = { opus: 'Opus', sonnet: 'Sonnet', fable: 'Fable' }
+
+// Kiest het hoofd- of snelle model, of een eigen model voor een /model-stand (met `[1m]` bij ≥ 1M
+// context), en bewaart zijn prijzen (voor de kostenschatting). Hetzelfde model nog eens voor een stand
+// = die stand weer leeg (terug naar het hoofdmodel). Staat claude-or al klaar, dan meteen in het eigen bestand.
+async function kies($: Engine, rol: Rol, m: OrModel): Promise<void> {
   try {
     const id = modelIdVoor(m)
     if (!id || !geldigModel(id)) return
-    if (teKlein(m)) $.ui.toast(`Let op: ${m.id} heeft ${contextTekst(m.context)} context; dat is te klein voor Claude Code.`)
     const oud = await orKeuze($)
-    await $.store.set('openrouter.keuze', { ...oud, [rol]: id })
+    const weg = rol !== 'model' && rol !== 'snel' && kaal(oud[rol]) === m.id
+    if (teKlein(m) && !weg) $.ui.toast(`Let op: ${m.id} heeft ${contextTekst(m.context)} context; dat is te klein voor Claude Code.`)
+    const nieuw: OrKeuze = { ...oud, [rol]: id }
+    if (weg) delete nieuw[rol]
+    await $.store.set('openrouter.keuze', nieuw)
     const prijzen = ((await $.store.get('openrouter.prijzen')) ?? {}) as Record<string, { in?: number; uit?: number }>
     const prijs = { ...(m.in !== undefined ? { in: m.in } : {}), ...(m.uit !== undefined ? { uit: m.uit } : {}), ...(m.context !== undefined ? { ctx: m.context } : {}) }
     await $.store.set('openrouter.prijzen', { ...prijzen, [m.id]: prijs, [id]: prijs })
@@ -168,17 +176,20 @@ async function blader($: Engine, stap: number, laatste: number): Promise<void> {
 
 const kaal = (id: string | undefined) => (id ?? '').replace(/\[1m\]$/, '')
 
-function regelVan(ui: ReturnType<typeof paneelVan>, $: Engine, m: OrModel, i: number, keuze: { model?: string; snel?: string }) {
+function regelVan(ui: ReturnType<typeof paneelVan>, $: Engine, m: OrModel, i: number, keuze: OrKeuze, meer: boolean) {
   const { Box, Text } = ui.el
   const hoofd = kaal(keuze.model) === m.id
   const snel = kaal(keuze.snel) === m.id
+  const stand = (s: 'opus' | 'sonnet' | 'fable') => kaal(keuze[s]) === m.id
+  const iets = hoofd || snel || stand('opus') || stand('sonnet') || stand('fable')
   return (
     <Box key={`or-regel-${i}`} flexDirection="row" flexWrap="wrap" columnGap={1}>
-      <Text bold={hoofd || snel} color={hoofd || snel ? ui.k.accent : ui.k.fg} wrap="wrap">{m.id}</Text>
+      <Text bold={iets} color={iets ? ui.k.accent : ui.k.fg} wrap="wrap">{m.id}</Text>
       <Text color={ui.k.mut} wrap="wrap">{`${contextTekst(m.context)} · ${prijsTekst(m.in)} in / ${prijsTekst(m.uit)} uit per Mtok`}</Text>
       {teKlein(m) ? <Text color={ui.k.err} wrap="wrap">te klein voor Claude Code</Text> : ''}
       {knop(ui, `or-hoofd-${i}`, hoofd ? '● Hoofd' : 'Hoofd', () => kies($, 'model', m), { primary: hoofd })}
-      {knop(ui, `or-snel-${i}`, snel ? '● Snel' : 'Snel', () => kies($, 'snel', m), { primary: snel })}
+      {knop(ui, `or-snel-${i}`, snel ? '● Haiku/snel' : 'Haiku/snel', () => kies($, 'snel', m), { primary: snel })}
+      {meer ? (['opus', 'sonnet', 'fable'] as const).map(s => knop(ui, `or-${s}-${i}`, stand(s) ? `● ${STAND_NAAM[s]}` : STAND_NAAM[s], () => kies($, s, m), { primary: stand(s) })) : ''}
     </Box>
   )
 }
@@ -199,8 +210,16 @@ export async function orBron($: Engine, e: any, k: Kleuren, meer = true): Promis
     const keuze = await orKeuze($)
     const geld = kostenOverzicht((await $.store.get('openrouter.kosten')) as Record<string, number> | undefined, await $.clock.now())
     const klaar = status.orKlaar === true
-    const gekozen = (lijst?.modellen ?? []).filter(m => m.id === kaal(keuze.model) || m.id === kaal(keuze.snel))
-    const anders = klaar && !!status.orModel && (status.orModel !== keuze.model || status.orSnel !== keuze.snel)
+    // Alle gekozen modellen (hoofd, snel en per stand): de waarschuwingen gelden per stand.
+    const ids = [keuze.model, keuze.snel, keuze.opus, keuze.sonnet, keuze.fable].map(kaal).filter(Boolean)
+    const gekozen = (lijst?.modellen ?? []).filter(m => ids.includes(m.id))
+    // Wat claude-or nu per stand gebruikt, tegen de keuze (lege stand = hoofdmodel).
+    const per = (s: 'opus' | 'sonnet' | 'fable') => keuze[s] ?? keuze.model
+    const standAnders = (['opus', 'sonnet', 'fable'] as const).some(s => {
+      const nu = s === 'opus' ? status.orOpus : s === 'sonnet' ? status.orSonnet : status.orFable
+      return nu !== undefined && nu !== per(s)
+    })
+    const anders = klaar && !!status.orModel && (status.orModel !== keuze.model || status.orSnel !== keuze.snel || standAnders)
 
     const gevonden = sorteer(lijst?.modellen ?? [], zoekTekst)
     const paginas = Math.max(1, Math.ceil(gevonden.length / TOON))
@@ -227,9 +246,15 @@ export async function orBron($: Engine, e: any, k: Kleuren, meer = true): Promis
           {keuze.model ? <Text>{keuze.model}</Text> : <Text color={k.mut}>nog niet gekozen</Text>}
         </Text>
         <Text wrap="wrap">
-          <Text color={k.mut}>{'  Snel model: '}</Text>
+          <Text color={k.mut}>{'  Haiku/snel: '}</Text>
           {keuze.snel ? <Text>{keuze.snel}</Text> : <Text color={k.mut}>nog niet gekozen</Text>}
         </Text>
+        {(['opus', 'sonnet', 'fable'] as const).map(s => (meer || keuze[s] ? (
+          <Text key={`or-stand-${s}`} wrap="wrap">
+            <Text color={k.mut}>{`  ${STAND_NAAM[s]}: `}</Text>
+            {keuze[s] ? <Text>{keuze[s]}</Text> : <Text color={k.mut}>{keuze.model ? `= hoofdmodel` : 'nog niet gekozen'}</Text>}
+          </Text>
+        ) : ''))}
         {anders ? (
           <Text color={k.warn} wrap="wrap">{START} start nog met {status.orModel}; klik Gebruik nu om je keuze te gebruiken.</Text>
         ) : ''}
@@ -264,15 +289,15 @@ export async function orBron($: Engine, e: any, k: Kleuren, meer = true): Promis
         lijst?.fout ? <Text color={k.err} wrap="wrap">{lijst.fout}</Text> : '',
         lijst !== null && !gevonden.length && !lijst.fout ? leeg(ui, 'Geen model gevonden.') : '',
         claude.length ? <Text key="or-groep-claude" bold color={k.mut}>Claude via OpenRouter</Text> : '',
-        ...claude.map(m => regelVan(ui, $, m, index(m), keuze)),
+        ...claude.map(m => regelVan(ui, $, m, index(m), keuze, meer)),
         andere.length ? <Text key="or-groep-andere" bold color={k.mut}>Andere modellen</Text> : '',
-        ...andere.map(m => regelVan(ui, $, m, index(m), keuze)),
+        ...andere.map(m => regelVan(ui, $, m, index(m), keuze, meer)),
         paginas > 1 ? uitleg(ui, meer ? `Pagina ${pagina + 1} van ${paginas} · ${gevonden.length} modellen` : `${gevonden.length} modellen; zoeken en bladeren onder Meer ▸`, 'or-meer') : '',
         meer && paginas > 1 ? knoppen(ui, [
           pagina > 0 ? knop(ui, 'or-vorige', '◂ Vorige', () => blader($, -1, paginas - 1), { hotkey: 'p' }) : null,
           pagina < paginas - 1 ? knop(ui, 'or-volgende', 'Volgende ▸', () => blader($, 1, paginas - 1), { hotkey: 'n' }) : null,
         ]) : '',
-        uitleg(ui, 'Hoofd = het model waarmee Claude Code met je praat en het werk doet. Snel = het goedkopere model voor bijtaken: samenvattingen, titels, achtergrondwerk en subagents. Alleen modellen die tools kunnen gebruiken.', 'or-rollen'),
+        uitleg(ui, 'Hoofd = het model waarmee een claude-or-sessie start. Haiku/snel = het goedkopere model voor bijtaken, de stand Haiku en subagents. Opus, Sonnet en Fable (onder Meer ▸) = een eigen model per stand van /model; leeg = het hoofdmodel, nog eens klikken maakt de stand leeg. Alleen modellen die tools kunnen gebruiken.', 'or-rollen'),
       ], {
         rechts: lijst?.modellen.length ? `${lijst.modellen.length} met tools` : '',
         knoppen: meer ? knoppen(ui, [knop(ui, 'or-ververs', 'Lijst verversen', () => laadModellen($, true))]) : null,

@@ -6,7 +6,7 @@
 //   api wis-key                 item uit de sleutelhanger               → JSON { gewist }
 //   api status                                                          → JSON { heeftKey, staart, modus, vreemdeHelper, fout? }
 //   api modus api|abonnement    zet of verwijdert alleen onze helper    → JSON { modus, gewijzigd }
-//   api modus openrouter --model <id> --snel <id>
+//   api modus openrouter --model <id> --snel <id> [--opus <id>] [--sonnet <id>] [--fable <id>]
 //                               zet OpenRouter klaar voor `claude-or`: eigen settings-bestand
 //                               <OPENROUTER_DIR>/settings.json en de shim <SHIM_DIR>/claude-or
 //                               → JSON { modus, gewijzigd, settings, shim, start, opPad }
@@ -41,7 +41,7 @@ import { fileURLToPath } from 'node:url'
 import { ACCOUNT, geldigeKey, HELPER, MODI, modusVan, SERVICE } from '../lib/api.mjs'
 import {
   CACHE_MS, eigenBasis, geldigeOrKey, geldigModel, haalWeg, modellenVan, OR_ACCOUNT, OR_SERVICE, OR_URL, orInstellingen,
-  SHIM_MERK, shimTekst, START,
+  SHIM_MERK, shimTekst, START, STANDEN,
 } from '../lib/openrouter.mjs'
 
 const BESTAND = process.env.SETTINGS_JSON || path.join(os.homedir(), '.claude', 'settings.json')
@@ -212,8 +212,9 @@ const opPad = () => (process.env.PATH ?? '').split(path.delimiter).some(d => d &
 // Zet OpenRouter klaar voor `claude-or`. Raakt ~/.claude/settings.json nooit aan.
 function zetOpenrouter(opties) {
   if (!geldigModel(opties.model) || !geldigModel(opties.snel)) throw new Fout('kies een model en een snel model (--model <id> --snel <id>)', 1)
+  for (const s of STANDEN) if (opties[s] !== undefined && !geldigModel(opties[s])) throw new Fout(`ongeldig model voor --${s}`, 1)
   if (leesKey(OR_SERVICE, OR_ACCOUNT) === undefined) throw new Fout('geen OpenRouter-key in de sleutelhanger; bewaar eerst een key', 4)
-  const gewenst = orInstellingen(opties.model, opties.snel)
+  const gewenst = orInstellingen(opties.model, opties.snel, { opus: opties.opus, sonnet: opties.sonnet, fable: opties.fable })
   let gewijzigd = false
   if (!gelijk(leesJson(OR_SETTINGS), gewenst)) {
     schrijfJson(OR_SETTINGS, gewenst)
@@ -228,10 +229,15 @@ function orKlaar() {
   const d = leesJson(OR_SETTINGS)
   const env = isObject(d?.env) ? d.env : {}
   const uit = {}
-  if (d?.apiKeyHelper === orInstellingen('a/b', 'a/b').apiKeyHelper && env.ANTHROPIC_BASE_URL === OR_URL && geldigModel(env.ANTHROPIC_DEFAULT_OPUS_MODEL) && geldigModel(env.ANTHROPIC_DEFAULT_HAIKU_MODEL)) {
+  if (d?.apiKeyHelper === orInstellingen('a/b', 'a/b').apiKeyHelper && env.ANTHROPIC_BASE_URL === OR_URL && geldigModel(env.ANTHROPIC_MODEL ?? env.ANTHROPIC_DEFAULT_OPUS_MODEL) && geldigModel(env.ANTHROPIC_DEFAULT_HAIKU_MODEL)) {
     uit.orKlaar = true
-    uit.orModel = env.ANTHROPIC_DEFAULT_OPUS_MODEL
+    // Hoofdmodel = ANTHROPIC_MODEL (sinds 0.11.1); oudere bestanden: de opus-stand.
+    uit.orModel = env.ANTHROPIC_MODEL ?? env.ANTHROPIC_DEFAULT_OPUS_MODEL
     uit.orSnel = env.ANTHROPIC_DEFAULT_HAIKU_MODEL
+    for (const s of STANDEN) {
+      const v = env[`ANTHROPIC_DEFAULT_${s.toUpperCase()}_MODEL`]
+      if (geldigModel(v)) uit[`or${s[0].toUpperCase()}${s.slice(1)}`] = v
+    }
   } else {
     uit.orKlaar = false
   }
@@ -321,7 +327,7 @@ function vlagen(rest) {
   for (let i = 0; i < rest.length; i++) {
     const a = rest[i]
     if (a === '--ververs') uit.ververs = true
-    else if ((a === '--model' || a === '--snel') && i + 1 < rest.length) uit[a.slice(2)] = rest[++i]
+    else if (['--model', '--snel', '--opus', '--sonnet', '--fable'].includes(a) && i + 1 < rest.length) uit[a.slice(2)] = rest[++i]
     else throw new Fout(`onbekend argument ${a.slice(0, 40)}`, 1)
   }
   return uit
@@ -524,7 +530,7 @@ export async function main(args) {
     else if (cmd === 'openrouter' && sub === 'opruimen' && vlag.length === 0) console.log(JSON.stringify(ruimOp()))
     else {
       console.error(
-        'Gebruik: api zet-key (key via stdin) | api wis-key | api status | api modus api|abonnement | api modus openrouter --model <id> --snel <id>' +
+        'Gebruik: api zet-key (key via stdin) | api wis-key | api status | api modus api|abonnement | api modus openrouter --model <id> --snel <id> [--opus|--sonnet|--fable <id>]' +
           ' | api takenlijst aan|uit|status | api openrouter zet-key|wis-key|opruimen | api openrouter modellen [--ververs] | api openrouter test --model <id>',
       )
       return 1

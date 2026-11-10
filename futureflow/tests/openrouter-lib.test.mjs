@@ -231,3 +231,15 @@ test('herstart: commando quoot map, shim en sessie; ongeldig id of relatieve map
   assert.equal(contextTeGroot(100_000, 200_000), false)
   assert.equal(contextTeGroot(undefined, 200_000), false)
 })
+
+test('orInstellingen: eigen model per stand; leeg of ongeldig = hoofdmodel; haiku = snel', () => {
+  const e = orInstellingen('a/hoofd', 'a/snel', { opus: 'a/opus[1m]', sonnet: '', fable: 'onzin' }).env
+  assert.equal(e.ANTHROPIC_MODEL, 'a/hoofd')
+  assert.equal(e.ANTHROPIC_DEFAULT_OPUS_MODEL, 'a/opus[1m]')
+  assert.equal(e.ANTHROPIC_DEFAULT_SONNET_MODEL, 'a/hoofd')
+  assert.equal(e.ANTHROPIC_DEFAULT_FABLE_MODEL, 'a/hoofd')
+  assert.equal(e.ANTHROPIC_DEFAULT_HAIKU_MODEL, 'a/snel')
+  assert.equal(e.CLAUDE_CODE_SUBAGENT_MODEL, 'a/snel')
+  assert.equal(e.ENABLE_TOOL_SEARCH, 'true')
+  assert.deepEqual(orInstellingen('a/h', 'a/s'), orInstellingen('a/h', 'a/s', {}))
+})
