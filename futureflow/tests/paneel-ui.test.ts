@@ -141,7 +141,9 @@ for (const kolommen of [44, 100]) {
     expect(boom).toContain('"flexWrap":"wrap"')
     expect(boom).not.toContain('"type":"Svg"')
     // De gekozen tab heeft een ▔-regel eronder.
-    expect(await ui.find({ type: 'Text', text: /▔/ })).toBeDefined()
+    // De gekozen tab krijgt een ●; geen ▔-streep meer (die verschoof bij afbreken).
+    expect(await ui.find({ type: 'Text', text: /●/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /▔/ })).toBeUndefined()
     await ui.unmount()
   })
 
@@ -162,17 +164,15 @@ for (const kolommen of [44, 100]) {
   }
 }
 
-test('overzicht: kerncijfers twee naast elkaar op 100 kolommen, onder elkaar op 44', async ($, on) => {
+test('overzicht: vier kerncijfers die de breedte vullen en zelf afbreken', async ($, on) => {
   fake(on)
   await run($, 'futureflow', '')
-  const breed = await $.ui.mount(PANE(100))
-  const kaart = (await breed.findAll({ type: 'Box' })).filter(b => typeof b.props.width === 'number')
-  expect(kaart.length).toBe(4)
-  expect(kaart[0]!.props.width).toBe(48)
-  await breed.unmount()
-  const smal = await $.ui.mount(PANE(44))
-  const kaart2 = (await smal.findAll({ type: 'Box' })).filter(b => typeof b.props.width === 'number')
-  expect(kaart2[0]!.props.width).toBe(42)
-  expect(await smal.find({ type: 'Button', key: 'snel-slots' })).toBeUndefined()
-  await smal.unmount()
+  for (const kolommen of [100, 44]) {
+    const ui = await $.ui.mount(PANE(kolommen))
+    // De gemeten kolommen zijn die van de hele terminal: de kaarten groeien mee en breken zelf af.
+    const kaart = (await ui.findAll({ type: 'Box' })).filter(b => b.props.flexGrow === 1 && typeof b.props.minWidth === 'number')
+    expect(kaart.length).toBe(4)
+    expect(await ui.find({ type: 'Button', key: 'snel-slots' })).toBeUndefined()
+    await ui.unmount()
+  }
 })

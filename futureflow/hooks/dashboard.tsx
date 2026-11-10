@@ -17,7 +17,6 @@ import { balkCommando, stappenRijen, voortgangLijst } from './voortgang'
 
 import { kpis } from '../lib/overzicht.mjs'
 import type { Kpi } from '../lib/overzicht.mjs'
-import { kolommenVoor } from '../lib/paneel-ui.mjs'
 import { palet } from '../lib/thema.mjs'
 
 export { openDashboard }
@@ -84,13 +83,12 @@ async function overzichtTab($: Engine, e: any, p: ReturnType<typeof palet>, ui: 
   const lijst = kpis({ teller, perNiveau, niveau, snapshot, context })
   const voortgang = await voortgangLijst($)
   const kleur = (k: Kpi) => (k.toon === 'oranje' ? ui.k.warn : k.toon === 'mut' ? ui.k.mut : ui.k.accent)
-  const { breed } = kolommenVoor(ui.breedte)
   return (
     <Box flexDirection="column" gap={1}>
       {Svg ? (
         <Svg source={kaartenSvg(lijst, p)} alt={lijst.map(k => `${k.titel}: ${k.waarde} ${k.sub}`).join('. ')} />
       ) : (
-        raster(ui, lijst.map(k => stat(ui, k.titel, k.waarde, k.sub, { kleur: kleur(k), breed, ...(k.fractie === undefined ? {} : { fractie: k.fractie }) })))
+        raster(ui, lijst.map(k => stat(ui, k.titel, k.waarde, k.sub, { kleur: kleur(k), ...(k.fractie === undefined ? {} : { fractie: k.fractie }) })))
       )}
       {voortgang === null
         ? leeg(ui, 'Nog geen takenlijst — de voortgang verschijnt zodra Claude een plan maakt.')

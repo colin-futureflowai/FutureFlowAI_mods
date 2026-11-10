@@ -1,6 +1,6 @@
 import type { EngineInterface as Engine, RenderElement } from 'claude-code'
 
-import { binnenBreedte, kaartBreedte, kolommenVoor, LANG, onderstreping, SCHEIDING, tabNamen, tabRijen } from '../lib/paneel-ui.mjs'
+import { binnenBreedte, kaartBreedte, LANG, SCHEIDING, tabNamen } from '../lib/paneel-ui.mjs'
 
 // Bouwstenen van het dashboard /futureflow, gedeeld door alle tabs: tabs, kaart, meter,
 // knoppen, vinkje en lege staat. Alleen tekenen; geen `$`, geen state. Breedtes komen uit
@@ -53,21 +53,17 @@ export function tabs(p: Paneel, sleutels: readonly string[], gekozen: number, ki
       </Box>
     )
   }
-  const rijen = tabRijen(namen, p.breedte)
+  // De gemeten kolommen zijn die van de hele terminal, niet van het paneel: niet zelf rekenen,
+  // de rij breekt zelf af. De gekozen tab: ● en vet in accent (een streep eronder raakt verschoven).
   return (
-    <Box flexDirection="column">
-      {rijen.map((rij, r) => {
-        const streep = onderstreping(namen, rij, gekozen)
-        return (
-          <Box key={`tabrij-${r}`} flexDirection="column">
-            <Box flexDirection="row" flexWrap="wrap">
-              {rij.map((i, n) => (n === 0 ? [knop(i)] : [<Text color={p.k.mut}>{SCHEIDING}</Text>, knop(i)]))}
-            </Box>
-            {streep ? <Text color={p.k.accent}>{streep}</Text> : ''}
-          </Box>
-        )
-      })}
-      <Text color={p.k.mut}>{'─'.repeat(p.breedte)}</Text>
+    <Box flexDirection="row" flexWrap="wrap" marginBottom={1}>
+      {sleutels.map((_, i) => (
+        <Box key={`tabvak-${sleutels[i]}`} flexDirection="row">
+          {i === 0 ? '' : <Text color={p.k.mut}>{SCHEIDING}</Text>}
+          {i === gekozen ? <Text color={p.k.accent}>● </Text> : ''}
+          {knop(i)}
+        </Box>
+      ))}
     </Box>
   )
 }
@@ -167,9 +163,10 @@ export function stat(
   o: { kleur?: string; fractie?: number; breed?: number } = {},
 ): RenderElement {
   const { Box, Text } = p.el
-  const breed = o.breed ?? kolommenVoor(p.breedte).breed
+  // Vult de beschikbare breedte: twee naast elkaar als het past, anders één over de hele breedte.
+  const breed = o.breed ?? 24
   return (
-    <Box key={`stat-${titel}`} flexDirection="column" borderStyle="round" borderColor={p.k.mut} paddingX={1} width={breed}>
+    <Box key={`stat-${titel}`} flexDirection="column" borderStyle="round" borderColor={p.k.mut} paddingX={1} flexGrow={1} minWidth={breed}>
       <Text color={p.k.mut} size="caption" wrap="truncate-end">{titel}</Text>
       <Text color={o.kleur ?? p.k.fg} bold size="title" weight="bold" tabular>{waarde}</Text>
       <Text color={p.k.mut} size="footnote" wrap="truncate-end">{onder}</Text>
