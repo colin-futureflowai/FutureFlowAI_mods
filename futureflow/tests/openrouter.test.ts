@@ -12,7 +12,7 @@ const MODELLEN = [
 ]
 
 type Modus = 'abonnement' | 'api' | 'openrouter'
-type Opties = { modus?: Modus; orKey?: boolean; store?: Record<string, unknown>; rateLimits?: unknown[]; test?: unknown }
+type Opties = { veel?: boolean; modus?: Modus; orKey?: boolean; store?: Record<string, unknown>; rateLimits?: unknown[]; test?: unknown }
 
 // Nep-omgeving met een nep-cli/api.mjs; alle mocks vóór de eerste $-aanroep.
 function fake(on: any, o: Opties = {}) {
@@ -74,7 +74,7 @@ function fake(on: any, o: Opties = {}) {
       cli.orKey = false
       return ok({ gewist })
     }
-    if (args[0] === 'openrouter' && args[1] === 'modellen') return ok({ modellen: MODELLEN, opgehaald: NU, uitCache: args[2] !== '--ververs' })
+    if (args[0] === 'openrouter' && args[1] === 'modellen') return ok({ modellen: o.veel ? [...MODELLEN, ...Array.from({ length: 42 }, (_, i) => ({ id: `x/m-${i}`, naam: `M ${i}`, context: 128000, in: 1, uit: 2 }))] : MODELLEN, opgehaald: NU, uitCache: args[2] !== '--ververs' })
     if (args[0] === 'openrouter' && args[1] === 'test') return ok(o.test ?? { ok: true, status: 200 })
     if (args[0] === 'modus') {
       if (args[1] === 'openrouter' && !cli.orKey) return fout(4, 'geen OpenRouter-key in de sleutelhanger; bewaar eerst een key')
@@ -265,4 +265,17 @@ test('kosten tellen apart als deze sessie op OpenRouter draait', async ($, on) =
   const [bedrag] = Object.values(kosten)
   expect(Math.abs(bedrag! - (2000 * 1.25 + 2000 * 10) / 1e6)).toBeLessThan(1e-9)
   expect(f.store.get('api.kosten')).toBeUndefined()
+})
+
+test('lange lijst: bladeren met Volgende (n) en Vorige (p) tekent op de terminal', async ($, on) => {
+  const f = fake(on, { veel: true })
+  await run($, 'futureflow', 'openrouter')
+  const ui = await $.ui.mount(PANE('terminal'))
+  await f.clock.settle()
+  expect(await ui.find({ type: 'Text', text: /Pagina 1 van 3/ })).toBeDefined()
+  expect(await ui.find({ type: 'Button', key: 'or-volgende', hotkey: 'n' } as any)).toBeDefined()
+  await ui.press({ key: 'or-volgende' } as any)
+  expect(await ui.find({ type: 'Text', text: /Pagina 2 van 3/ })).toBeDefined()
+  expect(await ui.find({ type: 'Button', key: 'or-vorige', hotkey: 'p' } as any)).toBeDefined()
+  await ui.unmount()
 })

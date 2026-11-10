@@ -296,8 +296,8 @@ export async function openrouterTab($: Engine, e: any, k: Kleuren) {
           ...andere.map(m => regelVan(ui, $, m, index(m), keuze)),
           paginas > 1 ? uitleg(ui, `Pagina ${pagina + 1} van ${paginas} · ${gevonden.length} modellen`, 'or-meer') : '',
           paginas > 1 ? knoppen(ui, [
-            pagina > 0 ? knop(ui, 'or-vorige', '◂ Vorige', () => blader($, -1, paginas - 1), { hotkey: '[' }) : null,
-            pagina < paginas - 1 ? knop(ui, 'or-volgende', 'Volgende ▸', () => blader($, 1, paginas - 1), { hotkey: ']' }) : null,
+            pagina > 0 ? knop(ui, 'or-vorige', '◂ Vorige', () => blader($, -1, paginas - 1), { hotkey: 'p' }) : null,
+            pagina < paginas - 1 ? knop(ui, 'or-volgende', 'Volgende ▸', () => blader($, 1, paginas - 1), { hotkey: 'n' }) : null,
           ]) : '',
           uitleg(ui, 'Hoofd = het model waarmee Claude Code met je praat en het werk doet. Snel = het goedkopere model voor bijtaken: samenvattingen, titels, achtergrondwerk en subagents. Alleen modellen die tools kunnen gebruiken.', 'or-rollen'),
         ], {
