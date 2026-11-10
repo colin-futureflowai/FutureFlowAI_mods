@@ -223,3 +223,14 @@ Besluiten van Colin bij plan 3 (`docs/superpowers/plans/2026-11-09-futureflow-3-
 - Voortgangsbalk tekent in dezelfde balk boven de prompt als de verbruiksmeters van de skin. `mcp__ccd_turn__wrap_up` sluit de lijst af.
 - Gemeten: met `apiKeyHelper` in de settings gebruikt een gewone terminal-sessie de helper in plaats van het abonnement (nep-key → "Invalid API key · Fix external API key"); een vanuit de desktop-app geërfde omgeving negeert hem.
 - Gemeten bijwerking: in API-modus laadt Claude Code de claude.ai-connectors niet ("claude.ai connectors are disabled because ANTHROPIC_API_KEY or another auth source is set"). De tab API en de wisselmelding zeggen dat.
+
+## Uitbreiding 10-11-2026
+
+Accounts gebouwd volgens plan 6 (`docs/superpowers/plans/2026-11-10-futureflow-6-accounts.md`), met de besluiten van Colin daaronder.
+
+- **Spike 6 niet uitgevoerd** (geen tweede account bij het bouwen; besluit Colin). De aannames onderaan Task 1 gelden: nieuwe terminal-sessies gebruiken het nieuwe account, een lopende terminal-sessie pakt het binnen ~30 s op, de desktop-app blijft ongewijzigd. Nog live te meten met Colin: `/status` na een wissel in een lopende en een nieuwe sessie, of `sessionId` in `~/.claude/sessions/<pid>.json` gelijk is aan `$.session.id`, en hoe snel `status` daar op `idle` staat na `turn.complete`.
+- Ketting: met accounts-auto aan en minstens twee accounts in de rotatie beslist alleen de tab Accounts (ook over de API-wissel); `apiMeet` doet dan niets. Een desktop-sessie neemt dan geen wisselbesluit meer, ook niet naar de API. Met accounts-auto uit of minder dan twee accounts in de rotatie blijft het API-gedrag van 9-11-2026 precies gelijk.
+- Bezig telt ruimer dan het plan: elk levend record in `~/.claude/sessions/` dat geen desktop-sessie is en niet `idle` (dus ook `waiting`, onbekende status, VS Code), want twijfel = niet wisselen.
+- Poll-getallen (besluit Colin, zuiniger): vloer 360 s, actief tot 600 s, kandidaat 600-900 s, uitgeput 1200 s, na een 429 ≥ 600 s ×1,5 tot 1800 s. Staat het actieve account binnen 15 punten van zijn marge, dan haalt de CLI kandidaten met een meting ≥ 10 min bij, zodat de keuze op verse metingen kan.
+- Stand vragen: elke terminal-sessie met futureflow kan de vraag tonen; Niet nu geldt voor alle sessies 30 min (store). Na Wissel probeert die sessie het opnieuw bij exit 7 tot het lukt of 10 min verstreken zijn.
+- Desktop-app: de tab toont het verbruik zonder knoppen, met "De desktop-app regelt zijn eigen login; wisselen werkt alleen voor terminal-sessies." Desktop-sessies schrijven geen sessiebestand.
