@@ -194,13 +194,16 @@ export function pollPlan(p) {
 
 const HARTSLAG = 10 * 60_000
 
-// Hoeveel andere terminal-sessies nu midden in een beurt zitten. Eigen bestand `bezig` met een hartslag
-// jonger dan 10 min telt; een record van Claude Code telt als de pid leeft, het geen desktop-sessie is
-// en de status niet `idle` is (busy, waiting en onbekend tellen). Onleesbaar telt. De eigen sessie nooit.
+// Hoeveel terminal-sessies nu midden in een beurt zitten. Eigen bestand `bezig` met een hartslag
+// jonger dan 10 min telt, ook dat van de eigen sessie (de mod zet het pas op `tussen` als de beurt
+// klaar is; zo wisselt een sessie nooit midden in haar eigen beurt). Een record van Claude Code telt als
+// de pid leeft, het geen desktop-sessie is en de status niet `idle` is (busy, waiting en onbekend
+// tellen). Onleesbaar telt. Alleen het record van Claude Code van de eigen sessie telt nooit: hoe
+// lang dat na een beurt nog `busy` blijft, is niet bekend.
 export function telBezig(p) {
   const wie = new Set()
   for (const e of Array.isArray(p.eigen) ? p.eigen : []) {
-    if (!e || e.sessie === p.ikzelf) continue
+    if (!e) continue
     if (e.status === 'bezig' && getal(e.hartslag) && p.nu - e.hartslag < HARTSLAG) wie.add(e.sessie)
   }
   for (const c of Array.isArray(p.claude) ? p.claude : []) {

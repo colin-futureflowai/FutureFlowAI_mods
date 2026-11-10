@@ -14,7 +14,7 @@ type Opties = {
   actief?: number | null
   accounts?: Acc[]
   instellingen?: Record<string, unknown>
-  /** Exitcodes voor opeenvolgende `switch`-aanroepen; leeg = 0. */
+  /** Exitcodes voor opeenvolgende `switch`-aanroepen; leeg = 0; 77 = exit 7 zonder `wie`. */
   switchCodes?: number[]
   apiModus?: 'abonnement' | 'api'
   store?: Record<string, unknown>
@@ -49,7 +49,7 @@ function fake(on: any, o: Opties = {}) {
     switchCodes: [...(o.switchCodes ?? [])],
     apiModus: o.apiModus ?? 'abonnement',
   }
-  const aanroepen: Array<{ args: string[]; argv: string[]; env?: Record<string, string> }> = []
+  const aanroepen: Array<{ args: string[]; argv: string[]; env?: Record<string, string>; timeoutMs?: number }> = []
   const toasts: string[] = []
   const writes: Array<{ path: string; text: string }> = []
   const store = new Map<string, unknown>(Object.entries(o.store ?? {}))
@@ -117,7 +117,7 @@ function fake(on: any, o: Opties = {}) {
   on('ui.panes', () => ({ value: [] }))
   on('ui.open', () => ({ value: { isPlaced: true } }))
   on('tool.call', ($: any, e: any) => ({ result: `uitgevoerd: ${e.tool}` }))
-  on('process.run', ($: any, e: { argv: string[]; init?: { env?: Record<string, string> } }) => {
+  on('process.run', ($: any, e: { argv: string[]; init?: { env?: Record<string, string>; timeoutMs?: number } }) => {
     const ok = (stdout: unknown) => ({ value: { exitCode: 0, stdout: JSON.stringify(stdout) + '\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
     const fout = (code: number, tekst: string, extra: Record<string, unknown> = {}) => ({
       value: { exitCode: code, stdout: JSON.stringify({ fout: tekst, code, ...extra }) + '\n', stderr: `[accounts] ${tekst}\n`, isStdoutTruncated: false, isStderrTruncated: false },
@@ -138,7 +138,7 @@ function fake(on: any, o: Opties = {}) {
     if (i < 0 && e.argv.includes('overflow')) return ok({ finished: [] })
     if (i < 0) return ok({ memory: { freePercent: 40, totalGB: 16 }, config: { limits: {}, floorPercent: 25, criticalPercent: 10 }, slots: [], refusals: [] })
     const args = e.argv.slice(i + 1)
-    aanroepen.push({ args, argv: e.argv, env: e.init?.env })
+    aanroepen.push({ args, argv: e.argv, env: e.init?.env, timeoutMs: e.init?.timeoutMs })
     switch (args[0]) {
       case 'status':
         return ok(status())
@@ -149,6 +149,8 @@ function fake(on: any, o: Opties = {}) {
       case 'switch': {
         const code = cli.switchCodes.shift() ?? 0
         if (code === 7) return fout(7, '1 sessie(s) midden in een beurt; nog niet gewisseld', { wie: ['andere-sessie'], sinds: NU })
+        // 77: exit 7 zonder sessies (lock of login niet te controleren).
+        if (code === 77) return fout(7, 'van wie de huidige login is, is niet te controleren (http-503); niet gewisseld, probeer het zo opnieuw')
         if (code !== 0) return fout(code, 'iets ging mis')
         const naar = Number(args[1])
         const van = cli.actief
@@ -261,6 +263,9 @@ test('klik Wissel hierheen: switch <id> --van <actief> --ikzelf <sessie>, met va
   expect(f.switches()).toEqual([['switch', '2', '--van', '1', '--ikzelf', 'sessie-1']])
   const sw = f.aanroepen.find(a => a.args[0] === 'switch')!
   expect(sw.argv.slice(0, 2)).toEqual(['/usr/bin/env', 'node'])
+  // Een switch krijgt 120 s (de CLI stopt zelf na 30 s vóór het schrijven); de rest 60 s.
+  expect(sw.timeoutMs).toBe(120_000)
+  expect(f.aanroepen.find(a => a.args[0] === 'status')!.timeoutMs).toBe(60_000)
   expect(f.toasts.length).toBe(1)
   expect(f.toasts[0]).toContain('Gewisseld naar account 2 (a2…@futureflowai.com, Max 5x; met de hand)')
   expect(f.toasts[0]).toContain('desktop-app houdt zijn eigen login')
@@ -499,4 +504,38 @@ test('accounts-auto uit: geen CLI na een meting, en de API-wissel werkt zoals vo
   await meet($, f.clock)
   expect(f.aanroepen.filter(a => a.args[0] !== 'api')).toEqual([])
   expect(f.modus()).toEqual(['api'])
+})
+
+test('midden in een eigen beurt: Wissel boven de prompt en /accounts wissel starten geen switch', async ($, on) => {
+  const f = fake(on, { accounts: [acc(1, 92), acc(2, 30)], instellingen: { ...AUTO, stand: 'vragen' } })
+  await $.session.start(START)
+  await meet($, f.clock)
+  expect(f.toasts[0]).toContain('stelt voor te wisselen naar account 2')
+  // De gebruiker begint een nieuwe beurt en klikt dan pas op Wissel.
+  await $.turn.start({ text: 'verder', turnId: 't1' } as any)
+  const band = await $.ui.mount(BAND())
+  await band.press({ key: 'acc-vraag-ja' } as any)
+  await band.unmount()
+  expect(f.switches()).toEqual([])
+  expect(f.toasts.at(-1)).toContain('midden in een beurt')
+  expect((await run($, 'accounts', 'wissel 2')).text).toContain('Niet gewisseld naar account 2')
+  expect(f.switches()).toEqual([])
+  // Na de beurt wel.
+  await $.turn.complete({ answer: 'x', durationMs: 1, isAborted: false, reason: 'answer', turnId: 't1' } as any)
+  await f.clock.settle()
+  const band2 = await $.ui.mount(BAND())
+  await band2.press({ key: 'acc-vraag-ja' } as any)
+  await band2.unmount()
+  expect(f.switches()).toEqual([['switch', '2', '--van', '1', '--ikzelf', 'sessie-1', '--auto']])
+})
+
+test('exit 7 zonder sessies (login niet te controleren): geen wachtregel; met de hand een melding', async ($, on) => {
+  const f = fake(on, { switchCodes: [77] })
+  await $.session.start(START)
+  expect((await run($, 'accounts', 'wissel 2')).text).toContain('Niet gewisseld naar account 2')
+  expect(f.switches().length).toBe(1)
+  expect(f.toasts.at(-1)).toContain('Nog niet gewisseld: van wie de huidige login is')
+  const band = await $.ui.mount(BAND())
+  expect(await band.find({ type: 'Text', text: /wacht op/ })).toBeUndefined()
+  await band.unmount()
 })

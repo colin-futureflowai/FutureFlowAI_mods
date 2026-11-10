@@ -3,7 +3,8 @@
 //   NEP_LOG       elke aanroep: `ARGV <json>`, elke stdin-regel: `STDIN <regel>`
 //   NEP_FAAL      JSON [{ op: 'add'|'find'|'delete', svc, keer?: n, modus?: 'exit'|'stil'|'kapot' }]
 //                 keer = alleen de n-de passende aanroep (1-based); zonder keer: elke.
-//                 exit = exitcode 1; stil = exit 0 maar niets bewaard; kapot = afgekapte waarde bewaard.
+//                 exit = exitcode 1; stil = exit 0 maar niets bewaard; kapot = afgekapte waarde bewaard;
+//                 traag = eerst 1 s wachten, dan gewoon bewaren (om een signaal midden in een wissel te sturen).
 // Ondersteunt -i (opdrachten op stdin, regel > 4096 bytes wordt geweigerd zoals de echte afkapt),
 // find-generic-password [-w], add-generic-password -U -a -s -X|-w, delete-generic-password; 44 = niet gevonden.
 import fs from 'node:fs'
@@ -73,6 +74,7 @@ function opdracht(args) {
   if (cmd === 'add-generic-password') {
     const modus = faalt('add', o['-s'])
     if (modus === 'exit') return 1
+    if (modus === 'traag') Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1000)
     const waarde = typeof o['-X'] === 'string' ? Buffer.from(o['-X'], 'hex').toString('utf8') : o['-w']
     if (modus === 'stil') return 0
     const d = lees()

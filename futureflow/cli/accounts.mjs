@@ -21,7 +21,8 @@
 // Uitvoer: altijd één JSON-regel op stdout, ook bij een fout ({ fout, code, … }; de melding staat ook
 // op stderr). Nooit een token, credential of volledig e-mailadres.
 // Exitcodes: 1 gebruik, 2 bestand onleesbaar/kapot (niets geschreven), 3 niet ingelogd of identiteit
-// klopt niet, 4 onbekend account, 5 sleutelhanger-fout, 6 niets te doen, 7 bezig (sessies of lock),
+// klopt niet, 4 onbekend account, 5 sleutelhanger-fout, 6 niets te doen, 7 bezig of nu niet zeker (sessies,
+// een lock, of van wie de huidige login is niet te controleren; niets gewijzigd, later opnieuw),
 // 8 eigen profiel (CLAUDE_CONFIG_DIR), 9 opnieuw inloggen nodig.
 //
 // Omgeving (tests; leeg = standaard): ACCOUNTS_HOME (~/.claude/futureflow/accounts), CLAUDE_JSON
@@ -49,6 +50,10 @@ const PLATFORM = process.env.ACCOUNTS_API || 'https://platform.claude.com'
 const LOCK_WACHT = Number(process.env.ACCOUNTS_TEST_LOCK_WACHT) || 9_000
 const NIET_GEVONDEN = 44
 const UUR = 3_600_000
+// Een wissel die na zoveel ms nog niet aan stap 3 (schrijven) toe is, stopt zonder iets te wijzigen:
+// de mod geeft hem 120 s, en schrijven + eventueel terugdraaien moet daar ruim in passen.
+const BEGIN = Date.now()
+const DEADLINE = 30_000
 
 // Locks van Claude Code (proper-lockfile: mappen). Volgorde altijd: wissel.lock → .oauth_refresh.lock
 // → ~/.claude.lock → ~/.claude.json.lock (claude-swap claude_locks.py).
@@ -140,6 +145,9 @@ function logRegel(regel) {
 // --- sleutelhanger ----------------------------------------------------------------------------
 
 function security(args, invoer) {
+  // Vastgehouden map-locks eerst aanraken: spawnSync blokkeert de timer van mapLock, en een lock
+  // die te lang niet is aangeraakt neemt Claude Code over (~/.claude.json.lock is al na 10 s stale).
+  raakLocksAan()
   return spawnSync(SECURITY, args, { input: invoer, encoding: 'utf8', timeout: 15_000 })
 }
 
@@ -159,11 +167,16 @@ function keychainLees(svc, acct) {
 // macos_keychain.py:43-47).
 const STDIN_GRENS = 4096 - 64
 const citeer = v => `"${v.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
+// Alleen deze services en account-namen gaan in een `security -i`-regel: een newline zou daar een
+// tweede opdracht beginnen (een account-naam kan van de server of uit $USER komen).
+const SERVICES = new Set([LIVE, KOPIE, VORIGE, REDDING])
+const ACCOUNT_NAAM = /^[A-Za-z0-9:._@-]{1,160}$/
 
 // Schrijft via `security -i` (opdracht op stdin, waarde als hex): nooit in argv. Alleen het live item
 // van Claude Code mag via argv als het te groot is voor één stdin-regel (besluit Colin 10-11-2026,
 // zoals Claude Code en claude-swap). Daarna terug lezen en vergelijken.
 function keychainSchrijf(svc, acct, waarde) {
+  if (!SERVICES.has(svc) || !ACCOUNT_NAAM.test(acct)) throw new Fout('ongeldige naam voor de sleutelhanger; niets geschreven', 5)
   const hex = Buffer.from(waarde, 'utf8').toString('hex')
   const regel = `add-generic-password -U -a ${citeer(acct)} -s ${citeer(svc)} -X ${hex}\n`
   let r
@@ -228,6 +241,19 @@ function schrijfKopie(sleutel, cred) {
   return true
 }
 
+// Een login die bij geen (gecontroleerd) bekend account hoort, of een opvolger die niet in zijn kopie
+// kon, in futureflow-accounts-redding (één slot per eigenaar). Overschrijft alleen een oudere redding:
+// staat er een andere geldige login met een even late of latere expiresAt, dan exit 5 en niets
+// geschreven (die kan de enige geldige keten van dat account zijn).
+function bewaarRedding(acct, cred) {
+  const nieuw = JSON.stringify(zonderGedeeld(cred))
+  const oud = keychainLees(REDDING, acct)
+  if (oud === nieuw) return
+  const o = oud === undefined ? undefined : parse(oud)
+  if (geldig(o) && verloopt(o) >= verloopt(cred)) throw new Fout('futureflow-accounts-redding bevat al een nieuwere login; niets overschreven', 5)
+  keychainSchrijf(REDDING, acct, nieuw)
+}
+
 // --- locks ------------------------------------------------------------------------------------
 
 function leeft(pid) {
@@ -283,14 +309,23 @@ async function mapLock(pad, stale) {
     }
     await slaap(250 + Math.random() * 250)
   }
-  const t = setInterval(() => {
-    try { const d = new Date(); fs.utimesSync(pad, d, d) } catch {}
-  }, AANRAKEN)
+  const t = setInterval(() => raak(pad), AANRAKEN)
   t.unref?.()
+  VAST.add(pad)
   return () => {
     clearInterval(t)
+    VAST.delete(pad)
     try { fs.rmdirSync(pad) } catch {}
   }
+}
+
+// Map-locks die dit proces nu vasthoudt; `security()` raakt ze aan vóór elke (blokkerende) aanroep.
+const VAST = new Set()
+function raak(pad) {
+  try { const d = new Date(); fs.utimesSync(pad, d, d) } catch {}
+}
+function raakLocksAan() {
+  for (const pad of VAST) raak(pad)
 }
 
 // Bestands-lock (O_EXCL) voor futureflow zelf: inhoud pid + tijd; stale als de pid dood is of na
@@ -331,11 +366,14 @@ async function bestandLock(pad, stale, wacht = LOCK_WACHT) {
 }
 
 // Locks in vaste volgorde nemen, `fn` draaien, in omgekeerde volgorde loslaten.
-// Namen: 'wissel' (eigen), 'cred' (.oauth_refresh.lock + ~/.claude.lock), 'config' (~/.claude.json.lock).
+// Namen: 'wissel' (eigen), 'refresh:<sleutel>' (eigen, refresh van dat account), 'cred'
+// (.oauth_refresh.lock + ~/.claude.lock), 'config' (~/.claude.json.lock). Volgorde: wissel →
+// refresh → cred → config; `ververs` neemt alleen de refresh-lock, dus geen kringloop.
 async function metLocks(namen, fn) {
   const vrij = []
   try {
     if (namen.includes('wissel')) vrij.push(await bestandLock(path.join(HOME, 'wissel.lock'), 120_000))
+    for (const n of namen) if (n.startsWith('refresh:')) vrij.push(await bestandLock(refreshLock(n.slice('refresh:'.length)), 60_000))
     if (namen.includes('cred')) {
       vrij.push(await mapLock(OAUTH_LOCK, STALE_CRED))
       vrij.push(await mapLock(CLAUDE_LOCK, STALE_CRED))
@@ -407,6 +445,7 @@ function zoek(staat, id) {
 }
 
 const configPad = sleutel => path.join(HOME, 'config', `${bestandsnaam(sleutel)}.json`)
+const refreshLock = sleutel => path.join(HOME, `refresh-${bestandsnaam(sleutel)}.lock`)
 
 // --- ~/.claude.json ---------------------------------------------------------------------------
 
@@ -581,13 +620,17 @@ function status() {
 async function remove(idArg) {
   const actiefSleutel = eigenProfiel() ? undefined : identiteitNu()?.sleutel
   const a = zoek(leesStaat(), idArg)
-  keychainWis(KOPIE, a.sleutel)
-  keychainWis(VORIGE, a.sleutel)
-  fs.rmSync(configPad(a.sleutel), { force: true })
-  await werkBij((staat, gebruik) => {
-    staat.accounts = staat.accounts.filter(x => x.id !== a.id)
-    if (staat.actief === a.id) staat.actief = null
-    delete gebruik[a.id]
+  // Onder de refresh-lock: een refresh die tegelijk loopt, zet de kopie anders na het wissen terug.
+  // De redding blijft staan: dat kan de enige geldige login van dat account zijn.
+  await metLocks([`refresh:${a.sleutel}`], async () => {
+    keychainWis(KOPIE, a.sleutel)
+    keychainWis(VORIGE, a.sleutel)
+    fs.rmSync(configPad(a.sleutel), { force: true })
+    await werkBij((staat, gebruik) => {
+      staat.accounts = staat.accounts.filter(x => x.id !== a.id)
+      if (staat.actief === a.id) staat.actief = null
+      delete gebruik[a.id]
+    })
   })
   const actief = a.sleutel === actiefSleutel
   logRegel({ soort: 'remove', id: a.id, email: a.email })
@@ -815,13 +858,36 @@ const OPNIEUW = 'login verlopen of ingetrokken; log in met /login en kies Toevoe
 // Onder refresh-<account>.lock: kopie opnieuw lezen (een ander proces kan net ververst hebben), POST,
 // en de opvolger **eerst** bewaren (elk refresh-token werkt één keer). Mislukt dat bewaren, dan de
 // opvolger in futureflow-accounts-redding en status `onbekend`.
+// Is deze keten nu (misschien) de live login? Ja als ~/.claude.json dit account noemt, als het live
+// refresh-token gelijk is aan dat van de kopie, of als dat niet vast te stellen is. Dan nooit POSTen:
+// elk refresh-token werkt één keer, en Claude Code ververst de live login zelf.
+function misschienLive(acc, kopie) {
+  try {
+    if (identiteitNu()?.sleutel === acc.sleutel) return 'actief'
+    const live = leesLive()
+    if (live && geldig(live.cred) && vinger(live.cred.claudeAiOauth.refreshToken) === vinger(kopie.claudeAiOauth.refreshToken)) return 'live login'
+    return undefined
+  } catch (err) {
+    return `live login niet te controleren (${err.message})`
+  }
+}
+
 // → { soort: 'ok', cred, ververst } | { soort: 'invalid_grant' | 'tijdelijk' | 'kapot', fout }
 async function ververs(acc, marge) {
-  const vrij = await bestandLock(path.join(HOME, `refresh-${bestandsnaam(acc.sleutel)}.lock`), 60_000)
+  let vrij
+  try {
+    vrij = await bestandLock(refreshLock(acc.sleutel), 60_000)
+  } catch (err) {
+    if (err instanceof Fout && err.code === 7) return { soort: 'tijdelijk', fout: 'refresh bezig' }
+    throw err
+  }
   try {
     const kopie = leesKopie(acc.sleutel)
     if (!geldig(kopie)) return { soort: 'kapot', fout: 'kopie ontbreekt of is kapot; log in met /login en kies Toevoegen' }
     if (verloopt(kopie) - nu() > marge) return { soort: 'ok', cred: kopie, ververst: false }
+    // Onder de lock, vlak voor de POST: een wissel kan deze keten net live hebben gemaakt.
+    const live = misschienLive(acc, kopie)
+    if (live) return { soort: 'tijdelijk', fout: `niet ververst: ${live}; Claude Code ververst die zelf` }
     const r = await tokenPost(kopie.claudeAiOauth.refreshToken)
     if (r.soort === 'invalid_grant') {
       await zetStatus(acc.id, 'opnieuw-inloggen', OPNIEUW)
@@ -849,7 +915,7 @@ async function ververs(acc, marge) {
     if (fout) {
       let gered = false
       try {
-        keychainSchrijf(REDDING, ander ? `uuid:${String(d.account.uuid).slice(0, 80)}` : acc.sleutel, JSON.stringify(zonderGedeeld(nieuw)))
+        bewaarRedding(ander ? `uuid:${String(d.account.uuid).slice(0, 80)}` : acc.sleutel, nieuw)
         gered = true
       } catch {}
       await zetStatus(acc.id, 'onbekend', `nieuwe login niet bewaard${gered ? ' (staat in futureflow-accounts-redding)' : ''}; log in met /login en kies Toevoegen`)
@@ -928,8 +994,8 @@ function schrijfOauthAccount(eerst, oauthAccount) {
   throw new Fout('~/.claude.json veranderde steeds tijdens het schrijven', 2)
 }
 
-// Stap 3-6, onder de credential-locks en de config-lock: alleen lokale I/O.
-function wisselOnderLocks({ doel, config, id1, vinger1, uitgaand }) {
+// Stap 3-6, onder de refresh-lock van het doel, de credential-locks en de config-lock: alleen lokale I/O.
+function wisselOnderLocks({ doel, config, id1, vinger1, uitgaand, reddingNaam }) {
   const S = leesLive()
   if (!S) throw new Fout('niet ingelogd: geen login in de sleutelhanger', 3)
   const C = leesClaudeJson()
@@ -938,12 +1004,13 @@ function wisselOnderLocks({ doel, config, id1, vinger1, uitgaand }) {
   const vS = geldig(S.cred) ? vinger(S.cred.claudeAiOauth.refreshToken) : undefined
   if (nuId?.sleutel !== id1?.sleutel || vS !== vinger1) throw new Fout('login veranderde tijdens het wisselen; probeer het opnieuw', 3)
 
-  // Uitgaande login terug in zijn kopie; hoort hij bij geen (gecontroleerd) bekend account, dan redding.
+  // Uitgaande login terug in zijn kopie; hoort hij aantoonbaar bij geen bekend account (stap 1), dan
+  // redding. Lukt dat niet, dan stopt de wissel hier: het live item is nog niet aangeraakt.
   if (uitgaand && vS) {
     const k = leesKopie(uitgaand.sleutel)
     if (!geldig(k) || verloopt(S.cred) >= verloopt(k)) schrijfKopie(uitgaand.sleutel, S.cred)
   } else if (vS) {
-    keychainSchrijf(REDDING, nuId?.sleutel ?? 'live', JSON.stringify(zonderGedeeld(S.cred)))
+    bewaarRedding(reddingNaam ?? nuId?.sleutel ?? 'live', S.cred)
   }
 
   // Doel = kopie + de gedeelde velden van de live login.
@@ -1017,16 +1084,24 @@ async function wissel(o) {
   const live1 = leesLive()
   if (!live1) throw new Fout('niet ingelogd: geen login in de sleutelhanger', 3)
   const vinger1 = geldig(live1.cred) ? vinger(live1.cred.claudeAiOauth.refreshToken) : undefined
+  // Van wie is de uitgaande login? Noemt ~/.claude.json een bekend account, dan moet dat vaststaan
+  // (kopie, eerder gecontroleerde vingerafdruk of profiel); anders gaat zijn verse token verloren.
+  // Niet vast te stellen → niet wisselen (exit 7, de volgende keer opnieuw). Redding alleen als het
+  // profiel aantoonbaar een ander account noemt, of als de login bij geen bekend account hoort.
   let uitgaand
+  let reddingNaam
   const accUit = staat.accounts.find(a => a.sleutel === id1?.sleutel)
   if (accUit && vinger1) {
     const k = leesKopie(accUit.sleutel)
     if ((geldig(k) && vinger(k.claudeAiOauth.refreshToken) === vinger1) || staat.profielOk[vinger1] === accUit.sleutel) uitgaand = accUit
     else {
       const p = await profiel(live1.cred.claudeAiOauth.accessToken)
-      if (p.uuid && hoortBij(p, accUit.sleutel)) {
+      if (!p.uuid) throw new Fout(`van wie de huidige login is, is niet te controleren (${p.fout}); niet gewisseld, probeer het zo opnieuw`, 7)
+      if (hoortBij(p, accUit.sleutel)) {
         uitgaand = accUit
         await werkBij(s => { s.profielOk[vinger1] = accUit.sleutel })
+      } else {
+        reddingNaam = staat.accounts.find(a => hoortBij(p, a.sleutel))?.sleutel ?? `uuid:${p.uuid.slice(0, 80)}`
       }
     }
   }
@@ -1036,11 +1111,15 @@ async function wissel(o) {
     staat = leesStaat()
     const nuSleutel = identiteitNu()?.sleutel
     const actief = staat.accounts.find(a => a.sleutel === nuSleutel)?.id ?? null
-    if (nuSleutel === doel.sleutel) throw new Fout(`account ${doel.id} is al actief`, 6)
-    if (van !== undefined && actief !== van) throw new Fout(`account ${van} is niet meer actief; niets gedaan`, 6)
+    const nietsTeDoen = async bericht => {
+      await wisWacht(staat)
+      throw new Fout(bericht, 6)
+    }
+    if (nuSleutel === doel.sleutel) await nietsTeDoen(`account ${doel.id} is al actief`)
+    if (van !== undefined && actief !== van) await nietsTeDoen(`account ${van} is niet meer actief; niets gedaan`)
     if (o.auto) {
-      if (!staat.instellingen.auto) throw new Fout('automatisch wisselen staat uit', 6)
-      if (nu() - (staat.laatsteWissel?.tijd ?? 0) < staat.instellingen.wachttijd) throw new Fout('net gewisseld; eerst de wachttijd afwachten', 6)
+      if (!staat.instellingen.auto) await nietsTeDoen('automatisch wisselen staat uit')
+      if (nu() - (staat.laatsteWissel?.tijd ?? 0) < staat.instellingen.wachttijd) await nietsTeDoen('net gewisseld; eerst de wachttijd afwachten')
     }
     const b = bezig(o.ikzelf)
     if (b.bezig > 0) {
@@ -1050,20 +1129,50 @@ async function wissel(o) {
       })
       throw new Fout(`${b.bezig} sessie(s) midden in een beurt; nog niet gewisseld`, 7, { wie: b.wie, sinds: w.sinds })
     }
+    await wisWacht(staat)
 
-    // 3-6. Claude Code's locks.
-    await metLocks(['cred', 'config'], () => wisselOnderLocks({ doel, config, id1, vinger1, uitgaand }))
+    // 3-6. Refresh-lock van het doel (geen refresh tegelijk met het lezen van zijn kopie) en de locks
+    // van Claude Code. Een SIGTERM/SIGINT/SIGHUP (timeout van de mod, sessie dicht) wacht tot het
+    // live item en ~/.claude.json weer hetzelfde account noemen: vóór stap 3 stoppen, daarna afmaken
+    // of terugdraaien. SIGKILL is niet te vangen.
+    const signalen = ['SIGTERM', 'SIGINT', 'SIGHUP']
+    let gestopt
+    const vang = s => { gestopt ??= s }
+    for (const s of signalen) process.on(s, vang)
+    try {
+      await metLocks([`refresh:${doel.sleutel}`, 'cred', 'config'], () => {
+        if (gestopt) throw new Fout(`gestopt (${gestopt}); niets gewijzigd`, 7)
+        if (Date.now() - BEGIN > DEADLINE) throw new Fout('wissel duurde te lang (locks of netwerk); niets gewijzigd, probeer het zo opnieuw', 7)
+        return wisselOnderLocks({ doel, config, id1, vinger1, uitgaand, reddingNaam })
+      })
 
-    // 7. Eigen staat en log.
-    const tijd = nu()
-    await werkBij(s => {
-      s.actief = doel.id
-      s.laatsteWissel = { tijd, van: actief, naar: doel.id, auto: !!o.auto }
-      delete s.wacht
-    })
-    logRegel({ soort: 'switch', van: actief, naar: doel.id, email: doel.email, auto: !!o.auto, ...(uitgaand ? {} : { redding: true }) })
-    return { gewisseld: true, van: actief, naar: doel.id, email: doel.email, plan: doel.plan ?? '?' }
+      // 7. Eigen staat en log. De wissel is gebeurd: een fout hier maakt hem niet ongedaan, dus loggen
+      // en toch gewisseld melden.
+      const tijd = nu()
+      const bij = () => werkBij(s => {
+        s.actief = doel.id
+        s.laatsteWissel = { tijd, van: actief, naar: doel.id, auto: !!o.auto }
+        delete s.wacht
+      })
+      try {
+        await bij().catch(() => bij())
+      } catch (err) {
+        logRegel({ soort: 'switch', fout: `staat niet bijgewerkt (${err.message})` })
+      }
+      logRegel({ soort: 'switch', van: actief, naar: doel.id, email: doel.email, auto: !!o.auto, ...(uitgaand ? {} : { redding: true }), ...(gestopt ? { signaal: gestopt } : {}) })
+      return { gewisseld: true, van: actief, naar: doel.id, email: doel.email, plan: doel.plan ?? '?' }
+    } finally {
+      for (const s of signalen) process.off(s, vang)
+    }
   })
+}
+
+// `wacht` (van een eerdere exit 7) weghalen zodra er niets meer op een sessie wacht.
+async function wisWacht(staat) {
+  if (!staat.wacht) return
+  try {
+    await werkBij(s => { delete s.wacht })
+  } catch {}
 }
 
 // --- verbruik -------------------------------------------------------------------------------
@@ -1121,13 +1230,20 @@ const basisPct = vs => {
   return m
 }
 
-// Eén account meten. Actief: access-token uit het live item (nooit verversen). Niet-actief: kopie,
-// eerst vers gemaakt als hij binnen 5 min verloopt.
-async function meetEen(a, isActief, t) {
+// Eén account meten. Actief: access-token uit het live item (nooit verversen), maar alleen als dat
+// nu nog aantoonbaar van dit account is (een andere sessie kan net gewisseld hebben). Niet-actief:
+// kopie, eerst vers gemaakt als hij binnen 5 min verloopt.
+async function meetEen(a, isActief, t, profielOk) {
   let cred
   if (isActief) {
+    if (identiteitNu()?.sleutel !== a.sleutel) return { fout: 'login wisselde tijdens het meten', overslaan: true }
     const live = leesLive()
     if (!live || !geldig(live.cred)) return { fout: 'geen login in de sleutelhanger', overslaan: true }
+    const vl = vinger(live.cred.claudeAiOauth.refreshToken)
+    if (profielOk[vl] !== a.sleutel) {
+      const k = leesKopie(a.sleutel)
+      if (!geldig(k) || vinger(k.claudeAiOauth.refreshToken) !== vl) return { fout: 'login nog niet gecontroleerd (volgt na sync)', overslaan: true }
+    }
     if (verloopt(live.cred) <= t) return { fout: 'token verlopen, ververst bij het volgende bericht', overslaan: true }
     cred = live.cred
   } else {
@@ -1201,7 +1317,7 @@ async function usage(o) {
       uit.overgeslagen.push(a.id)
       continue
     }
-    const r = await meetEen(a, isActief, t)
+    const r = await meetEen(a, isActief, t, staat.profielOk)
     await werkBij((s, gb) => {
       gb[a.id] = verwerk(gb[a.id] ?? {}, r, isActief, t)
       const acc = s.accounts.find(x => x.id === a.id)

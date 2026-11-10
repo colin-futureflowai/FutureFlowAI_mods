@@ -179,8 +179,11 @@ test('telBezig: dode pid, desktop, eigen sessie, oude hartslag, waiting, onleesb
     ikzelf: 'ik',
     nu: NU,
   })
-  assert.deepEqual(r.wie.sort(), ['c3', 'c5', 'pid 17', 's1'])
-  assert.equal(r.bezig, 4)
+  // Het eigen sessiebestand `bezig` telt (eigen beurt loopt); het eigen record van Claude Code niet.
+  assert.deepEqual(r.wie.sort(), ['c3', 'c5', 'ik', 'pid 17', 's1'])
+  assert.equal(r.bezig, 5)
+  const tussen = telBezig({ eigen: [{ sessie: 'ik', status: 'tussen', hartslag: NU }], claude: [{ pid: 15, sessionId: 'ik', entrypoint: 'cli', status: 'busy', levend: true }], ikzelf: 'ik', nu: NU })
+  assert.deepEqual(tussen, { bezig: 0, wie: [] })
   assert.deepEqual(telBezig({ eigen: [], claude: [], ikzelf: 'x', nu: NU }), { bezig: 0, wie: [] })
 })
 

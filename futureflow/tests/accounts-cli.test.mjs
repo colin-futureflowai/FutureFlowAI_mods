@@ -44,9 +44,11 @@ beforeEach(async () => {
       const auth = (req.headers.authorization ?? '').replace(/^Bearer /, '')
       t.verzoeken.push({ pad, auth, body, ua: req.headers['user-agent'], beta: req.headers['anthropic-beta'] })
       const eigen = t.route[pad]
-      const antwoord = eigen ? eigen({ auth, body, req }) : standaard(pad, auth)
-      res.writeHead(antwoord.status ?? 200, { 'Content-Type': 'application/json', ...(antwoord.headers ?? {}) })
-      res.end(JSON.stringify(antwoord.json ?? {}))
+      // Een route mag een Promise teruggeven (antwoord vertragen).
+      Promise.resolve(eigen ? eigen({ auth, body, req }) : standaard(pad, auth)).then(antwoord => {
+        res.writeHead(antwoord.status ?? 200, { 'Content-Type': 'application/json', ...(antwoord.headers ?? {}) })
+        res.end(JSON.stringify(antwoord.json ?? {}))
+      })
     })
   })
   await new Promise(r => t.server.listen(0, '127.0.0.1', r))
@@ -528,7 +530,7 @@ function claudeRecord(pid, rec) {
   fs.writeFileSync(path.join(t.claudeHome, 'sessions', `${pid}.json`), JSON.stringify({ pid, ...rec }))
 }
 
-test('bezig: levende cli-sessie busy → switch exit 7 met wie; desktop en eigen sessie tellen niet', async () => {
+test('bezig: levende cli-sessie busy → switch exit 7 met wie; desktop en eigen Claude Code-record tellen niet, eigen bestand bezig wel', async () => {
   try {
     await tweeAccounts()
     const pid = slaper()
@@ -550,8 +552,12 @@ test('bezig: levende cli-sessie busy → switch exit 7 met wie; desktop en eigen
     claudeRecord(999_999, { sessionId: 'dood', entrypoint: 'cli', status: 'busy' })
     const pid2 = slaper()
     claudeRecord(pid2, { sessionId: 'rustig', entrypoint: 'cli', status: 'idle' })
-    // Eigen sessiebestanden: ikzelf bezig telt niet, een ander wel.
+    // Eigen sessiebestanden: ook het eigen bestand `bezig` telt (nooit midden in de eigen beurt).
     assert.deepEqual((await cli(['sessie', 'ik', 'bezig'])).json, { sessie: 'ik', status: 'bezig' })
+    r = await cli(['switch', '1', '--ikzelf', 'ik'])
+    assert.equal(r.status, 7)
+    assert.deepEqual(r.json.wie, ['ik'])
+    await cli(['sessie', 'ik', 'tussen'])
     r = await cli(['switch', '1', '--ikzelf', 'ik'])
     assert.equal(r.status, 0, r.stderr)
     assert.equal(leesJson(path.join(t.home, 'accounts.json')).wacht, undefined)
@@ -800,4 +806,141 @@ test('usage: actief dicht bij zijn marge → kandidaat met een meting > 10 min w
   }))
   r = await cli(['usage', '--refresh'], { ACCOUNTS_TEST_NU: String(T0) })
   assert.deepEqual(r.json.opgehaald, [])
+})
+
+// --- Eindreview (0.5.1) -----------------------------------------------------------------------
+
+test('I1: refresh van een "niet-actief" account waarvan de keten live is → geen POST (usage en freshen)', async () => {
+  // ~/.claude.json zegt account 2, maar het live item is de keten van account 1 (half gewisseld).
+  const c1 = await voegToe(1, { expiresAt: Date.now() + 3 * 60_000 })
+  await voegToe(2)
+  kcZet(LIVE, USER, JSON.stringify(c1))
+  usageRoute()
+  t.route['/v1/oauth/token'] = () => ({ json: { access_token: 'x', refresh_token: 'y', expires_in: 28800 } })
+  let r = await cli(['usage', '--refresh', '--id', '1'])
+  assert.equal(r.status, 0, r.stderr)
+  assert.match(r.json.fouten[1], /live login/)
+  r = await cli(['freshen', '1'])
+  assert.equal(r.status, 0, r.stderr)
+  assert.equal(r.json.ververst, false)
+  assert.equal(refreshVerzoeken().length, 0, 'het live refresh-token is niet gebruikt')
+  assert.equal(JSON.parse(kcGet(LIVE, USER)).claudeAiOauth.refreshToken, c1.claudeAiOauth.refreshToken)
+  geenGeheimen()
+})
+
+test('I1: usage ververst het doel terwijl switch het doel leest → live krijgt nooit het opgebruikte refresh-token', async () => {
+  const c1 = await voegToe(1, { expiresAt: Date.now() + 3 * 60_000 })
+  await voegToe(2)
+  usageRoute()
+  const nieuwAt = 'sk-ant-oat01-GEHEIM-RACE-AT'
+  const nieuwRt = 'sk-ant-ort01-GEHEIM-RACE-RT'
+  t.geheimen.push(nieuwAt, nieuwRt)
+  t.tokens[nieuwAt] = 1
+  let sw
+  // usage houdt refresh-1.lock vast tijdens de POST; precies dan loopt een switch naar 1.
+  t.route['/v1/oauth/token'] = async () => {
+    sw = await cli(['switch', '1'], { ACCOUNTS_TEST_LOCK_WACHT: '800' })
+    return { json: { access_token: nieuwAt, refresh_token: nieuwRt, expires_in: 28800 } }
+  }
+  const r = await cli(['usage', '--refresh', '--id', '1'])
+  assert.equal(r.status, 0, r.stderr)
+  assert.equal(refreshVerzoeken().length, 1)
+  assert.equal(JSON.parse(kcGet('futureflow-accounts', sleutel(1))).claudeAiOauth.refreshToken, nieuwRt)
+  const live = JSON.parse(kcGet(LIVE, USER))
+  assert.notEqual(live.claudeAiOauth.refreshToken, c1.claudeAiOauth.refreshToken, 'live item kreeg een al gebruikt refresh-token')
+  assert.equal(sw.status, 7, sw.stderr)
+  assert.deepEqual(claudeJsonData().oauthAccount, oauthAccount(2))
+  // Daarna gewoon wisselen: live = de opvolger.
+  const r2 = await cli(['switch', '1'])
+  assert.equal(r2.status, 0, r2.stderr)
+  assert.equal(JSON.parse(kcGet(LIVE, USER)).claudeAiOauth.refreshToken, nieuwRt)
+  geenGeheimen()
+})
+
+test('I2: SIGTERM terwijl het live item geschreven wordt → wissel afgemaakt; sleutelhanger en ~/.claude.json noemen hetzelfde account', async () => {
+  await tweeAccounts()
+  const p = spawn(process.execPath, [CLI, 'switch', '1'], { env: env({ NEP_FAAL: JSON.stringify([{ op: 'add', svc: LIVE, keer: 1, modus: 'traag' }]) }) })
+  let uit = ''
+  p.stdout.on('data', d => { uit += d })
+  const klaar = new Promise(r => p.on('close', (code, signaal) => r({ code, signaal })))
+  const start = Date.now()
+  while (!secRegels().some(l => l.startsWith('STDIN add-generic-password') && l.includes(`-s "${LIVE}"`))) {
+    assert.ok(Date.now() - start < 10_000, 'live item niet geschreven')
+    await new Promise(r => setTimeout(r, 10))
+  }
+  p.kill('SIGTERM')
+  const r = await klaar
+  // Het nep-security-proces kan nog bezig zijn met schrijven.
+  await new Promise(r => setTimeout(r, 1300))
+  const liveAcc = t.tokens[JSON.parse(kcGet(LIVE, USER)).claudeAiOauth.accessToken]
+  assert.equal(claudeJsonData().oauthAccount.accountUuid, `uuid-${liveAcc}`, 'half gewisseld')
+  assert.equal(r.code, 0, `exit ${r.code} ${r.signaal ?? ''}`)
+  assert.equal(liveAcc, 1)
+  assert.equal(JSON.parse(uit.trim()).gewisseld, true)
+  for (const lock of [path.join(t.claudeHome, '.oauth_refresh.lock'), t.claudeHome + '.lock', t.claudeJson + '.lock']) assert.equal(fs.existsSync(lock), false, lock)
+  geenGeheimen()
+})
+
+test('I4: uitgaande login van een bekend account niet te controleren → exit 7, niets gewijzigd; daarna wel', async () => {
+  const { c2 } = await tweeAccounts()
+  // Claude Code roteerde het token van 2; het profiel is onbereikbaar.
+  const geroteerd = maakCred(2, { expiresAt: Date.now() + 9 * UUR })
+  kcZet(LIVE, USER, JSON.stringify(geroteerd))
+  t.route['/api/oauth/profile'] = () => ({ status: 503 })
+  const kcVoor = fs.readFileSync(t.keychain, 'utf8')
+  const voor = fs.readFileSync(t.claudeJson, 'utf8')
+  let r = await cli(['switch', '1'])
+  assert.equal(r.status, 7, r.stderr)
+  assert.equal(r.json.wie, undefined)
+  assert.equal(fs.readFileSync(t.keychain, 'utf8'), kcVoor)
+  assert.equal(fs.readFileSync(t.claudeJson, 'utf8'), voor)
+  assert.equal(kcGet('futureflow-accounts-redding', sleutel(2)), undefined)
+  assert.equal(JSON.parse(kcGet('futureflow-accounts', sleutel(2))).claudeAiOauth.refreshToken, c2.claudeAiOauth.refreshToken)
+  delete t.route['/api/oauth/profile']
+  r = await cli(['switch', '1'])
+  assert.equal(r.status, 0, r.stderr)
+  assert.equal(JSON.parse(kcGet('futureflow-accounts', sleutel(2))).claudeAiOauth.refreshToken, geroteerd.claudeAiOauth.refreshToken)
+  assert.equal(kcGet('futureflow-accounts-redding', sleutel(2)), undefined)
+  geenGeheimen()
+})
+
+test('I4: redding overschrijft alleen een oudere redding', async () => {
+  await voegToe(1)
+  const vreemd = login(3, { expiresAt: Date.now() + UUR })
+  const nieuwer = maakCred(3, { expiresAt: Date.now() + 9 * UUR })
+  const bewaard = JSON.stringify({ claudeAiOauth: nieuwer.claudeAiOauth })
+  kcZet('futureflow-accounts-redding', sleutel(3), bewaard)
+  let r = await cli(['switch', '1'])
+  assert.equal(r.status, 5, r.stderr)
+  assert.equal(kcGet('futureflow-accounts-redding', sleutel(3)), bewaard)
+  assert.equal(JSON.parse(kcGet(LIVE, USER)).claudeAiOauth.refreshToken, vreemd.claudeAiOauth.refreshToken)
+  assert.deepEqual(claudeJsonData().oauthAccount, oauthAccount(3))
+  // Een oudere redding wordt wel vervangen.
+  const ouder = maakCred(3, { expiresAt: Date.now() - UUR })
+  kcZet('futureflow-accounts-redding', sleutel(3), JSON.stringify({ claudeAiOauth: ouder.claudeAiOauth }))
+  r = await cli(['switch', '1'])
+  assert.equal(r.status, 0, r.stderr)
+  assert.equal(JSON.parse(kcGet('futureflow-accounts-redding', sleutel(3))).claudeAiOauth.refreshToken, vreemd.claudeAiOauth.refreshToken)
+  geenGeheimen()
+})
+
+test('minor: bezette refresh-lock → usage gaat door met een tijdelijke fout; wacht verdwijnt zodra niemand meer bezig is', async () => {
+  await voegToe(1, { expiresAt: Date.now() + 60_000 })
+  await voegToe(2)
+  usageRoute()
+  // refresh-1.lock van een levend proces (deze test).
+  fs.writeFileSync(path.join(t.home, 'refresh-uuid-1_org-1.lock'), JSON.stringify({ pid: process.pid, tijd: Date.now() }))
+  let r = await cli(['usage', '--refresh'])
+  assert.equal(r.status, 0, r.stderr)
+  assert.match(r.json.fouten[1], /refresh bezig/)
+  assert.deepEqual(r.json.opgehaald, [2])
+  fs.rmSync(path.join(t.home, 'refresh-uuid-1_org-1.lock'))
+  // wacht van een eerdere exit 7 blijft niet hangen.
+  await cli(['sessie', 'buur', 'bezig'])
+  assert.equal((await cli(['switch', '1'])).status, 7)
+  assert.ok((await cli(['status'])).json.wacht)
+  await cli(['sessie', 'buur', 'tussen'])
+  // Exit 6 onder wissel.lock (auto staat uit): wacht weg.
+  assert.equal((await cli(['switch', '1', '--auto'])).status, 6)
+  assert.equal((await cli(['status'])).json.wacht, undefined)
 })

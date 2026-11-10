@@ -89,8 +89,10 @@ function cliPath($: Engine): string {
 // Draait cli/accounts.mjs. De desktop-app heeft een kaal PATH en argv[0] wordt daarop gezocht,
 // dus `node` via /usr/bin/env met een PATH waar Homebrew vooraan staat.
 async function cli($: Engine, args: string[]) {
-  // Een wissel kan per lock tot 9 s wachten en een refresh 5 s duren.
-  const init = { timeoutMs: 60_000 }
+  // Een wissel kan per lock tot 9 s wachten en een refresh 5 s duren. Een switch krijgt 120 s: de CLI
+  // stopt zelf vóór het schrijven als hij na 30 s nog niet zover is, en schrijven + terugdraaien moet
+  // daarna nog passen (een afgebroken wissel laat anders een half gewisselde login achter).
+  const init = { timeoutMs: args[0] === 'switch' ? 120_000 : 60_000 }
   if ((await $.env.get('OS')) === 'Windows_NT') return $.process.run(['node', cliPath($), ...args], { ...init, env: CLI_ENV })
   const hostPath = (await $.env.get('PATH')) ?? ''
   const PATH = `/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:${hostPath}`
@@ -342,6 +344,12 @@ async function voerWisselUit($: Engine, vraag: AccountsVraag, o: { auto: boolean
       await wisVraagEnWacht($)
       return await apiWissel($, 'abonnement', vraag.reden, { auto: true })
     }
+    // Nooit midden in een eigen beurt (die kan begonnen zijn terwijl sync en usage liepen); de CLI
+    // telt het eigen sessiebestand `bezig` ook. Na de beurt volgt een nieuw besluit.
+    if (beurtBezig) {
+      if (!o.auto) $.ui.toast('Deze sessie is midden in een beurt; wissel na de beurt.')
+      return false
+    }
     const args = [
       'switch',
       String(vraag.naar),
@@ -361,6 +369,12 @@ async function voerWisselUit($: Engine, vraag: AccountsVraag, o: { auto: boolean
       gezienWissel = Math.max(gezienWissel ?? 0, s.laatsteWissel?.tijd ?? nu)
       if (vraag.soort === 'terug') await apiWissel($, 'abonnement', vraag.reden, { auto: true })
       return true
+    }
+    if (u.code === 7 && !Array.isArray(u.data.wie)) {
+      // Bezig zonder sessies (een lock, of de huidige login niet te controleren): niets gewijzigd;
+      // het volgende besluit probeert het opnieuw.
+      if (!o.auto) $.ui.toast(`Nog niet gewisseld: ${u.fout}.`)
+      return false
     }
     if (u.code === 7) {
       wachtSinds ??= nu
@@ -402,6 +416,10 @@ async function keurGoed($: Engine): Promise<void> {
   try {
     const vraag = await read($, vraagAtom)
     if (vraag === null) return
+    if (beurtBezig) {
+      $.ui.toast('Deze sessie is midden in een beurt; kies Wissel na de beurt.')
+      return
+    }
     goedgekeurd = vraag.naar
     const s = (await read($, statusAtom)) ?? (await ververs($))
     await voerWisselUit($, vraag, { auto: true, maxWacht: s.instellingen.maxWacht })
