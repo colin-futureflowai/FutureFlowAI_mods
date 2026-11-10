@@ -38,6 +38,8 @@ import { STANDAARD_KLEUREN, voortgangRij } from '../voortgang'
 import { apiMeetLos } from '../api'
 // futureflow: de tab Accounts houdt bij of deze sessie bezig is, meldt wissels boven de prompt en beslist na een meting.
 import { accountsBeurtStart, accountsMeetLos, accountsRij } from '../accounts'
+// futureflow: de regel Herstart op OpenRouter boven de prompt.
+import { herstartRij } from '../herstart'
 
 const SETTINGS = 'skins-settings'
 const GALLERY = 'skins-gallery'
@@ -1302,7 +1304,8 @@ export const registerSkins = (on: Parameters<Register>[0]): void => {
       $,
       e,
       await voortgangRij($, e, active === null ? STANDAARD_KLEUREN : kleurenVan(lookOf($.ui.resolve(e), active, e.surface))),
-      await accountsRij($, e, await actieveKleuren($)),
+      // futureflow: plus de regel Herstart op OpenRouter (vraag met knop).
+      bovenRij($, e, await accountsRij($, e, await actieveKleuren($)), await herstartRij($, e, await actieveKleuren($))),
     )
 
     if (active === null || !active.prefs.band || meters.length === 0) {
@@ -1357,7 +1360,7 @@ export const registerSkins = (on: Parameters<Register>[0]): void => {
     }
 
     $.ui.log(`skins: ${next.error?.message ?? next.error?.kind}`, { to: 'debug' })
-    const voortgang = e.props?.hasSurvey ? null : bovenRij($, e, await voortgangRij($, e, STANDAARD_KLEUREN), await accountsRij($, e, await actieveKleuren($).catch(() => ({ ...STANDAARD_KLEUREN, ok: STANDAARD_KLEUREN.accent, warn: '#e0a030', err: '#e05050' }))))
+    const voortgang = e.props?.hasSurvey ? null : bovenRij($, e, await voortgangRij($, e, STANDAARD_KLEUREN), bovenRij($, e, await accountsRij($, e, await actieveKleuren($).catch(() => ({ ...STANDAARD_KLEUREN, ok: STANDAARD_KLEUREN.accent, warn: '#e0a030', err: '#e05050' }))), await herstartRij($, e, await actieveKleuren($).catch(() => ({ ...STANDAARD_KLEUREN, ok: STANDAARD_KLEUREN.accent, warn: '#e0a030', err: '#e05050' })))))
     return voortgang === null ? next(e) : alleenVoortgang($, e, next, voortgang)
   }) as any)
 

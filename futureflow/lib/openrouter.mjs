@@ -57,7 +57,7 @@ export function shimTekst(settingsPad) {
     '# Start Claude Code via OpenRouter, alleen deze sessie. Andere sessies en de desktop-app blijven op je abonnement.',
     `S='${pad}'`,
     'if [ ! -f "$S" ]; then',
-    `  echo "${START}: nog geen OpenRouter-instellingen; kies modellen in /futureflow en klik Zet klaar." >&2`,
+    `  echo "${START}: nog geen OpenRouter-instellingen; kies modellen in /futureflow en klik Gebruik nu." >&2`,
     '  exit 1',
     'fi',
     'exec claude --settings "$S" "$@"',
@@ -210,4 +210,47 @@ export function orKosten(usage, prijs) {
   if (!usage || typeof usage !== 'object' || !prijs) return 0
   const input = telling(usage.input_tokens) + telling(usage.cache_read_input_tokens) + telling(usage.cache_creation_input_tokens)
   return (input * telling(prijs.in) + telling(usage.output_tokens) * telling(prijs.uit)) / 1_000_000
+}
+
+// ---- Herstart op OpenRouter (0.11.0): de huidige sessie verder in een nieuw Terminal-venster ----
+
+const SESSIE = /^[A-Za-z0-9-]{8,64}$/
+
+export const geldigeSessie = s => typeof s === 'string' && SESSIE.test(s)
+
+// Eén argument veilig voor sh: tussen enkele aanhalingstekens.
+export function shQuote(s) {
+  return `'${String(s).replace(/'/g, `'\\''`)}'`
+}
+
+// Het commando voor het nieuwe venster: naar de map en de sessie voortzetten via claude-or. Geen
+// geheimen: alleen map, pad van de shim en sessie-id. undefined bij een ongeldig id of lege map.
+export function herstartCommando({ cwd, sessie, shim }) {
+  if (!geldigeSessie(sessie) || typeof cwd !== 'string' || !cwd.startsWith('/') || typeof shim !== 'string' || !shim) return undefined
+  return `cd ${shQuote(cwd)} && ${shQuote(shim)} --resume ${shQuote(sessie)}`
+}
+
+// Tekst als AppleScript-string: backslash en dubbel aanhalingsteken escapen; geen regeleinden.
+export function asString(s) {
+  return `"${String(s).replace(/[\r\n]/g, ' ').replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
+}
+
+// AppleScript dat een nieuw venster opent en het commando daarin draait. iTerm alleen als dat de
+// terminal van de sessie is (TERM_PROGRAM=iTerm.app); anders Terminal.app.
+export function herstartScript(app, commando) {
+  if (app === 'iterm') {
+    return [
+      'tell application "iTerm"',
+      'activate',
+      'set w to (create window with default profile)',
+      `tell current session of w to write text ${asString(commando)}`,
+      'end tell',
+    ].join('\n')
+  }
+  return ['tell application "Terminal"', 'activate', `do script ${asString(commando)}`, 'end tell'].join('\n')
+}
+
+// Past het gesprek niet in het venster van het model? Onbekend = geen waarschuwing.
+export function contextTeGroot(tokens, context) {
+  return typeof tokens === 'number' && typeof context === 'number' && context > 0 && tokens > context
 }

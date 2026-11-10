@@ -178,7 +178,7 @@ test('zoeken filtert; Hoofd en Snel kiezen bewaart de keuze en de prijzen', asyn
   // 1M context: met [1m], zodat Claude Code met 1M rekent.
   expect(f.store.get('openrouter.keuze')).toEqual({ snel: 'openai/gpt-5-mini', model: 'anthropic/claude-sonnet-4.5[1m]' })
   expect(f.store.get('openrouter.prijzen')).toEqual({
-    'openai/gpt-5-mini': { in: 0.25, uit: 2 }, 'anthropic/claude-sonnet-4.5': { in: 3, uit: 15 }, 'anthropic/claude-sonnet-4.5[1m]': { in: 3, uit: 15 },
+    'openai/gpt-5-mini': { in: 0.25, uit: 2, ctx: 400000 }, 'anthropic/claude-sonnet-4.5': { in: 3, uit: 15, ctx: 1000000 }, 'anthropic/claude-sonnet-4.5[1m]': { in: 3, uit: 15, ctx: 1000000 },
   })
   expect(await ui.find({ type: 'Text', text: /Hoofdmodel: anthropic\/claude-sonnet-4\.5\[1m\]/ })).toBeDefined()
   // Nog niet klaargezet: kiezen zet niets klaar.
@@ -186,7 +186,7 @@ test('zoeken filtert; Hoofd en Snel kiezen bewaart de keuze en de prijzen', asyn
   await ui.unmount()
 })
 
-test('Zet klaar: zonder modellen een uitleg; met modellen claude-or klaar, settings.json en de modus blijven', async ($, on) => {
+test('Gebruik nu: zonder modellen een uitleg; met modellen claude-or klaar, settings.json en de modus blijven', async ($, on) => {
   const f = fake(on, { orKey: true })
   await $.session.start(START)
   await run($, 'futureflow', 'openrouter')
@@ -198,7 +198,7 @@ test('Zet klaar: zonder modellen een uitleg; met modellen claude-or klaar, setti
   f.store.set('openrouter.keuze', { model: 'openai/gpt-5', snel: 'openai/gpt-5-mini' })
   await ui.press({ key: 'or-naar' } as any)
   expect(f.modusAanroepen()).toEqual(['openrouter --model openai/gpt-5 --snel openai/gpt-5-mini'])
-  expect(f.toasts[1]).toBe('Klaar. Start een OpenRouter-sessie met claude-or; andere sessies en de desktop-app blijven op je abonnement.')
+  expect(f.toasts[1]).toBe('Klaar. Klik Herstart op OpenRouter boven de prompt, of start een OpenRouter-sessie met claude-or; andere sessies en de desktop-app blijven op je abonnement.')
   expect((f.store.get('api.toestand') as any)?.modus ?? 'abonnement').toBe('abonnement')
   expect(f.cli.modus).toBe('abonnement')
   expect(await ui.find({ type: 'Text', text: 'claude-or' })).toBeDefined()

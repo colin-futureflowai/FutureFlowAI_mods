@@ -4,6 +4,7 @@ import type { EngineInterface as Engine, RenderElement } from 'claude-code'
 import type { ApiStatus, ApiToestand } from '../types'
 
 import { failOpen, leesAccountsStaat } from './ctx'
+import { vraagHerstart } from './herstart'
 import { kaart, knop, knoppen, paneelVan, uitleg } from './paneel-ui'
 
 import { beslis, dagSleutel, geldigeKey, houdTot, kosten, kostenOverzicht, limietenVan, modusVan, telOp, toestandVan, usd } from '../lib/api.mjs'
@@ -335,9 +336,11 @@ async function zetOrKlaar($: Engine, reden: string, opties: { door?: Door; auto?
   const start = d.opPad === false && typeof d.shim === 'string' ? d.shim.replace(/^\/Users\/[^/]+/, '~') : START
   $.ui.toast(
     opties.auto
-      ? `Je abonnement zit vol (${reden}). Verder op OpenRouter? Start een nieuwe sessie met ${start}; andere sessies en de desktop-app blijven op je abonnement.`
-      : `Klaar. Start een OpenRouter-sessie met ${start}; andere sessies en de desktop-app blijven op je abonnement.`,
+      ? `Je abonnement zit vol (${reden}). Verder op OpenRouter? Klik Herstart op OpenRouter boven de prompt, of start een nieuwe sessie met ${start}; andere sessies en de desktop-app blijven op je abonnement.`
+      : `Klaar. Klik Herstart op OpenRouter boven de prompt, of start een OpenRouter-sessie met ${start}; andere sessies en de desktop-app blijven op je abonnement.`,
   )
+  // Bij elke wissel naar OpenRouter: de vraag met de knop Herstart op OpenRouter boven de prompt.
+  await vraagHerstart($, opties.auto ? `Abonnement vol (${reden}).` : 'Deze sessie op OpenRouter voortzetten.')
   return false
 }
 

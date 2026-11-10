@@ -31,3 +31,9 @@ export function sorteer(lijst: readonly OrModel[] | null | undefined, zoek?: str
 export function prijsTekst(n: number | undefined): string
 export function contextTekst(n: number | undefined): string
 export function orKosten(usage: Usage | null | undefined, prijs: { in?: number; uit?: number } | null | undefined): number
+export function geldigeSessie(s: unknown): boolean
+export function shQuote(s: string): string
+export function herstartCommando(a: { cwd: unknown; sessie: unknown; shim: unknown }): string | undefined
+export function asString(s: string): string
+export function herstartScript(app: 'terminal' | 'iterm', commando: string): string
+export function contextTeGroot(tokens: unknown, context: unknown): boolean

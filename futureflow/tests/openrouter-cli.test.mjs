@@ -184,7 +184,7 @@ test('shim start claude met --settings en het eigen bestand; zonder bestand een 
   fs.rmSync(path.join(ordir, 'settings.json'))
   const r2 = spawnSync(shim, [], { env, encoding: 'utf8' })
   assert.equal(r2.status, 1)
-  assert.match(r2.stderr, /Zet klaar/)
+  assert.match(r2.stderr, /Gebruik nu/)
 })
 
 test('een claude-or die niet van futureflow is: exit 3 en blijft staan', async () => {

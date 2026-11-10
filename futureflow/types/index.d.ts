@@ -41,6 +41,9 @@ export type SlotsSnapshot = {
   error?: string
 }
 
+/** Herstart op OpenRouter (0.11.0): vraag met knop, commando om te kopiëren (desktop), of al geopend. */
+export type OrHerstart = { stand: 'vraag' | 'kopieer' | 'geopend'; reden: string; tot: number; commando?: string }
+
 export type DashboardTab = 'overzicht' | 'wisselen' | 'zuinig' | 'instellingen'
 
 /** `cli/connectors.mjs list` voor de projectsleutel (git-root van de sessiemap, anders die map zelf). */
@@ -225,6 +228,7 @@ declare module 'claude-code' {
       'skins.lastReply': string
       'slots.snapshot': SlotsSnapshot | null
       'dashboard.tab': DashboardTab | null
+      'openrouter.herstart': OrHerstart | null
       /** Per tab of Meer ▸ open staat; null = alles ingeklapt. */
       'dashboard.meer': Record<string, boolean> | null
       'minify.niveau': MinifyNiveau | null

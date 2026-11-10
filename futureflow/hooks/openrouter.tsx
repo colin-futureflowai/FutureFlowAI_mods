@@ -5,6 +5,7 @@ import type { ApiStatus, OrModel, OrModellen } from '../types'
 
 import { cli, foutVan, handmatig, laatsteJson, leesStatus, orKeuze, verversApi, wissel } from './api'
 import { failOpen } from './ctx'
+import { herstartOpOr } from './herstart'
 import { kaart, knop, knoppen, leeg, paneelVan, uitleg } from './paneel-ui'
 
 import { kostenOverzicht, usd } from '../lib/api.mjs'
@@ -118,7 +119,7 @@ async function kies($: Engine, rol: 'model' | 'snel', m: OrModel): Promise<void>
     const oud = await orKeuze($)
     await $.store.set('openrouter.keuze', { ...oud, [rol]: id })
     const prijzen = ((await $.store.get('openrouter.prijzen')) ?? {}) as Record<string, { in?: number; uit?: number }>
-    const prijs = { ...(m.in !== undefined ? { in: m.in } : {}), ...(m.uit !== undefined ? { uit: m.uit } : {}) }
+    const prijs = { ...(m.in !== undefined ? { in: m.in } : {}), ...(m.uit !== undefined ? { uit: m.uit } : {}), ...(m.context !== undefined ? { ctx: m.context } : {}) }
     await $.store.set('openrouter.prijzen', { ...prijzen, [m.id]: prijs, [id]: prijs })
     const status = (await read($, statusAtom)) ?? (await leesStatus($))
     const nu = await orKeuze($)
@@ -230,7 +231,7 @@ export async function orBron($: Engine, e: any, k: Kleuren, meer = true): Promis
           {keuze.snel ? <Text>{keuze.snel}</Text> : <Text color={k.mut}>nog niet gekozen</Text>}
         </Text>
         {anders ? (
-          <Text color={k.warn} wrap="wrap">{START} start nog met {status.orModel}; klik Zet klaar om je keuze te gebruiken.</Text>
+          <Text color={k.warn} wrap="wrap">{START} start nog met {status.orModel}; klik Gebruik nu om je keuze te gebruiken.</Text>
         ) : ''}
         {klaar && !status.orOpPad ? (
           <Text color={k.warn} wrap="wrap">~/.local/bin staat niet op je PATH: start met ~/.local/bin/{START}.</Text>
@@ -244,9 +245,10 @@ export async function orBron($: Engine, e: any, k: Kleuren, meer = true): Promis
           <Input key="or-key" label="Key " placeholder="sk-or-…" value="" submitLabel="bewaar" onSubmit={(waarde: string) => bewaarKey($, waarde)} />
         ) : ''}
         {!status.orHeeftKey || meer ? uitleg(ui, INVOER_UITLEG, 'or-invoer-uitleg') : ''}
-        {klaar && !meer && !anders ? '' : (
+        {(
           <Box flexDirection="row" flexWrap="wrap" columnGap={1} paddingLeft={2}>
-            {klaar && !anders ? '' : knop(ui, 'or-naar', 'Zet klaar', () => handmatig($, 'openrouter'))}
+            {klaar && !anders ? '' : knop(ui, 'or-naar', 'Gebruik nu', () => handmatig($, 'openrouter'))}
+            {klaar && !anders ? knop(ui, 'or-herstart', 'Herstart op OpenRouter', () => herstartOpOr($)) : ''}
             {meer && status.orHeeftKey ? knop(ui, 'or-test', 'Test verbinding', () => testVerbinding($)) : ''}
             {meer && status.orHeeftKey ? knop(ui, 'or-wis', 'Key wissen', () => wisKey($)) : ''}
           </Box>

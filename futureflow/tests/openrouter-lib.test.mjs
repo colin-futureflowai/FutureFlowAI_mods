@@ -6,7 +6,7 @@ import { beslis, eersteStap, HELPER, modusVan, OR_HELPER, toestandVan, WACHTTIJD
 import { ketting } from '../lib/accounts.mjs'
 import {
   contextTekst, eigenBasis, geldigeOrKey, geldigModel, haalWeg, modelIdVoor, modellenVan, orInstellingen, orKosten, pasToe, perMtok, prijsTekst,
-  SHIM_MERK, shimTekst, sorteer, teKlein,
+  SHIM_MERK, shimTekst, sorteer, teKlein, herstartCommando, herstartScript, asString, contextTeGroot, geldigeSessie,
 } from '../lib/openrouter.mjs'
 
 const NU = Date.parse('2026-11-10T12:00:00Z')
@@ -214,4 +214,20 @@ test('ketting: tabel met OpenRouter als laatste stap en terug naar een abonnemen
 test('modellenVan: uitvoer van de CLI (al per Mtok) blijft gelijk', () => {
   const lijst = [{ id: 'openai/gpt-5', naam: 'GPT-5', context: 400000, in: 1.25, uit: 10 }, { id: 'x/y', naam: 'Y', in: -1 }]
   assert.deepEqual(modellenVan(lijst), [lijst[0], { id: 'x/y', naam: 'Y' }])
+})
+
+test('herstart: commando quoot map, shim en sessie; ongeldig id of relatieve map → undefined', () => {
+  const id = 'f2b8903e-a21c-4741-b219-c03db7d5e4cb'
+  assert.equal(herstartCommando({ cwd: "/a/b'c d", sessie: id, shim: '/h/.local/bin/claude-or' }), `cd '/a/b'\\''c d' && '/h/.local/bin/claude-or' --resume '${id}'`)
+  assert.equal(herstartCommando({ cwd: '/a', sessie: 'x; rm -rf /', shim: '/s' }), undefined)
+  assert.equal(herstartCommando({ cwd: 'rel', sessie: id, shim: '/s' }), undefined)
+  assert.equal(geldigeSessie('abc'), false)
+  assert.equal(asString('a"b\\c\nd'), '"a\\"b\\\\c d"')
+  const t = herstartScript('terminal', `cd '/x' && 'y' --resume '${id}'`)
+  assert.match(t, /tell application "Terminal"/)
+  assert.match(t, /do script "cd '\/x' && 'y' --resume/)
+  assert.match(herstartScript('iterm', 'ls'), /tell application "iTerm"[\s\S]*write text "ls"/)
+  assert.equal(contextTeGroot(300_000, 200_000), true)
+  assert.equal(contextTeGroot(100_000, 200_000), false)
+  assert.equal(contextTeGroot(undefined, 200_000), false)
 })
