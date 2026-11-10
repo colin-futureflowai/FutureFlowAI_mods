@@ -27,7 +27,7 @@ Settings live in the plugin store under `skins.prefs`. What changed against upst
 
 ## Dashboard
 
-`/futureflow` opens the dashboard with seven tabs (hotkeys 1-7): Overview, Slots, Minify, Stijl (style), Connectors, API and Accounts. `/futureflow <tab>` opens a tab directly.
+`/futureflow` opens the dashboard with eight tabs (hotkeys 1-8): Overview, Slots, Minify, Stijl (style), Connectors, API, Accounts and OpenRouter. `/futureflow <tab>` opens a tab directly.
 
 ## Progress
 
@@ -66,6 +66,19 @@ The Accounts tab (`/accounts`, or hotkey 7 in `/futureflow`) switches terminal s
 - **Terminal only, standard profile only.** Sessions with `CLAUDE_CONFIG_DIR` or `CLAUDE_SECURESTORAGE_CONFIG_DIR` can only look.
 
 The keychain, `~/.claude.json`, Claude Code's locks and the network are handled by `cli/accounts.mjs` (Node built-ins only); run it with `status --json` to see what the tab sees.
+
+## OpenRouter
+
+The OpenRouter tab (hotkey 8 in `/futureflow`, or `/futureflow openrouter`) runs Claude Code itself on another model through [OpenRouter](https://openrouter.ai), for new terminal sessions only. The desktop app keeps its own login.
+
+- **Key** in the macOS keychain (service `futureflow-openrouter`, account `futureflow`), passed to `security -i` over stdin; it must look like `sk-or-…`. Only the last 4 characters are ever shown.
+- **Models.** The tab lists OpenRouter's models that support tools (`GET /api/v1/models?supported_parameters=tools`, public, cached for 6 hours in `~/.claude/futureflow/openrouter/modellen.json`; *Lijst verversen* fetches again). Search by id or name; Claude models come first under "Claude via OpenRouter"; 15 are shown with context size and price in/out per million tokens. Pick a main model (*Hoofd*: opus, sonnet and fable) and a fast model (*Snel*: haiku, background tasks and subagents).
+- **Switching** writes to `~/.claude/settings.json`, atomically and only these keys: `env.ANTHROPIC_BASE_URL=https://openrouter.ai/api`, `env.ANTHROPIC_API_KEY=""`, `apiKeyHelper` = `/usr/bin/security find-generic-password -s futureflow-openrouter -a futureflow -w`, `env.ANTHROPIC_DEFAULT_OPUS_MODEL` / `SONNET` / `FABLE` (main model), `env.ANTHROPIC_DEFAULT_HAIKU_MODEL` and `env.CLAUDE_CODE_SUBAGENT_MODEL` (fast model), and `env.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1`. What futureflow added is recorded in `~/.claude/futureflow/openrouter/marker.json`; switching back to the subscription or the API removes exactly those keys, and only while they still hold futureflow's value. A key that already had the same value stays yours. A different value on any of these keys, a foreign `apiKeyHelper` or a foreign `ANTHROPIC_BASE_URL` makes futureflow refuse with an explanation.
+- **Test verbinding** sends one tiny request (`POST /api/v1/messages`, `max_tokens: 1`) to the fast model with the key from the keychain and shows only ok or the error. Never automatic.
+- **Chain.** When automatic switching is on (API tab) and every subscription is full, futureflow goes to the first available step of the chain: by default the Anthropic API; enable OpenRouter and set the order in the tab. OpenRouter is only used with a key and both models chosen. Back to a subscription as soon as one has room again; a manual choice wins.
+- **Costs** while a session runs on OpenRouter are estimated with the chosen model's cached prices (cache tokens count as normal input) and shown per day and month, separate from the API costs.
+- **Caveats:** non-Claude models are not guaranteed to work in Claude Code (Anthropic and OpenRouter both say so); web search does not work; claude.ai connectors are off; it applies to new terminal sessions only.
+- **Fallback (not built):** if OpenRouter turns out not to accept the key from `apiKeyHelper`, the alternative is `env.ANTHROPIC_AUTH_TOKEN` with the key in plain text in `settings.json`. futureflow deliberately does not do that; check a new session with `/status` and *Test verbinding*.
 
 ## Credits
 

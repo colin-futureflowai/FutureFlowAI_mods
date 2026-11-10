@@ -234,3 +234,12 @@ Accounts gebouwd volgens plan 6 (`docs/superpowers/plans/2026-11-10-futureflow-6
 - Poll-getallen (besluit Colin, zuiniger): vloer 360 s, actief tot 600 s, kandidaat 600-900 s, uitgeput 1200 s, na een 429 ≥ 600 s ×1,5 tot 1800 s. Staat het actieve account binnen 15 punten van zijn marge, dan haalt de CLI kandidaten met een meting ≥ 10 min bij, zodat de keuze op verse metingen kan.
 - Stand vragen: elke terminal-sessie met futureflow kan de vraag tonen; Niet nu geldt voor alle sessies 30 min (store). Na Wissel probeert die sessie het opnieuw bij exit 7 tot het lukt of 10 min verstreken zijn.
 - Desktop-app: de tab toont het verbruik zonder knoppen, met "De desktop-app regelt zijn eigen login; wisselen werkt alleen voor terminal-sessies." Desktop-sessies schrijven geen sessiebestand.
+
+## Uitbreiding 10-11-2026 OpenRouter
+
+Gebouwd volgens plan 7 (`docs/superpowers/plans/2026-11-10-futureflow-7-openrouter.md`). Besluiten van Colin: optie B (Claude Code zelf op een ander model), model kiezen uit de lijst van OpenRouter, ketting abonnement → ander abonnement → Anthropic API → OpenRouter met instelbare volgorde, met de hand wisselen kan altijd, alleen de terminal.
+
+- Tab 8 `OpenRouter` (kort `OR`): key, zoeken en kiezen van hoofd- en snel model (Claude-modellen eerst), wisselen, Test verbinding, ketting-volgorde, geschatte kosten apart van de API.
+- Settings: alleen futureflow's eigen sleutels, vastgelegd in een marker en exact terug te draaien; vreemde waarden blijven staan en de wissel wordt geweigerd.
+- Nog live te meten met Colin: of OpenRouter de key via `apiKeyHelper` accepteert (Claude Code stuurt hem als Bearer én als x-api-key) en of `/status` in een nieuwe sessie de base-URL toont. Werkt de helper niet, dan is de terugval `ANTHROPIC_AUTH_TOKEN` in platte tekst; die is bewust niet gebouwd.
+- Niet-Claude-modellen werken niet gegarandeerd in Claude Code; webzoeken werkt niet; de claude.ai-connectors staan uit.

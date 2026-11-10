@@ -34,23 +34,23 @@
 
 ### Task 1: Pure logica
 
-- [ ] `lib/api.mjs`: `MODI`, `modusVan(data)` (abonnement/api/openrouter, vreemdeHelper, vreemdeBasis), `toestandVan` met `modus` openrouter en `stappen` (deelverzameling van `api`, `openrouter`, standaard `['api']`), `beslis` met `stappen` en `beschikbaar` (eerste beschikbare stap; terug vanaf api én openrouter).
-- [ ] `lib/openrouter.mjs`: `OR_SERVICE`, `OR_HELPER`, `OR_URL`, `geldigeOrKey`, `geldigModel`, `orInstellingen(model, snel)`, `pasToe(data, gewenst)` → `{ data, marker }` of `{ vreemd }`, `haalWeg(data, marker)`, `modellenVan(ruw)`, `sorteer(lijst, zoek)` (Claude eerst), `orKosten(usage, prijs)`, `perMtok`.
-- [ ] `lib/accounts.mjs` `ketting`: `stappen`/`beschikbaar` doorgeven; terug vanaf elke niet-abonnement-modus.
-- [ ] Tabel-tests `tests/openrouter-lib.test.mjs`, uitbreiding `api-lib`/`accounts-lib`.
+- [x] `lib/api.mjs`: `MODI`, `modusVan(data)` (abonnement/api/openrouter, vreemdeHelper, vreemdeBasis), `toestandVan` met `modus` openrouter en `stappen` (deelverzameling van `api`, `openrouter`, standaard `['api']`), `beslis` met `stappen` en `beschikbaar` (eerste beschikbare stap; terug vanaf api én openrouter).
+- [x] `lib/openrouter.mjs`: `OR_SERVICE`, `OR_HELPER`, `OR_URL`, `geldigeOrKey`, `geldigModel`, `orInstellingen(model, snel)`, `pasToe(data, gewenst)` → `{ data, marker }` of `{ vreemd }`, `haalWeg(data, marker)`, `modellenVan(ruw)`, `sorteer(lijst, zoek)` (Claude eerst), `orKosten(usage, prijs)`, `perMtok`.
+- [x] `lib/accounts.mjs` `ketting`: `stappen`/`beschikbaar` doorgeven; terug vanaf elke niet-abonnement-modus.
+- [x] Tabel-tests `tests/openrouter-lib.test.mjs`, uitbreiding `api-lib`/`accounts-lib`.
 
 ### Task 2: CLI
 
-- [ ] `api openrouter zet-key|wis-key|modellen [--ververs]|test --model <id>`; `api modus openrouter --model <id> --snel <id>`; `status` met `orHeeftKey`, `orStaart`, `vreemdeBasis`, `orModel`, `orSnel`.
-- [ ] Marker eerst schrijven, dan settings; terug: settings, dan marker weg. `OPENROUTER_DIR`, `OPENROUTER_URL` voor tests.
-- [ ] Tests `tests/openrouter-cli.test.mjs`: nep-security, tijdelijke settings, lokale http-server (modellen, cache 6 u, test ok/fout zonder key in uitvoer), heen-en-terug byte-gelijk, vreemde waarden geweigerd.
+- [x] `api openrouter zet-key|wis-key|modellen [--ververs]|test --model <id>`; `api modus openrouter --model <id> --snel <id>`; `status` met `orHeeftKey`, `orStaart`, `vreemdeBasis`, `orModel`, `orSnel`.
+- [x] Marker eerst schrijven, dan settings; terug: settings, dan marker weg. `OPENROUTER_DIR`, `OPENROUTER_URL` voor tests.
+- [x] Tests `tests/openrouter-cli.test.mjs`: nep-security, tijdelijke settings, lokale http-server (modellen, cache 6 u, test ok/fout zonder key in uitvoer), heen-en-terug byte-gelijk, vreemde waarden geweigerd.
 
 ### Task 3: Mod — tab OpenRouter en ketting
 
-- [ ] `hooks/openrouter.tsx`: tab 8 (`OpenRouter`, kort `OR`): status en wisselknoppen, key, zoeken + 15 modellen (Claude-groep eerst) met knoppen Hoofd/Snel, ketting-volgorde, kosten, waarschuwingen.
-- [ ] `hooks/api.tsx`: `wissel` naar openrouter (met gekozen modellen), kosten op OpenRouter apart (`openrouter.kosten`), `apiMeet` met stappen/beschikbaar; `hooks/accounts.tsx` geeft dezelfde door.
-- [ ] Tests `tests/openrouter.test.ts`: tab, zoeken, model kiezen, wissel, ketting naar OpenRouter en terug, key alleen via stdin.
+- [x] `hooks/openrouter.tsx`: tab 8 (`OpenRouter`, kort `OR`): status en wisselknoppen, key, zoeken + 15 modellen (Claude-groep eerst) met knoppen Hoofd/Snel, ketting-volgorde, kosten, waarschuwingen.
+- [x] `hooks/api.tsx`: `wissel` naar openrouter (met gekozen modellen), kosten op OpenRouter apart (`openrouter.kosten`), `apiMeet` met stappen/beschikbaar; `hooks/accounts.tsx` geeft dezelfde door.
+- [x] Tests `tests/openrouter.test.ts`: tab, zoeken, model kiezen, wissel, ketting naar OpenRouter en terug, key alleen via stdin.
 
 ### Task 4: Afronden
 
-- [ ] README (OpenRouter), CLAUDE.md `### futureflow`, spec "Uitbreiding 10-11-2026 OpenRouter", versie 0.7.0. Alle checks groen.
+- [x] README (OpenRouter), CLAUDE.md `### futureflow`, spec "Uitbreiding 10-11-2026 OpenRouter", versie 0.7.0. Alle checks groen.
