@@ -1,4 +1,4 @@
-import type { Door, Limiet, Toestand } from './api.mjs'
+import type { Beschikbaar, Door, Limiet, Modus, Toestand } from './api.mjs'
 
 export type Venster = { label: '5u' | '7d' | string; pct?: number; resetsAt?: number }
 export type Meting = { vensters: Venster[]; gemetenOp: number; fout?: string }
@@ -22,10 +22,10 @@ export type KeuzeInvoer = {
   nu: number
   laatsteWissel: number
 }
-export type KettingInvoer = KeuzeInvoer & { api: Toestand; sessieLimieten: Limiet[]; handmatigTot?: number }
+export type KettingInvoer = KeuzeInvoer & { api: Toestand; sessieLimieten: Limiet[]; handmatigTot?: number; beschikbaar?: Beschikbaar }
 export type KettingBesluit =
   | { soort: 'account'; naar: number; reden: string; door?: Door }
-  | { soort: 'api'; naar: 'api' | 'abonnement'; reden: string; door?: Door }
+  | { soort: 'api'; naar: Modus; reden: string; door?: Door }
   | { soort: 'terug'; naar: number; reden: string }
 export type PollInvoer = {
   vorig?: { interval: number; pct?: number }

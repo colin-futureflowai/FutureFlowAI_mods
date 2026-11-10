@@ -149,11 +149,11 @@ test('houdTot: laatste reset van de vensters ≥ hoog en van overgeschakeldDoor;
 })
 
 test('toestandVan: standaarden en grenzen', () => {
-  assert.deepEqual(toestandVan(undefined), { modus: 'abonnement', auto: false, hoog: 90, laag: 50, laatsteWissel: 0 })
+  assert.deepEqual(toestandVan(undefined), { modus: 'abonnement', auto: false, hoog: 90, laag: 50, laatsteWissel: 0, stappen: ['api'] })
   assert.deepEqual(toestandVan({ modus: 'api', auto: true, hoog: 95, laag: 20, laatsteWissel: 5, overgeschakeldDoor: { label: '5u', resetsAt: 9 } }), {
-    modus: 'api', auto: true, hoog: 95, laag: 20, laatsteWissel: 5, overgeschakeldDoor: { label: '5u', resetsAt: 9 },
+    modus: 'api', auto: true, hoog: 95, laag: 20, laatsteWissel: 5, overgeschakeldDoor: { label: '5u', resetsAt: 9 }, stappen: ['api'],
   })
-  assert.deepEqual(toestandVan({ hoog: 30, laag: 99, modus: 'x', auto: 'ja' }), { modus: 'abonnement', auto: false, hoog: 90, laag: 50, laatsteWissel: 0 })
+  assert.deepEqual(toestandVan({ hoog: 30, laag: 99, modus: 'x', auto: 'ja' }), { modus: 'abonnement', auto: false, hoog: 90, laag: 50, laatsteWissel: 0, stappen: ['api'] })
   assert.equal(toestandVan({ hoog: 50, laag: 60 }).laag, 49)
   assert.equal(toestandVan({ handmatigTot: 123 }).handmatigTot, 123)
   assert.equal('handmatigTot' in toestandVan({ handmatigTot: 'morgen' }), false)

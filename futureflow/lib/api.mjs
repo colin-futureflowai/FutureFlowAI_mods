@@ -8,7 +8,31 @@ export const HELPER = '/usr/bin/security find-generic-password -s futureflow-ant
 // Minimale tijd tussen twee wissels (ms), zodat auto niet heen en weer springt.
 export const WACHTTIJD = 5 * 60_000
 
-export const STANDAARD = { modus: 'abonnement', auto: false, hoog: 90, laag: 50, laatsteWissel: 0 }
+export const STANDAARD = { modus: 'abonnement', auto: false, hoog: 90, laag: 50, laatsteWissel: 0, stappen: ['api'] }
+
+// De drie modi van nieuwe terminal-sessies, op één plek.
+export const MODI = ['abonnement', 'api', 'openrouter']
+// Stappen van de ketting na de abonnementen, in volgorde; welke en in welke volgorde is instelbaar.
+export const STAPPEN = ['api', 'openrouter']
+
+// Sleutelhanger-item en helper van OpenRouter (hier, zodat modusVan de modus op één plek bepaalt).
+export const OR_SERVICE = 'futureflow-openrouter'
+export const OR_HELPER = '/usr/bin/security find-generic-password -s futureflow-openrouter -a futureflow -w'
+export const OR_URL = 'https://openrouter.ai/api'
+
+// De modus uit settings.json (het object): onze API-helper → api, onze OpenRouter-helper → openrouter.
+// vreemdeHelper: een andere apiKeyHelper; vreemdeBasis: een ANTHROPIC_BASE_URL die niet van ons is
+// (`eigenBasis` = de waarde uit de marker, als die er is).
+export function modusVan(data, eigenBasis) {
+  const helper = data && typeof data === 'object' ? data.apiKeyHelper : undefined
+  const env = data && typeof data === 'object' && data.env && typeof data.env === 'object' && !Array.isArray(data.env) ? data.env : {}
+  const basis = env.ANTHROPIC_BASE_URL
+  return {
+    modus: helper === HELPER ? 'api' : helper === OR_HELPER ? 'openrouter' : 'abonnement',
+    vreemdeHelper: helper !== undefined && helper !== HELPER && helper !== OR_HELPER,
+    vreemdeBasis: basis !== undefined && basis !== eigenBasis,
+  }
+}
 
 const KEY = /^sk-ant-[A-Za-z0-9_-]{20,}$/
 
@@ -100,7 +124,7 @@ const getal = (v, min, max, standaard) => (typeof v === 'number' && Number.isFin
 export function toestandVan(ruw) {
   const r = ruw && typeof ruw === 'object' ? ruw : {}
   const t = {
-    modus: r.modus === 'api' ? 'api' : 'abonnement',
+    modus: MODI.includes(r.modus) ? r.modus : 'abonnement',
     auto: r.auto === true,
     hoog: getal(r.hoog, 50, 100, STANDAARD.hoog),
     laag: getal(r.laag, 0, 90, STANDAARD.laag),
@@ -112,6 +136,7 @@ export function toestandVan(ruw) {
     t.overgeschakeldDoor = { label: d.label, ...(typeof d.resetsAt === 'number' && Number.isFinite(d.resetsAt) ? { resetsAt: d.resetsAt } : {}) }
   }
   if (typeof r.handmatigTot === 'number' && Number.isFinite(r.handmatigTot)) t.handmatigTot = r.handmatigTot
+  t.stappen = Array.isArray(r.stappen) ? [...new Set(r.stappen.filter(x => STAPPEN.includes(x)))] : STANDAARD.stappen.slice()
   return t
 }
 
@@ -123,12 +148,20 @@ export function horizon(label) {
 // Metingen die nog gelden: zonder resetsAt, of met een resetsAt in de toekomst.
 const geldig = (limieten, nu) => (Array.isArray(limieten) ? limieten : []).filter(l => l && (l.resetsAt === undefined || l.resetsAt > nu))
 
+// De eerste stap uit `stappen` die beschikbaar is (api standaard wel, openrouter alleen als
+// `beschikbaar.openrouter` true is: key, modellen en aangezet); undefined als er geen is.
+export function eersteStap(stappen, beschikbaar) {
+  const lijst = Array.isArray(stappen) ? stappen : STANDAARD.stappen
+  const b = beschikbaar && typeof beschikbaar === 'object' ? beschikbaar : {}
+  return lijst.find(x => (x === 'api' ? b.api !== false : x === 'openrouter' ? b.openrouter === true : false))
+}
+
 // Wisselen of niet. Nooit binnen WACHTTIJD na de vorige wissel, en niet zolang een keuze met de hand
 // geldt (`handmatigTot`).
-// Naar API: auto aan, modus abonnement en een venster ≥ hoog (het volste telt); zonder resetsAt
-// rekent `door` met de lengte van het venster.
-// Terug: modus api, overgeschakeld door een venster en geen enkel gemeten venster meer ≥ hoog; is het
-// venster van de wissel gemeten, dan pas onder `laag`, anders pas na zijn resetsAt.
+// Weg van het abonnement: auto aan, modus abonnement en een venster ≥ hoog (het volste telt), naar de
+// eerste beschikbare stap (`eersteStap`); zonder resetsAt rekent `door` met de lengte van het venster.
+// Terug: modus api of openrouter, overgeschakeld door een venster en geen enkel gemeten venster meer
+// ≥ hoog; is het venster van de wissel gemeten, dan pas onder `laag`, anders pas na zijn resetsAt.
 export function beslis(s) {
   const nu = s.nu
   if (nu - (s.laatsteWissel ?? 0) < WACHTTIJD) return null
@@ -139,14 +172,16 @@ export function beslis(s) {
     if (!s.auto) return null
     const vol = limieten.filter(l => l.percent >= s.hoog).sort((a, b) => b.percent - a.percent)[0]
     if (!vol) return null
+    const naar = eersteStap(s.stappen, s.beschikbaar)
+    if (!naar) return null
     return {
-      naar: 'api',
+      naar,
       reden: `${vol.label}-venster op ${vol.percent}% (grens ${s.hoog}%)`,
       door: { label: vol.label, resetsAt: vol.resetsAt ?? nu + horizon(vol.label) },
     }
   }
 
-  if (s.modus === 'api' && s.overgeschakeldDoor) {
+  if (s.modus !== 'abonnement' && s.overgeschakeldDoor) {
     // Een ander (of hetzelfde) venster staat nog boven de grens: blijven, anders over 5 min weer heen.
     if (limieten.some(l => l.percent >= s.hoog)) return null
     const door = s.overgeschakeldDoor

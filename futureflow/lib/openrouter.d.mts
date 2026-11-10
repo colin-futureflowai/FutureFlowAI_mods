@@ -1,0 +1,26 @@
+import type { Usage } from './api.mjs'
+
+export type OrModel = { id: string; naam: string; context?: number; in?: number; uit?: number }
+export type OrInstellingen = { apiKeyHelper: string; env: Record<string, string> }
+export type OrMarker = { apiKeyHelper?: string; env: Record<string, string>; envNieuw?: boolean }
+
+export const OR_SERVICE: string
+export const OR_HELPER: string
+export const OR_URL: string
+export const OR_ACCOUNT: string
+export const CACHE_MS: number
+export const TOON: number
+
+export function geldigeOrKey(s: unknown): boolean
+export function geldigModel(s: unknown): boolean
+export function orInstellingen(model: string, snel: string): OrInstellingen
+export function pasToe(data: unknown, gewenst: OrInstellingen): { data: Record<string, any>; marker: OrMarker; vreemd?: undefined } | { vreemd: string; data?: undefined; marker?: undefined }
+export function haalWeg(data: unknown, marker: unknown): Record<string, any>
+export function eigenBasis(marker: unknown): string | undefined
+export function perMtok(v: unknown): number | undefined
+export function modellenVan(ruw: unknown): OrModel[]
+export function isClaude(id: unknown): boolean
+export function sorteer(lijst: readonly OrModel[] | null | undefined, zoek?: string): OrModel[]
+export function prijsTekst(n: number | undefined): string
+export function contextTekst(n: number | undefined): string
+export function orKosten(usage: Usage | null | undefined, prijs: { in?: number; uit?: number } | null | undefined): number

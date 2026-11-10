@@ -156,8 +156,9 @@ export function kiesAccount(s) {
   return { naar: best.id, reden: `account ${s.actief} op of boven de marge; account ${best.id} heeft ${rond(best.r)} punten ruimte` }
 }
 
-// Het hele besluit: eerst een ander abonnement met ruimte, pas als alle abonnementen vol zitten de API
-// (bestaande `beslis`), en terug van de API zodra een abonnement weer ruimte heeft.
+// Het hele besluit: eerst een ander abonnement met ruimte, pas als alle abonnementen vol zitten de
+// eerste beschikbare stap (API of OpenRouter, volgens `api.stappen` en `beschikbaar`; bestaande
+// `beslis`), en terug van de API of OpenRouter zodra een abonnement weer ruimte heeft.
 // Minder dan twee accounts in de rotatie, of auto voor accounts uit: precies het oude gedrag (`beslis`).
 export function ketting(s) {
   const { api, nu } = s
@@ -167,7 +168,7 @@ export function ketting(s) {
   const metingen = eigen ? { ...s.metingen, [s.actief]: eigen } : s.metingen
   const si = { ...s, metingen }
   const oud = () => {
-    const b = beslis({ ...api, limieten: s.sessieLimieten, nu })
+    const b = beslis({ ...api, beschikbaar: s.beschikbaar, limieten: s.sessieLimieten, nu })
     return b ? { soort: 'api', naar: b.naar, reden: b.reden, ...(b.door ? { door: b.door } : {}) } : null
   }
   const rotatie = s.accounts.filter(a => a.inRotatie)
@@ -198,7 +199,7 @@ export function ketting(s) {
     if (onverse && !limietBereikt(metingen?.[s.actief], nu)) return null
     return oud()
   }
-  if (api.modus === 'api' && api.overgeschakeldDoor) {
+  if (api.modus !== 'abonnement' && api.overgeschakeldDoor) {
     const best = bruikbaar.filter(x => x.r >= i.hysterese).sort((a, b) => b.r - a.r)[0]
     if (best) return { soort: 'terug', naar: best.id, reden: `account ${best.id} heeft weer ${rond(best.r)} punten ruimte` }
     return oud()
