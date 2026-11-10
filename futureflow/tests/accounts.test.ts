@@ -224,7 +224,7 @@ test('hotkey 7 opent de tab Accounts: rijen met gemaskeerd e-mailadres, verbruik
   expect(await ui.find({ type: 'Text', text: /Nooit \/logout tussen accounts/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /Alleen terminal/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /sessiebestanden van Claude Code/ })).toBeDefined()
-  for (const key of ['acc-toevoegen', 'acc-ververs', 'acc-wissel-2', 'acc-rotatie-1', 'acc-weg-2', 'acc-auto', 'acc-stil', 'acc-vragen']) {
+  for (const key of ['acc-toevoegen', 'acc-ververs', 'acc-wissel-2', 'acc-rotatie-1', 'acc-weg-2', 'wissel-auto', 'wissel-stap-account', 'acc-stil', 'acc-vragen']) {
     expect(await ui.find({ type: 'Button', key } as any)).toBeDefined()
   }
   // Het actieve account heeft geen wisselknop.
@@ -538,4 +538,30 @@ test('exit 7 zonder sessies (login niet te controleren): geen wachtregel; met de
   const band = await $.ui.mount(BAND())
   expect(await band.find({ type: 'Text', text: /wacht op/ })).toBeUndefined()
   await band.unmount()
+})
+
+test('kaart Automatisch wisselen in de tab Accounts: stap 2 met ruimte, schakelaar zet API en accounts samen', async ($, on) => {
+  const f = fake(on)
+  await $.session.start(START)
+  await run($, 'futureflow', 'accounts')
+  const ui = await $.ui.mount(PANE('terminal'))
+  expect(await ui.find({ type: 'Text', text: /^Abonnement \(account 1, a1…@futureflowai\.com\)$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^1\. Je abonnement — 5u 62% · 7d 18%$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^2\. Ander abonnement — account 2, ruimte 60% \(uit\)$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^3\. Anthropic API — key ✓$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^4\. OpenRouter — geen key \(uit\)$/ })).toBeDefined()
+  await ui.press({ key: 'wissel-auto' } as any)
+  expect(f.cli.instellingen.auto).toBe(true)
+  expect((f.store.get('api.toestand') as any).auto).toBe(true)
+  expect(await ui.find({ type: 'Text', text: /^2\. Ander abonnement — account 2, ruimte 60%$/ })).toBeDefined()
+  // Stap 2 uit: alleen accounts-auto; de schakelaar blijft aan.
+  await ui.press({ key: 'wissel-stap-account' } as any)
+  expect(f.cli.instellingen.auto).toBe(false)
+  expect((f.store.get('api.toestand') as any).auto).toBe(true)
+  await ui.press({ key: 'wissel-auto' } as any)
+  expect(f.cli.instellingen.auto).toBe(false)
+  expect((f.store.get('api.toestand') as any).auto).toBe(false)
+  // De 5u/7d-marges staan alleen hier, onder Geavanceerd.
+  expect(await ui.find({ type: 'Text', text: /^Geavanceerd$/ })).toBeDefined()
+  await ui.unmount()
 })

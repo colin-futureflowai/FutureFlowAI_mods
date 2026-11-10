@@ -14,6 +14,7 @@ import { kaart, knop, knoppen, leeg, paneelVan, raster, stat, tabs, uitleg, vink
 import type { Paneel } from './paneel-ui'
 import { actieveKleuren, openSkinSettings, setSkinPrefs, skinPrefs } from './skins/register'
 import { slotsTab, startSlotsTicker } from './slots'
+import { wisselKaart } from './wissel-kaart'
 import { balkCommando, stappenRijen, voortgangLijst } from './voortgang'
 
 import { kpis } from '../lib/overzicht.mjs'
@@ -194,14 +195,16 @@ export const registerDashboard = (on: Parameters<Register>[0]): void => {
     const k = await actieveKleuren($)
     const ui = paneelVan(el, e, k)
     // Geen woordmerk bovenaan: de titel van het paneel zegt al FutureFlowAI. Het paneel begint met de tabs.
+    // Kaart Automatisch wisselen: dezelfde in de tabs API, Accounts en OpenRouter.
+    const wissel = tab === 'api' || tab === 'accounts' || tab === 'openrouter' ? await wisselKaart($, e, k) : null
     const inhoud =
       tab === 'slots' ? await slotsTab($, e)
       : tab === 'minify' ? await minifyTab($, e)
       : tab === 'overzicht' ? await overzichtTab($, e, p, ui)
       : tab === 'connectors' ? await connectorsTab($, e)
-      : tab === 'api' ? await apiTab($, e, k)
-      : tab === 'accounts' ? await accountsTab($, e, k)
-      : tab === 'openrouter' ? await openrouterTab($, e, k)
+      : tab === 'api' ? await apiTab($, e, k, wissel)
+      : tab === 'accounts' ? await accountsTab($, e, k, wissel)
+      : tab === 'openrouter' ? await openrouterTab($, e, k, wissel)
       : await stijlTab($, ui)
 
     const kies = (i: number) => async () => {

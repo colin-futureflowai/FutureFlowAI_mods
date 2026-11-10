@@ -6,7 +6,7 @@ const NU = Date.parse('2026-11-09T12:00:00Z')
 const KEY = 'sk-ant-api03-ABCDEFGHIJKLMNOPQRSTUVWXYZ_abc-WXYZ'
 const SLOTS = JSON.stringify({ memory: { freePercent: 40, totalGB: 16 }, config: { limits: { dev: 2 }, floorPercent: 25, criticalPercent: 10 }, slots: [], refusals: [] }) + '\n'
 
-type Opties = { modus?: 'abonnement' | 'api'; heeftKey?: boolean; vreemd?: boolean; store?: Record<string, unknown>; rateLimits?: unknown[] }
+type Opties = { modus?: 'abonnement' | 'api'; heeftKey?: boolean; vreemd?: boolean; store?: Record<string, unknown>; rateLimits?: unknown[]; accountsJson?: unknown }
 
 // Nep-omgeving met een nep-cli/api.mjs die zijn eigen stand bijhoudt; alle mocks vóór de eerste $-aanroep.
 function fake(on: any, o: Opties = {}) {
@@ -38,7 +38,9 @@ function fake(on: any, o: Opties = {}) {
   on('config.list', () => ({ value: [] }))
   // settings.json zoals de nep-CLI hem zou schrijven: onze helper in modus api, of een andere.
   on('fs.read', ($: any, e: { path: string }) => ({
-    value: e.path === '/home/t/.claude/settings.json' && (cli.vreemd || cli.modus === 'api') ? JSON.stringify({ apiKeyHelper: cli.vreemd ? '~/bin/eigen.sh' : HELPER }) : '',
+    value:
+      e.path === '/home/t/.claude/futureflow/accounts/accounts.json' && o.accountsJson ? JSON.stringify(o.accountsJson)
+      : e.path === '/home/t/.claude/settings.json' && (cli.vreemd || cli.modus === 'api') ? JSON.stringify({ apiKeyHelper: cli.vreemd ? '~/bin/eigen.sh' : HELPER }) : '',
   }))
   on('fs.write', ($: any, e: { text?: string }) => {
     state.push(e.text)
@@ -50,9 +52,17 @@ function fake(on: any, o: Opties = {}) {
   on('ui.panes', () => ({ value: [] }))
   on('ui.open', () => ({ value: { isPlaced: true } }))
   const envs: Array<Record<string, string> | undefined> = []
+  const accInstellingen: unknown[] = []
   on('process.run', ($: any, e: { argv: string[]; init?: { stdin?: string; env?: Record<string, string> } }) => {
     const ok = (stdout: unknown) => ({ value: { exitCode: 0, stdout: JSON.stringify(stdout) + '\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
     const fout = (exitCode: number, stderr: string) => ({ value: { exitCode, stdout: '', stderr: `[api] ${stderr}\n`, isStdoutTruncated: false, isStderrTruncated: false } })
+    // Nep-cli/accounts.mjs: alleen `instellingen` wordt onthouden.
+    const j = e.argv.findIndex(a => a.endsWith('accounts.mjs'))
+    if (j >= 0) {
+      const aargs = e.argv.slice(j + 1)
+      if (aargs[0] === 'instellingen') accInstellingen.push(JSON.parse(aargs[1]!))
+      return { value: { exitCode: 0, stdout: JSON.stringify(aargs[0] === 'status' ? { accounts: [], instellingen: {} } : { ok: true }) + '\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    }
     const i = e.argv.findIndex(a => a.endsWith('api.mjs'))
     if (i < 0) return { value: { exitCode: 0, stdout: SLOTS, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     const args = e.argv.slice(i + 1)
@@ -81,7 +91,7 @@ function fake(on: any, o: Opties = {}) {
     return fout(1, 'gebruik')
   })
   const modusAanroepen = () => aanroepen.filter(a => a.args[0] === 'modus').map(a => a.args[1])
-  return { cli, aanroepen, toasts, store, state, modusAanroepen, clock, envs }
+  return { cli, aanroepen, toasts, store, state, modusAanroepen, clock, envs, accountsInstellingen: () => accInstellingen }
 }
 
 const run = ($: any, command: string, args: string) =>
@@ -110,8 +120,8 @@ test('hotkey 6 opent de tab API met uitleg over terminal, desktop-app en connect
   expect(await ui.find({ type: 'Text', text: /desktop-app regelt zijn eigen login/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /claude\.ai-connectors niet/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /zichtbaar tot je op Enter drukt; daarna bewaart futureflow alleen de laatste 4 tekens/ })).toBeDefined()
-  for (const key of ['api-abonnement', 'api-api', 'api-auto']) expect(await ui.find({ type: 'Button', key } as any)).toBeDefined()
-  for (const key of ['api-hoog', 'api-laag']) expect(await ui.find({ type: 'Input', key } as any)).toBeDefined()
+  for (const key of ['api-abonnement', 'api-api', 'wissel-auto']) expect(await ui.find({ type: 'Button', key } as any)).toBeDefined()
+  for (const key of ['wissel-hoog', 'wissel-laag']) expect(await ui.find({ type: 'Input', key } as any)).toBeDefined()
   await ui.unmount()
 })
 
@@ -218,39 +228,86 @@ test('binnen 5 min na een wissel geen nieuwe automatische wissel', async ($, on)
   expect(f.toasts).toEqual([])
 })
 
-test('auto aanzetten: eerst een key nodig; de eerste keer één uitleg-toast', async ($, on) => {
+test('één schakelaar: zet API-auto én accounts-auto; de eerste keer één uitleg-toast', async ($, on) => {
   const f = fake(on)
   await $.session.start(START)
   await run($, 'futureflow', 'api')
   const ui = await $.ui.mount(PANE('terminal'))
-  await ui.press({ key: 'api-auto' } as any)
-  expect(f.toasts[0]).toContain('Bewaar eerst een API-key')
-  expect(f.store.get('api.toestand')).toBeUndefined()
-  await (ui as any).input({ key: 'api-key', text: KEY } as any)
-  await ui.press({ key: 'api-auto' } as any)
+  // Zonder key mag het: de ketting slaat de API dan over.
+  await ui.press({ key: 'wissel-auto' } as any)
   expect((f.store.get('api.toestand') as any).auto).toBe(true)
-  const uitleg = f.toasts.filter(t => t.startsWith('Automatisch wisselen staat aan'))
+  expect(f.accountsInstellingen()).toEqual([{ auto: true }])
+  const uitleg = f.toasts.filter(t => t.startsWith('Automatisch wisselen staat aan. Bij de grens'))
   expect(uitleg.length).toBe(1)
-  expect(uitleg[0]).toContain('kost geld per token')
+  expect(uitleg[0]).toContain('kosten geld per token')
   expect(uitleg[0]).toContain('nieuwe terminal-sessies')
-  await ui.press({ key: 'api-auto' } as any)
-  await ui.press({ key: 'api-auto' } as any)
-  expect(f.toasts.filter(t => t.startsWith('Automatisch wisselen staat aan')).length).toBe(1)
+  await ui.press({ key: 'wissel-auto' } as any)
+  expect((f.store.get('api.toestand') as any).auto).toBe(false)
+  expect(f.accountsInstellingen()).toEqual([{ auto: true }, { auto: false }])
+  await ui.press({ key: 'wissel-auto' } as any)
+  expect(f.toasts.filter(t => t.startsWith('Automatisch wisselen staat aan. Bij de grens')).length).toBe(1)
   await ui.unmount()
 })
 
-test('grenzen: geldige waarde bewaard, ongeldige geweigerd', async ($, on) => {
+test('een andere apiKeyHelper: de schakelaar gaat niet aan', async ($, on) => {
+  const f = fake(on, { vreemd: true })
+  await run($, 'futureflow', 'api')
+  const ui = await $.ui.mount(PANE('terminal'))
+  await ui.press({ key: 'wissel-auto' } as any)
+  expect(f.toasts[0]).toContain('andere apiKeyHelper')
+  expect(f.store.get('api.toestand')).toBeUndefined()
+  expect(f.accountsInstellingen()).toEqual([])
+  await ui.unmount()
+})
+
+test('grenzen: "wissel vanaf" zet de API-grens én beide marges; ongeldige waarden geweigerd', async ($, on) => {
   const f = fake(on)
   await run($, 'futureflow', 'api')
   const ui = await $.ui.mount(PANE('terminal'))
-  await (ui as any).input({ key: 'api-hoog', text: '85' } as any)
+  await (ui as any).input({ key: 'wissel-hoog', text: '85' } as any)
   expect((f.store.get('api.toestand') as any).hoog).toBe(85)
-  await (ui as any).input({ key: 'api-laag', text: '95' } as any)
-  await (ui as any).input({ key: 'api-hoog', text: '40' } as any)
+  expect(f.accountsInstellingen()).toEqual([{ marge5u: 85, marge7d: 85 }])
+  await (ui as any).input({ key: 'wissel-laag', text: '95' } as any)
+  await (ui as any).input({ key: 'wissel-hoog', text: '40' } as any)
+  await (ui as any).input({ key: 'wissel-hoog', text: '100' } as any)
   expect((f.store.get('api.toestand') as any).laag).toBe(50)
   expect((f.store.get('api.toestand') as any).hoog).toBe(85)
-  expect(f.toasts.length).toBe(2)
+  expect(f.toasts.length).toBe(3)
+  await (ui as any).input({ key: 'wissel-laag', text: '40' } as any)
+  expect((f.store.get('api.toestand') as any).laag).toBe(40)
+  expect(f.accountsInstellingen().length).toBe(1)
+  expect(await ui.find({ type: 'Text', text: /Haalt je huidige abonnement 85% van het 5u- of 7d-venster/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /zodra het weer onder 40% zit of gereset is/ })).toBeDefined()
   await ui.unmount()
+})
+
+test('de kaart: alle vier stappen met hun stand, ← nu bij het abonnement', async ($, on) => {
+  const f = fake(on, { rateLimits: [{ kind: 'five_hour', percentUsed: 42 }, { kind: 'seven_day', percentUsed: 18 }] })
+  await run($, 'futureflow', 'api')
+  const ui = await $.ui.mount(PANE('terminal'))
+  expect(await ui.find({ type: 'Text', text: /^Je werkt nu op: / })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^Abonnement$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^1\. Je abonnement — 5u 42% · 7d 18%$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^2\. Ander abonnement — geen tweede account \(uit\)$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^3\. Anthropic API — geen key$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^4\. OpenRouter — geen key \(uit\)$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /← nu/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Geldt voor nieuwe terminal-sessies\. Kies je zelf, dan blijft futureflow eraf tot de reset\./ })).toBeDefined()
+  for (const key of ['wissel-auto', 'wissel-stap-account', 'wissel-stap-api', 'wissel-stap-openrouter']) expect(await ui.find({ type: 'Button', key } as any)).toBeDefined()
+  // Stap account zonder schakelaar: eerst de schakelaar.
+  await ui.press({ key: 'wissel-stap-account' } as any)
+  expect(f.toasts).toEqual(['Zet eerst Automatisch wisselen aan.'])
+  expect(f.accountsInstellingen()).toEqual([])
+  await ui.press({ key: 'wissel-stap-api' } as any)
+  expect((f.store.get('api.toestand') as any).stappen).toEqual([])
+  expect(await ui.find({ type: 'Text', text: /^3\. Anthropic API — geen key \(uit\)$/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('migratie: stond alleen accounts-auto aan, dan staat na de start ook API-auto aan', async ($, on) => {
+  const f = fake(on, { accountsJson: { accounts: [], instellingen: { auto: true } } })
+  await $.session.start(START)
+  expect((f.store.get('api.toestand') as any).auto).toBe(true)
 })
 
 test('kosten tellen alleen als deze sessie op de API draait', async ($, on) => {
@@ -311,8 +368,8 @@ test('met de hand terug naar het abonnement terwijl auto aan staat: auto wacht t
   await meet($, [{ kind: 'seven_day', percentUsed: 93, resetsAt }], f.clock)
   expect(f.modusAanroepen()).toEqual(['abonnement'])
   // Auto uit- en aanzetten beëindigt de keuze met de hand: dan wel weer naar API.
-  await ui.press({ key: 'api-auto' } as any)
-  await ui.press({ key: 'api-auto' } as any)
+  await ui.press({ key: 'wissel-auto' } as any)
+  await ui.press({ key: 'wissel-auto' } as any)
   await f.clock.settle()
   expect((f.store.get('api.toestand') as any).handmatigTot).toBeUndefined()
   expect(f.modusAanroepen()).toEqual(['abonnement', 'api'])

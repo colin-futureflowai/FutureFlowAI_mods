@@ -519,18 +519,17 @@ async function zetInstelling($: Engine, deel: Record<string, unknown>, gelukt: s
   await actie($, ['instellingen', JSON.stringify(deel)], () => gelukt)
 }
 
-async function zetAuto($: Engine): Promise<void> {
-  const s = (await read($, statusAtom)) ?? (await ververs($))
-  const aan = !s.instellingen.auto
-  // Aan- of uitzetten beëindigt ook een keuze met de hand.
-  await zetHandmatig($, null)
-  const inRotatie = s.accounts.filter(a => a.inRotatie).length
-  const extra = aan && inRotatie < 2 ? ' Dat werkt vanaf twee accounts in de rotatie; tot dan geldt alleen de tab API.' : ''
-  await zetInstelling(
-    $,
-    { auto: aan },
-    aan ? `Automatisch wisselen tussen accounts staat aan.${extra}` : 'Automatisch wisselen tussen accounts staat uit.',
-  )
+// Voor de kaart Automatisch wisselen (hooks/wissel-kaart.tsx): instellingen zetten zonder eigen toast.
+// '' = gelukt, anders de fout. `auto` aan- of uitzetten beëindigt ook een keuze met de hand.
+export async function zetAccountsInstellingen($: Engine, deel: Record<string, unknown>): Promise<string> {
+  try {
+    if ('auto' in deel) await zetHandmatig($, null)
+    const u = await draai($, ['instellingen', JSON.stringify(deel)])
+    await ververs($)
+    return u.code === 0 ? '' : u.fout
+  } finally {
+    await hertekenen($).catch(() => undefined)
+  }
 }
 
 async function zetMarge($: Engine, welke: 'marge5u' | 'marge7d', invoer: string): Promise<void> {
@@ -614,7 +613,7 @@ function vensterTekst(a: AccountsAccount, label: '5u' | '7d', nu: number): strin
 
 // Inhoud van de tab Accounts. Tekent alleen; schrijven gebeurt in onPress/onSubmit. Zonder gelezen
 // status (paneel hersteld zonder openen) leest hij hem één keer zelf, zonder iets te bewaren.
-export async function accountsTab($: Engine, e: any, k: Kleuren) {
+export async function accountsTab($: Engine, e: any, k: Kleuren, wisselKaart?: RenderElement | null) {
   const el = $.ui.resolve(e)
   const { Box, Text, Input } = el
   try {
@@ -705,11 +704,10 @@ export async function accountsTab($: Engine, e: any, k: Kleuren) {
           ]) : null,
         })}
 
-        {kaart(ui, 'Automatisch wisselen', [
-          kan
-            ? vinkje(ui, 'acc-auto', i.auto, 'Automatisch wisselen', async () => { try { await zetAuto($) } catch (err) { failOpen($, err) } })
-            : <Text color={k.mut}>{`Automatisch wisselen: ${i.auto ? 'aan' : 'uit'}`}</Text>,
-          uitleg(ui, 'Vóór een limiet: eerst een ander abonnement, pas als alle vol zitten de API.'),
+        {wisselKaart ?? ''}
+
+        {kaart(ui, 'Geavanceerd', [
+          uitleg(ui, 'Aparte grens per venster voor het wisselen tussen accounts. "Wissel vanaf %" hierboven zet ze allebei.'),
           kan ? (
             <Input key="acc-marge5u" label="Marge 5u %  " value={String(i.marge5u)} submitLabel="zet" onSubmit={(waarde: string) => zetMarge($, 'marge5u', waarde)} />
           ) : '',
@@ -721,7 +719,6 @@ export async function accountsTab($: Engine, e: any, k: Kleuren) {
           uitleg(ui, `Strategie: meeste ruimte · wachttijd tussen wissels ${Math.round(i.wachttijd / 60_000)} min · alleen metingen jonger dan 15 min`),
           kan ? '' : <Text color={k.mut}>{`Stand: ${i.stand === 'vragen' ? 'eerst vragen' : 'stil'}`}</Text>,
         ], {
-          rechts: i.auto ? 'aan' : 'uit',
           knoppen: kan ? knoppen(ui, [
             knop(ui, 'acc-stil', i.stand === 'stil' ? '● Stil' : 'Stil', () => zetInstelling($, { stand: 'stil' }, 'Stand stil: futureflow wisselt tussen beurten en meldt het.'), { primary: i.stand === 'stil' }),
             knop(ui, 'acc-vragen', i.stand === 'vragen' ? '● Eerst vragen' : 'Eerst vragen', () => zetInstelling($, { stand: 'vragen' }, 'Stand eerst vragen: futureflow vraagt boven de prompt voor het wisselt.'), { primary: i.stand === 'vragen' }),

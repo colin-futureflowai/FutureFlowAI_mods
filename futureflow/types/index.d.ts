@@ -258,6 +258,8 @@ declare module 'claude-code' {
       'accounts.status': AccountsStatus | null
       /** Telt op na een actie in de tab Accounts, zodat die opnieuw tekent. */
       'accounts.versie': number
+      /** Telt op na een actie in de kaart Automatisch wisselen (tabs API, Accounts, OpenRouter). */
+      'wissel.versie': number
       /** Stand vragen: de voorgestelde wissel; null = geen vraag. */
       'accounts.vraag': AccountsVraag | null
       /** Een wissel die wacht op bezige sessies; null = niets. */

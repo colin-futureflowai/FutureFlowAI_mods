@@ -1,24 +1,22 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface as Engine } from 'claude-code'
+import type { EngineInterface as Engine, RenderElement } from 'claude-code'
 
-import type { ApiStatus, ApiToestand, OrModel, OrModellen } from '../types'
+import type { ApiStatus, OrModel, OrModellen } from '../types'
 
 import { cli, foutVan, handmatig, laatsteJson, leesStatus, orKeuze, verversApi, wissel } from './api'
 import { failOpen } from './ctx'
-import { kaart, knop, knoppen, leeg, paneelVan, uitleg, vinkje } from './paneel-ui'
+import { kaart, knop, knoppen, leeg, paneelVan, uitleg } from './paneel-ui'
 
-import { kostenOverzicht, STAPPEN, toestandVan, usd } from '../lib/api.mjs'
-import type { Stap } from '../lib/api.mjs'
+import { kostenOverzicht, usd } from '../lib/api.mjs'
 import { contextTekst, geldigeOrKey, geldigModel, isClaude, modellenVan, prijsTekst, sorteer, TOON } from '../lib/openrouter.mjs'
 
 // Tab OpenRouter: Claude Code zelf (nieuwe terminal-sessies) op een ander model via OpenRouter.
 // Key in de macOS-sleutelhanger (alleen via stdin naar cli/api.mjs), modellen kiezen uit de lijst
-// van OpenRouter, met de hand wisselen, en de volgorde van API en OpenRouter in de ketting.
+// van OpenRouter en met de hand wisselen. De ketting staat in de kaart Automatisch wisselen (wissel-kaart.tsx).
 // Alles buiten de plugin gaat via cli/api.mjs; de key komt nooit in state, store, log of toast.
 
-// Dezelfde atoms als in hooks/api.tsx (de hooks-module leest ze statisch per bestand).
+// Dezelfde atom als in hooks/api.tsx (de hooks-module leest ze statisch per bestand).
 const statusAtom = atom({ plugin: 'futureflow', key: 'api.status' } as const, null as ApiStatus | null)
-const toestandAtom = atom({ plugin: 'futureflow', key: 'api.toestand' } as const, null as ApiToestand | null)
 const modellenAtom = atom({ plugin: 'futureflow', key: 'openrouter.modellen' } as const, null as OrModellen | null)
 const zoekAtom = atom({ plugin: 'futureflow', key: 'openrouter.zoek' } as const, '')
 // Welke pagina van de modellenlijst open staat (0 = eerste).
@@ -36,7 +34,6 @@ const WAARSCHUWINGEN = [
 ]
 const INVOER_UITLEG = 'Wat je typt is zichtbaar tot je op Enter drukt; daarna bewaart futureflow alleen de laatste 4 tekens in beeld.'
 const FOUTE_KEY = 'Dat is geen OpenRouter-key (die begint met sk-or-); niets opgeslagen.'
-const NAMEN: Record<Stap, string> = { api: 'Anthropic API', openrouter: 'OpenRouter' }
 
 // Eén lading tegelijk.
 let laadt = false
@@ -74,15 +71,6 @@ async function laadModellen($: Engine, ververs: boolean): Promise<void> {
 export async function openOpenrouter($: Engine): Promise<void> {
   await verversApi($)
   void laadModellen($, false).catch(err => failOpen($, err))
-}
-
-async function toestand($: Engine): Promise<ApiToestand> {
-  return toestandVan(await $.store.get('api.toestand'))
-}
-
-async function bewaarToestand($: Engine, t: ApiToestand): Promise<void> {
-  await $.store.set('api.toestand', t)
-  await update($, toestandAtom, () => t)
 }
 
 // ---- acties (alleen in onPress/onSubmit) ----
@@ -162,33 +150,6 @@ async function testVerbinding($: Engine): Promise<void> {
   }
 }
 
-// Zet een stap in of uit de ketting. OpenRouter aanzetten mag zonder key of model, maar dan zegt een
-// toast dat de ketting hem overslaat tot die er zijn.
-async function zetStap($: Engine, stap: Stap): Promise<void> {
-  try {
-    const t = await toestand($)
-    const aan = t.stappen.includes(stap)
-    const stappen = aan ? t.stappen.filter(x => x !== stap) : [...t.stappen, stap]
-    await bewaarToestand($, { ...t, stappen })
-    if (!aan && stap === 'openrouter') {
-      const k = await orKeuze($)
-      const status = (await read($, statusAtom)) ?? (await leesStatus($))
-      if (!status.orHeeftKey || !k.model || !k.snel) $.ui.toast('OpenRouter staat in de ketting, maar wordt overgeslagen tot er een key en beide modellen zijn.')
-    }
-  } catch (err) {
-    failOpen($, err)
-  }
-}
-
-async function draaiVolgorde($: Engine): Promise<void> {
-  try {
-    const t = await toestand($)
-    await bewaarToestand($, { ...t, stappen: t.stappen.slice().reverse() })
-  } catch (err) {
-    failOpen($, err)
-  }
-}
-
 async function zoek($: Engine, tekst: string): Promise<void> {
   await update($, zoekAtom, () => tekst.trim().slice(0, 60))
   await update($, paginaAtom, () => 0)
@@ -215,16 +176,13 @@ function regelVan(ui: ReturnType<typeof paneelVan>, $: Engine, m: OrModel, i: nu
 }
 
 // Inhoud van de tab OpenRouter. Tekent alleen; schrijven gebeurt in onPress/onSubmit.
-export async function openrouterTab($: Engine, e: any, k: Kleuren) {
+export async function openrouterTab($: Engine, e: any, k: Kleuren, wisselKaart?: RenderElement | null) {
   const el = $.ui.resolve(e)
   const { Box, Text, Input } = el
   try {
     await read($, versieAtom) // opnieuw tekenen na een actie
     const ui = paneelVan(el, e, k)
     const status = (await read($, statusAtom)) ?? (await leesStatus($))
-    // Een toestand uit een sessie van vóór 0.7 heeft nog geen `stappen`: dan de standaard.
-    const t0 = (await read($, toestandAtom)) ?? (await toestand($))
-    const t = { ...t0, stappen: Array.isArray(t0.stappen) ? t0.stappen : ['api'] }
     const lijst = await read($, modellenAtom)
     const zoekTekst = await read($, zoekAtom)
     const test = await read($, testAtom)
@@ -239,9 +197,6 @@ export async function openrouterTab($: Engine, e: any, k: Kleuren) {
     const claude = getoond.filter(m => isClaude(m.id))
     const andere = getoond.filter(m => !isClaude(m.id))
     const index = (m: OrModel) => getoond.indexOf(m)
-
-    // Volgorde: eerst de stappen die aan staan (in hun volgorde), daarna de rest.
-    const uit = STAPPEN.filter(x => !t.stappen.includes(x))
 
     return (
       <Box flexDirection="column" gap={1}>
@@ -305,19 +260,7 @@ export async function openrouterTab($: Engine, e: any, k: Kleuren) {
           knoppen: knoppen(ui, [knop(ui, 'or-ververs', 'Lijst verversen', () => laadModellen($, true))]),
         })}
 
-        {kaart(ui, 'Ketting', [
-          uitleg(ui, 'Als alle abonnementen vol zitten (tab Accounts), in deze volgorde:'),
-          <Text key="or-ketting-0"><Text color={k.mut}>1. </Text>ander abonnement met ruimte</Text>,
-          ...t.stappen.map((x, i) => <Text key={`or-ketting-${x}`}><Text color={k.mut}>{`${i + 2}. `}</Text>{NAMEN[x]}</Text>),
-          ...uit.map(x => <Text key={`or-ketting-uit-${x}`} color={k.mut}>{`– ${NAMEN[x]} (uit)`}</Text>),
-          vinkje(ui, 'or-stap-api', t.stappen.includes('api'), 'API in de ketting', () => zetStap($, 'api')),
-          vinkje(ui, 'or-stap-openrouter', t.stappen.includes('openrouter'), 'OpenRouter in de ketting', () => zetStap($, 'openrouter')),
-          uitleg(ui, `Automatisch wisselen zet je aan in de tab API (nu ${t.auto ? 'aan' : 'uit'}). Terug naar een abonnement zodra dat weer ruimte heeft; een keuze met de hand gaat voor.`),
-        ], {
-          knoppen: t.stappen.length === 2
-            ? knoppen(ui, [knop(ui, 'or-volgorde', t.stappen[0] === 'api' ? 'OpenRouter vóór API' : 'API vóór OpenRouter', () => draaiVolgorde($))])
-            : null,
-        })}
+        {wisselKaart ?? ''}
 
         {kaart(ui, 'Geschatte kosten', [
           <Text>

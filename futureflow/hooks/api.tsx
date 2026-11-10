@@ -1,14 +1,14 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface as Engine } from 'claude-code'
+import type { EngineInterface as Engine, RenderElement } from 'claude-code'
 
 import type { ApiStatus, ApiToestand } from '../types'
 
 import { failOpen, leesAccountsStaat } from './ctx'
-import { kaart, knop, knoppen, paneelVan, uitleg, vinkje } from './paneel-ui'
+import { kaart, knop, knoppen, paneelVan, uitleg } from './paneel-ui'
 
 import { beslis, dagSleutel, geldigeKey, houdTot, kosten, kostenOverzicht, limietenVan, modusVan, telOp, toestandVan, usd } from '../lib/api.mjs'
 import type { Beschikbaar, Door, Modus } from '../lib/api.mjs'
-import { kettingAan } from '../lib/accounts.mjs'
+import { instellingenVan, kettingAan } from '../lib/accounts.mjs'
 import { geldigModel, orKosten } from '../lib/openrouter.mjs'
 
 // Tab API: de API-key in de macOS-sleutelhanger en wisselen tussen abonnement en API, met de hand
@@ -29,8 +29,6 @@ const UITLEG = [
 ]
 const INVOER_UITLEG = 'Wat je typt is zichtbaar tot je op Enter drukt; daarna bewaart futureflow alleen de laatste 4 tekens in beeld.'
 const FOUTE_KEY = 'Dat is geen Anthropic API-key (die begint met sk-ant-); niets opgeslagen.'
-const AUTO_UITLEG =
-  'Automatisch wisselen staat aan: vanaf de grens van je 5u- of 7d-venster gebruiken nieuwe terminal-sessies je API-key, en dat kost geld per token (geschat in de tab API). Terug na de reset. Deze sessie en de desktop-app houden hun eigen login.'
 
 // Of deze sessie zelf op de API of OpenRouter draait: gestart terwijl onze helper aan stond. Per sessie (één module-instantie).
 let sessieOpApi = false
@@ -141,6 +139,11 @@ export async function apiToestand($: Engine): Promise<ApiToestand> {
   return leesToestand($)
 }
 
+// Ook gebruikt door de kaart Automatisch wisselen (hooks/wissel-kaart.tsx).
+export async function bewaarApiToestand($: Engine, t: ApiToestand): Promise<void> {
+  await bewaarToestand($, t)
+}
+
 async function bewaarToestand($: Engine, t: ApiToestand): Promise<void> {
   await $.store.set('api.toestand', t)
   await update($, toestandAtom, () => t)
@@ -192,6 +195,12 @@ export async function startApi($: Engine): Promise<void> {
     const gelezen = await modusUitSettings($)
     sessieOpApi = gelezen?.modus === 'api'
     sessieOpOpenrouter = gelezen?.modus === 'openrouter'
+    // Sinds 0.8 één schakelaar voor API en accounts: stond alleen accounts-auto aan, dan ook die van de API.
+    const t0 = await leesToestand($)
+    if (!t0.auto) {
+      const staat = (await leesAccountsStaat($)) as { instellingen?: unknown } | undefined
+      if (staat && instellingenVan(staat.instellingen).auto) await bewaarToestand($, { ...t0, auto: true })
+    }
     if (!gelezen || gelezen.vreemdeHelper) return
     const t = await leesToestand($)
     if (t.modus !== gelezen.modus) {
@@ -410,51 +419,18 @@ export async function handmatig($: Engine, naar: Modus): Promise<void> {
   }
 }
 
-async function zetAuto($: Engine): Promise<void> {
-  try {
-    const t = await leesToestand($)
-    if (!t.auto) {
-      const status = (await read($, statusAtom)) ?? (await leesStatus($))
-      if (!status.heeftKey) {
-        $.ui.toast('Bewaar eerst een API-key; zonder key kan futureflow niet naar de API wisselen.')
-        return
-      }
-      if (status.vreemdeHelper) {
-        $.ui.toast('In ~/.claude/settings.json staat al een andere apiKeyHelper; futureflow laat die staan en wisselt niet.')
-        return
-      }
-    }
-    // Aan- of uitzetten beëindigt ook een keuze met de hand.
-    const { handmatigTot: _hand, ...rest } = t
-    await bewaarToestand($, { ...rest, auto: !t.auto })
-    if (!t.auto && !(await $.store.get('api.autoUitgelegd'))) {
-      await $.store.set('api.autoUitgelegd', true)
-      $.ui.toast(AUTO_UITLEG)
-    }
-    // Meteen kijken: staat een venster al boven de grens, dan nu wisselen (na de wachttijd).
-    if (!t.auto) await apiMeet($)
-  } catch (err) {
-    failOpen($, err)
+// Voor de kaart Automatisch wisselen: auto van de API aan of uit. '' = gelukt, anders de reden.
+// Aan- of uitzetten beëindigt ook een keuze met de hand. Een API-key is niet nodig: zonder key slaat
+// de ketting de stap API over.
+export async function zetApiAuto($: Engine, aan: boolean): Promise<string> {
+  const t = await leesToestand($)
+  if (aan) {
+    const status = (await read($, statusAtom)) ?? (await leesStatus($))
+    if (status.vreemdeHelper) return 'In ~/.claude/settings.json staat al een andere apiKeyHelper; futureflow laat die staan en wisselt niet.'
   }
-}
-
-async function zetGrens($: Engine, welke: 'hoog' | 'laag', invoer: string): Promise<void> {
-  try {
-    const t = await leesToestand($)
-    const n = Number(invoer.trim().replace(/%$/, ''))
-    const [min, max] = welke === 'hoog' ? [50, 100] : [0, 90]
-    if (!Number.isInteger(n) || n < min || n > max) {
-      $.ui.toast(`Grens niet veranderd: kies een heel getal van ${min} tot ${max}.`)
-    } else if (welke === 'hoog' ? n <= t.laag : n >= t.hoog) {
-      $.ui.toast(`Grens niet veranderd: "naar API" (${welke === 'hoog' ? n : t.hoog}%) moet hoger zijn dan "terug" (${welke === 'laag' ? n : t.laag}%).`)
-    } else {
-      await bewaarToestand($, { ...t, [welke]: n })
-    }
-  } catch (err) {
-    failOpen($, err)
-  } finally {
-    await hertekenen($).catch(() => undefined)
-  }
+  const { handmatigTot: _hand, ...rest } = t
+  await bewaarToestand($, { ...rest, auto: aan })
+  return ''
 }
 
 const twee = (n: number) => String(n).padStart(2, '0')
@@ -468,7 +444,7 @@ function wanneer(ms: number, nu: number): string {
 }
 
 // Inhoud van de tab API. Tekent alleen; schrijven gebeurt in onPress/onSubmit.
-export async function apiTab($: Engine, e: any, k: Kleuren) {
+export async function apiTab($: Engine, e: any, k: Kleuren, wisselKaart?: RenderElement | null) {
   const el = $.ui.resolve(e)
   const { Box, Text, Input } = el
   try {
@@ -524,12 +500,7 @@ export async function apiTab($: Engine, e: any, k: Kleuren) {
           knoppen: status.heeftKey ? knoppen(ui, [knop(ui, 'api-wis', 'Key wissen', () => wisKey($))]) : null,
         })}
 
-        {kaart(ui, 'Automatisch wisselen', [
-          vinkje(ui, 'api-auto', t.auto, 'Automatisch wisselen', () => zetAuto($)),
-          uitleg(ui, 'Op de 5u- en 7d-vensters van je abonnement. Volgorde van API en OpenRouter: tab OpenRouter.'),
-          <Input key="api-hoog" label="Naar API vanaf % " value={String(t.hoog)} submitLabel="zet" onSubmit={(waarde: string) => zetGrens($, 'hoog', waarde)} />,
-          <Input key="api-laag" label="Terug onder %     " value={String(t.laag)} submitLabel="zet" onSubmit={(waarde: string) => zetGrens($, 'laag', waarde)} />,
-        ], { rechts: t.auto ? 'aan' : 'uit' })}
+        {wisselKaart ?? ''}
 
         {kaart(ui, 'Geschatte kosten', [
           <Text>
