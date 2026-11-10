@@ -121,14 +121,18 @@ test('terminal tekent geen Svg', async ($, on) => {
   const ui = await $.ui.mount(PANE('terminal'))
   const boom = JSON.stringify(await ui.drawn())
   expect(boom).not.toContain('"type":"Svg"')
-  expect(await ui.find({ type: 'Text', text: /^AI$/ })).toBeDefined()
+  // Geen woordmerk: de titel van het paneel zegt al FutureFlowAI.
+  expect(await ui.find({ type: 'Text', text: /^AI$/ })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /FutureFlow/ })).toBeUndefined()
   await ui.unmount()
 })
 
-test('desktop tekent het woordmerk', async ($, on) => {
+test('desktop tekent geen woordmerk; het paneel begint met de tabs', async ($, on) => {
   fake(on)
   const ui = await $.ui.mount(PANE('desktop'))
-  expect(await ui.find({ type: 'Svg', alt: 'FutureFlowAI' } as any)).toBeDefined()
+  // `alt` zoekt find niet; daarom in de getekende boom kijken.
+  expect(JSON.stringify(await ui.drawn())).not.toContain('"alt":"FutureFlowAI"')
+  expect(await ui.find({ type: 'Button', key: 'tab-overzicht' } as any)).toBeDefined()
   await ui.unmount()
 })
 

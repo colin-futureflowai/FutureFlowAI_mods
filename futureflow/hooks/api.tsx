@@ -4,6 +4,7 @@ import type { EngineInterface as Engine } from 'claude-code'
 import type { ApiStatus, ApiToestand } from '../types'
 
 import { failOpen, leesAccountsStaat } from './ctx'
+import { kaart, knop, knoppen, paneelVan, uitleg, vinkje } from './paneel-ui'
 
 import { beslis, dagSleutel, geldigeKey, HELPER, houdTot, kosten, kostenOverzicht, limietenVan, telOp, toestandVan, usd } from '../lib/api.mjs'
 import type { Door } from '../lib/api.mjs'
@@ -395,8 +396,6 @@ async function zetGrens($: Engine, welke: 'hoog' | 'laag', invoer: string): Prom
   }
 }
 
-const vinkje = (aan: boolean) => (aan ? '☑' : '☐')
-
 const twee = (n: number) => String(n).padStart(2, '0')
 // Lokale tijd kort: "14:05", of "di 10-11 14:05" als het niet vandaag is.
 function wanneer(ms: number, nu: number): string {
@@ -409,9 +408,11 @@ function wanneer(ms: number, nu: number): string {
 
 // Inhoud van de tab API. Tekent alleen; schrijven gebeurt in onPress/onSubmit.
 export async function apiTab($: Engine, e: any, k: Kleuren) {
-  const { Box, Text, Button, Input } = $.ui.resolve(e)
+  const el = $.ui.resolve(e)
+  const { Box, Text, Input } = el
   try {
     await read($, versieAtom) // opnieuw tekenen na een actie
+    const ui = paneelVan(el, e, k)
     const status = (await read($, statusAtom)) ?? (await leesStatus($))
     const t = (await read($, toestandAtom)) ?? (await leesToestand($))
     const nu = await $.clock.now()
@@ -420,71 +421,62 @@ export async function apiTab($: Engine, e: any, k: Kleuren) {
 
     return (
       <Box flexDirection="column" gap={1}>
-        <Box flexDirection="column">
-          <Text bold color={k.accent}>API</Text>
+        {kaart(ui, 'API', [
           <Text>
             <Text color={k.mut}>Nieuwe terminal-sessies: </Text>
             <Text bold color={opApi ? k.warn : k.ok}>{opApi ? 'API-key' : 'abonnement'}</Text>
-            <Text color={k.mut}>{'  ·  key '}</Text>
-            {status.heeftKey ? <Text>{`sk-ant-…${status.staart}`}</Text> : <Text color={k.mut}>geen key</Text>}
-          </Text>
-          {t.overgeschakeldDoor && opApi ? (
-            <Text color={k.warn}>Automatisch naar API door het {t.overgeschakeldDoor.label}-venster; terug na de reset.</Text>
-          ) : null}
-          {t.auto && t.handmatigTot !== undefined && t.handmatigTot > nu ? (
-            <Text color={k.warn}>Met de hand gekozen: automatisch wisselen wacht tot {wanneer(t.handmatigTot, nu)} (of tot je het uit- en aanzet).</Text>
-          ) : null}
-          {t.auto && opApi && !t.overgeschakeldDoor ? (
-            <Text color={k.warn}>Met de hand op API: automatisch wisselen zet dit niet terug.</Text>
-          ) : null}
-          {status.vreemdeHelper ? (
-            <Text color={k.err}>In ~/.claude/settings.json staat al een andere apiKeyHelper. futureflow laat die staan en wisselt niet.</Text>
-          ) : null}
-          {status.fout ? <Text color={k.err} wrap="truncate-end">Status niet volledig gelezen: {status.fout}</Text> : null}
-        </Box>
-
-        <Box flexDirection="column">
-          <Input key="api-key" label="Key " placeholder="sk-ant-…" value="" submitLabel="bewaar" onSubmit={(waarde: string) => bewaarKey($, waarde)} />
-          <Text color={k.mut}>{INVOER_UITLEG}</Text>
-          {status.heeftKey ? (
-            <Box flexDirection="row">
-              <Button key="api-wis" onPress={() => wisKey($)}>Key wissen</Button>
-            </Box>
-          ) : null}
-        </Box>
-
-        <Box flexDirection="row" gap={2}>
-          <Text color={k.mut}>Wissel</Text>
-          <Button key="api-abonnement" onPress={() => handmatig($, 'abonnement')}>
-            {opApi ? 'Abonnement' : <Text color={k.ok} bold>Abonnement</Text>}
-          </Button>
-          <Button key="api-api" onPress={() => handmatig($, 'api')}>
-            {opApi ? <Text color={k.warn} bold>API</Text> : 'API'}
-          </Button>
-        </Box>
-
-        <Box flexDirection="column">
-          <Button key="api-auto" onPress={() => zetAuto($)}>
-            <Text>{`${vinkje(t.auto)} Automatisch wisselen op de 5u- en 7d-vensters`}</Text>
-          </Button>
-          <Input key="api-hoog" label="Naar API vanaf % " value={String(t.hoog)} submitLabel="zet" onSubmit={(waarde: string) => zetGrens($, 'hoog', waarde)} />
-          <Input key="api-laag" label="Terug onder %     " value={String(t.laag)} submitLabel="zet" onSubmit={(waarde: string) => zetGrens($, 'laag', waarde)} />
-        </Box>
-
-        <Box flexDirection="column">
+          </Text>,
           <Text>
-            <Text color={k.mut}>Geschatte API-kosten  vandaag </Text>
+            <Text color={k.mut}>{'Key: '}</Text>
+            {status.heeftKey ? <Text>{`sk-ant-…${status.staart}`}</Text> : <Text color={k.mut}>geen key</Text>}
+          </Text>,
+          t.overgeschakeldDoor && opApi ? (
+            <Text color={k.warn}>Automatisch naar API door het {t.overgeschakeldDoor.label}-venster; terug na de reset.</Text>
+          ) : '',
+          t.auto && t.handmatigTot !== undefined && t.handmatigTot > nu ? (
+            <Text color={k.warn}>Met de hand gekozen: automatisch wisselen wacht tot {wanneer(t.handmatigTot, nu)} (of tot je het uit- en aanzet).</Text>
+          ) : '',
+          t.auto && opApi && !t.overgeschakeldDoor ? (
+            <Text color={k.warn}>Met de hand op API: automatisch wisselen zet dit niet terug.</Text>
+          ) : '',
+          status.vreemdeHelper ? (
+            <Text color={k.err}>In ~/.claude/settings.json staat al een andere apiKeyHelper. futureflow laat die staan en wisselt niet.</Text>
+          ) : '',
+          status.fout ? <Text color={k.err} wrap="truncate-end">Status niet volledig gelezen: {status.fout}</Text> : '',
+        ], {
+          rechts: opApi ? 'API' : 'abonnement',
+          knoppen: knoppen(ui, [
+            knop(ui, 'api-abonnement', opApi ? 'Abonnement' : '● Abonnement', () => handmatig($, 'abonnement'), { primary: !opApi }),
+            knop(ui, 'api-api', opApi ? '● API' : 'API', () => handmatig($, 'api'), { primary: opApi }),
+          ]),
+        })}
+
+        {kaart(ui, 'Key', [
+          <Input key="api-key" label="Key " placeholder="sk-ant-…" value="" submitLabel="bewaar" onSubmit={(waarde: string) => bewaarKey($, waarde)} />,
+          uitleg(ui, INVOER_UITLEG),
+        ], {
+          knoppen: status.heeftKey ? knoppen(ui, [knop(ui, 'api-wis', 'Key wissen', () => wisKey($))]) : null,
+        })}
+
+        {kaart(ui, 'Automatisch wisselen', [
+          vinkje(ui, 'api-auto', t.auto, 'Automatisch wisselen', () => zetAuto($)),
+          uitleg(ui, 'Op de 5u- en 7d-vensters van je abonnement.'),
+          <Input key="api-hoog" label="Naar API vanaf % " value={String(t.hoog)} submitLabel="zet" onSubmit={(waarde: string) => zetGrens($, 'hoog', waarde)} />,
+          <Input key="api-laag" label="Terug onder %     " value={String(t.laag)} submitLabel="zet" onSubmit={(waarde: string) => zetGrens($, 'laag', waarde)} />,
+        ], { rechts: t.auto ? 'aan' : 'uit' })}
+
+        {kaart(ui, 'Geschatte kosten', [
+          <Text>
+            <Text color={k.mut}>vandaag </Text>
             <Text bold>{usd(geld.vandaag)}</Text>
             <Text color={k.mut}>  ·  deze maand </Text>
             <Text bold>{usd(geld.maand)}</Text>
-          </Text>
-          <Text color={k.mut}>Schatting op basis van de prijslijst; geen harde stop.</Text>
-        </Box>
+          </Text>,
+          uitleg(ui, 'Schatting op basis van de prijslijst; geen harde stop.'),
+        ])}
 
         <Box flexDirection="column">
-          {UITLEG.map((regel, i) => (
-            <Text key={`api-uitleg-${i}`} color={k.mut}>{regel}</Text>
-          ))}
+          {UITLEG.map((regel, i) => uitleg(ui, regel, `api-uitleg-${i}`))}
         </Box>
       </Box>
     )

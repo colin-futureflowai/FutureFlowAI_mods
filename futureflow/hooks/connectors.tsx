@@ -5,6 +5,7 @@ import type { ConnectorsLijst, DashboardTab } from '../types'
 
 import { failOpen } from './ctx'
 import { PANE } from './paneel'
+import { kaart, knop, leeg, meter, paneelVan, uitleg } from './paneel-ui'
 import { actieveKleuren } from './skins/register'
 
 import { getal, perServer, procent, totalen, verdeel } from '../lib/connectors.mjs'
@@ -146,65 +147,68 @@ function status(r: ServerRij, gewijzigd: 'uit' | 'aan' | undefined): string {
 // Tekent alleen; schrijven gebeurt in onPress. Zonder gelezen lijst (paneel hersteld zonder openen)
 // leest hij hem één keer zelf, zonder iets te bewaren.
 export async function connectorsTab($: Engine, e: any) {
-  const { Box, Text, Button } = $.ui.resolve(e)
+  const el = $.ui.resolve(e)
+  const { Box, Text } = el
   try {
     const k = await actieveKleuren($)
+    const ui = paneelVan(el, e, k)
     const gewijzigd = (await read($, gewijzigdAtom)) ?? {}
     const lijst = (await read($, lijstAtom)) ?? (await leesLijst($))
     const { tools, venster } = await leesContext($)
     const rijen = perServer(tools, lijst.uit, Object.keys(gewijzigd))
     const som = totalen(rijen)
     const { eigen, intern } = verdeel(rijen, [...lijst.servers, ...Object.keys(gewijzigd)])
+    // Meter + percentage passen in de kaart.
+    const cellen = Math.max(8, Math.min(20, ui.binnen - 8))
 
     return (
       <Box flexDirection="column" gap={1}>
-        <Box flexDirection="column">
-          <Text bold color={k.accent}>Connectors</Text>
+        {kaart(ui, 'Connectors', [
           <Text>
             <Text color={k.mut}>MCP in context </Text>
             <Text bold>{getal(som.inContext)} tokens</Text>
             <Text color={k.mut}>
               {venster ? ` · ${procent(som.inContext, venster)} van het venster (${getal(venster)})` : ''} · schema's samen {getal(som.tokens)}
             </Text>
-          </Text>
-          <Text color={k.mut}>{UITLEG}</Text>
-          {lijst.sleutel && lijst.sleutel !== lijst.map ? (
+          </Text>,
+          venster ? meter(ui, som.inContext / venster, cellen, k.accent) : '',
+          uitleg(ui, UITLEG),
+          lijst.sleutel && lijst.sleutel !== lijst.map ? (
             <Text color={k.mut} wrap="truncate-end">Projectmap (git-root): {lijst.sleutel}</Text>
-          ) : null}
-          {lijst.fout ? <Text color={k.err} wrap="truncate-end">Lijst van /mcp niet gelezen: {lijst.fout}</Text> : null}
-        </Box>
+          ) : '',
+          lijst.fout ? <Text color={k.err} wrap="truncate-end">Lijst van /mcp niet gelezen: {lijst.fout}</Text> : '',
+        ])}
 
-        {rijen.length === 0 ? <Text color={k.mut}>Geen connectors in deze sessie.</Text> : null}
-        {eigen.map(r => {
-          const tekst = status(r, gewijzigd[r.server])
-          return (
-            <Box key={`rij-${r.server}`} flexDirection="column">
-              <Text wrap="truncate-end">
-                <Text color={r.uit ? k.warn : k.ok}>{'●'}</Text>
-                {'  '}<Text bold>{r.server}</Text>
-                <Text color={k.mut}>
+        {kaart(ui, 'Servers', [
+          rijen.length === 0 ? leeg(ui, 'Geen connectors in deze sessie.') : '',
+          ...eigen.map((r, n) => {
+            const tekst = status(r, gewijzigd[r.server])
+            return (
+              <Box key={`rij-${r.server}`} flexDirection="column" marginTop={n === 0 ? 0 : 1}>
+                <Text wrap="truncate-end">
+                  <Text color={r.uit ? k.warn : k.ok}>{'●'}</Text>
+                  {' '}<Text bold>{r.server}</Text>
+                </Text>
+                <Text color={k.mut} wrap="truncate-end">
                   {'  '}{r.tools} {r.tools === 1 ? 'tool' : 'tools'} · {getal(r.inContext)} / {getal(r.tokens)} tokens
                 </Text>
-              </Text>
-              <Text>
-                {'   '}<Text color={r.uit ? k.mut : k.accent}>{balkTekst(venster ? r.inContext / venster : 0, 20)}</Text>
-                <Text color={k.mut}> {venster ? procent(r.inContext, venster) : ''}</Text>
-                {tekst ? <Text color={k.warn}>  {tekst}</Text> : null}
-              </Text>
-              <Box flexDirection="row">
-                <Text>{'   '}</Text>
-                <Button key={`conn-${r.server}`} onPress={() => wissel($, lijst.sleutel, r.server, !r.uit)}>
-                  {r.uit ? 'Weer aan' : 'Uit vanaf volgende sessie'}
-                </Button>
+                <Text>
+                  {'  '}<Text color={r.uit ? k.mut : k.accent}>{balkTekst(venster ? r.inContext / venster : 0, cellen)}</Text>
+                  <Text color={k.mut}> {venster ? procent(r.inContext, venster) : ''}</Text>
+                </Text>
+                {tekst ? <Text color={k.warn}>{`  ${tekst}`}</Text> : ''}
+                <Box flexDirection="row" paddingLeft={2}>
+                  {knop(ui, `conn-${r.server}`, r.uit ? 'Weer aan' : 'Uit vanaf volgende sessie', () => wissel($, lijst.sleutel, r.server, !r.uit), { primary: r.uit })}
+                </Box>
               </Box>
-            </Box>
-          )
-        })}
-        {intern.servers > 0 ? (
-          <Text color={k.mut} wrap="truncate-end">
-            Intern (app en mods): {intern.tools} {intern.tools === 1 ? 'tool' : 'tools'}, {getal(intern.inContext)} tokens
-          </Text>
-        ) : null}
+            )
+          }),
+          intern.servers > 0 ? (
+            <Text color={k.mut} wrap="truncate-end">
+              Intern (app en mods): {intern.tools} {intern.tools === 1 ? 'tool' : 'tools'}, {getal(intern.inContext)} tokens
+            </Text>
+          ) : '',
+        ], { rechts: `${eigen.length}` })}
       </Box>
     )
   } catch (err) {

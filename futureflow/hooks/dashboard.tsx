@@ -9,13 +9,16 @@ import { connectorsTab, openConnectors } from './connectors'
 import { failOpen, oud } from './ctx'
 import { minifyTab, niveauLezen } from './minify'
 import { openDashboard, PANE, TABS } from './paneel'
+import { kaart, knop, knoppen, leeg, paneelVan, raster, stat, tabs, uitleg, vinkje } from './paneel-ui'
+import type { Paneel } from './paneel-ui'
 import { actieveKleuren, openSkinSettings, setSkinPrefs, skinPrefs } from './skins/register'
 import { slotsTab, startSlotsTicker } from './slots'
 import { balkCommando, stappenRijen, voortgangLijst } from './voortgang'
 
 import { kpis } from '../lib/overzicht.mjs'
 import type { Kpi } from '../lib/overzicht.mjs'
-import { balkTekst, palet, woordmerkSvg } from '../lib/thema.mjs'
+import { kolommenVoor } from '../lib/paneel-ui.mjs'
+import { palet } from '../lib/thema.mjs'
 
 export { openDashboard }
 
@@ -62,10 +65,10 @@ function kaartenSvg(lijst: Kpi[], p: ReturnType<typeof palet>): string {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${breed}" height="${h}" viewBox="0 0 ${breed} ${h}" font-family="-apple-system, 'Segoe UI', sans-serif">${lijst.map(kaart).join('')}</svg>`
 }
 
-// Inhoud van de tab Overzicht: vier kerncijfers en snelkoppelingen naar de andere tabs.
-async function overzichtTab($: Engine, e: any, p: ReturnType<typeof palet>) {
-  const el = $.ui.resolve(e)
-  const { Box, Text, Button } = el
+// Inhoud van de tab Overzicht: vier kerncijfers (desktop: Svg-kaarten) en de voortgang.
+async function overzichtTab($: Engine, e: any, p: ReturnType<typeof palet>, ui: Paneel) {
+  const el = ui.el
+  const { Box } = el
   const Svg = e.surface !== 'terminal' && 'Svg' in el ? el.Svg : undefined
   const teller = await read($, tellerAtom)
   const snapshot = await read($, snapshotAtom)
@@ -80,37 +83,18 @@ async function overzichtTab($: Engine, e: any, p: ReturnType<typeof palet>) {
   }
   const lijst = kpis({ teller, perNiveau, niveau, snapshot, context })
   const voortgang = await voortgangLijst($)
-  const kleur = (k: Kpi) => (k.toon === 'oranje' ? p.oranje : k.toon === 'mut' ? p.mut : p.groen)
-  const snelkoppeling = (t: DashboardTab) => (
-    <Button
-      key={`snel-${t}`}
-      onPress={async () => {
-        await update($, tabAtom, () => t)
-        if (t === 'slots') await startSlotsTicker($)
-      }}
-    >
-      {NAMEN[t]}
-    </Button>
-  )
+  const kleur = (k: Kpi) => (k.toon === 'oranje' ? ui.k.warn : k.toon === 'mut' ? ui.k.mut : ui.k.accent)
+  const { breed } = kolommenVoor(ui.breedte)
   return (
     <Box flexDirection="column" gap={1}>
       {Svg ? (
         <Svg source={kaartenSvg(lijst, p)} alt={lijst.map(k => `${k.titel}: ${k.waarde} ${k.sub}`).join('. ')} />
       ) : (
-        <Box flexDirection="column">
-          {lijst.map(k => (
-            <Text key={`kpi-${k.titel}`}>
-              <Text dimColor>{k.titel}  </Text>
-              <Text color={kleur(k)} bold>{k.waarde}</Text>
-              <Text dimColor>  {k.sub}{k.fractie === undefined ? '' : `  ${balkTekst(k.fractie, 10)}`}</Text>
-            </Text>
-          ))}
-        </Box>
+        raster(ui, lijst.map(k => stat(ui, k.titel, k.waarde, k.sub, { kleur: kleur(k), breed, ...(k.fractie === undefined ? {} : { fractie: k.fractie }) })))
       )}
-      {voortgang === null ? '' : stappenRijen(el, voortgang, { accent: p.groen, mut: p.mut, fg: p.inkt }, await $.clock.now())}
-      <Box flexDirection="row" gap={2}>
-        {(['slots', 'minify', 'stijl'] as const).map(snelkoppeling)}
-      </Box>
+      {voortgang === null
+        ? leeg(ui, 'Nog geen takenlijst — de voortgang verschijnt zodra Claude een plan maakt.')
+        : kaart(ui, 'Voortgang', stappenRijen(el, voortgang, { accent: ui.k.accent, mut: ui.k.mut, fg: ui.k.fg }, await $.clock.now()))}
     </Box>
   )
 }
@@ -130,8 +114,8 @@ const ONDERDELEN = [
 
 // Inhoud van de tab Stijl: welke skin, aan/uit, losse onderdelen en de volledige instellingen.
 // Tekent alleen; schrijven gebeurt in de onPress van de knoppen.
-async function stijlTab($: Engine, e: any, p: ReturnType<typeof palet>) {
-  const { Box, Text, Button } = $.ui.resolve(e)
+async function stijlTab($: Engine, ui: Paneel) {
+  const { Box, Text } = ui.el
   const { prefs, names } = await skinPrefs($)
   const zet = (deel: Parameters<typeof setSkinPrefs>[1]) => async () => {
     await setSkinPrefs($, deel)
@@ -140,41 +124,25 @@ async function stijlTab($: Engine, e: any, p: ReturnType<typeof palet>) {
   const aan = prefs.skin !== 'off'
   const snel = SNEL.filter(n => names.includes(n))
   const taken = await takenlijstStand($)
+  const anders = aan && !(snel as readonly string[]).includes(prefs.skin)
   return (
     <Box flexDirection="column" gap={1}>
-      <Box flexDirection="column">
-        <Button key="stijl-aan" hotkey="s" onPress={zet({ skin: aan ? 'off' : 'futureflow' })}>
-          <Text>{`${aan ? '☑' : '☐'} Skin aan`}</Text>
-        </Button>
-        <Text dimColor>Uit = Claude Code's eigen weergave. Licht of donker volgt het thema van Claude Code (/theme).</Text>
-      </Box>
-      <Box flexDirection="row" gap={2}>
-        <Text dimColor>Skin</Text>
-        {snel.map(n => (
-          <Button key={`stijl-skin-${n}`} onPress={zet({ skin: n })}>
-            {n === prefs.skin ? <Text color={p.groen} bold>{n}</Text> : n}
-          </Button>
-        ))}
-        {aan && !(snel as readonly string[]).includes(prefs.skin) ? <Text color={p.groen} bold>{prefs.skin}</Text> : ''}
-      </Box>
-      <Box flexDirection="column">
-        {ONDERDELEN.map(([sleutel, naam]) => (
-          <Button key={`stijl-${sleutel}`} onPress={zet({ [sleutel]: !prefs[sleutel] })}>
-            <Text>{`${prefs[sleutel] ? '☑' : '☐'} ${naam}`}</Text>
-          </Button>
-        ))}
-      </Box>
-      <Box flexDirection="column">
-        <Button key="stijl-takenlijst" onPress={async () => { await zetTakenlijst($, !taken) }}>
-          <Text>{`${taken ? '☑' : '☐'} Takenlijst in de terminal (nodig voor de voortgangsbalk)`}</Text>
-        </Button>
-        <Text dimColor>Geldt voor nieuwe sessies. Zet CLAUDE_CODE_ENABLE_TODO_TOOLS in ~/.claude/settings.json.</Text>
-      </Box>
-      <Box flexDirection="row" gap={2}>
-        <Button key="stijl-alles" hotkey="a" onPress={() => openSkinSettings($)}>
-          Alle instellingen
-        </Button>
-        <Text dimColor>of /skin, /skin gallery</Text>
+      {kaart(ui, 'Skin', [
+        vinkje(ui, 'stijl-aan', aan, 'Skin aan', zet({ skin: aan ? 'off' : 'futureflow' }), 's'),
+        uitleg(ui, "Uit = Claude Code's eigen weergave. Licht of donker volgt het thema van Claude Code (/theme)."),
+        anders ? <Text color={ui.k.mut}>{'Nu: '}<Text color={ui.k.accent} bold>{prefs.skin}</Text></Text> : '',
+      ], {
+        rechts: aan ? prefs.skin : 'uit',
+        knoppen: knoppen(ui, snel.map(n => knop(ui, `stijl-skin-${n}`, n === prefs.skin ? `● ${n}` : n, zet({ skin: n }), { primary: n === prefs.skin }))),
+      })}
+      {kaart(ui, 'Onderdelen', ONDERDELEN.map(([sleutel, naam]) => vinkje(ui, `stijl-${sleutel}`, prefs[sleutel], naam, zet({ [sleutel]: !prefs[sleutel] }))))}
+      {kaart(ui, 'Terminal', [
+        vinkje(ui, 'stijl-takenlijst', taken, 'Takenlijst in de terminal', async () => { await zetTakenlijst($, !taken) }),
+        uitleg(ui, 'Nodig voor de voortgangsbalk. Geldt voor nieuwe sessies; zet CLAUDE_CODE_ENABLE_TODO_TOOLS in ~/.claude/settings.json.'),
+      ])}
+      <Box flexDirection="row" flexWrap="wrap" columnGap={1} alignItems="center">
+        {knop(ui, 'stijl-alles', 'Alle instellingen', () => openSkinSettings($), { hotkey: 'a' })}
+        {uitleg(ui, 'of /skin, /skin gallery')}
       </Box>
     </Box>
   )
@@ -218,51 +186,34 @@ export const registerDashboard = (on: Parameters<Register>[0]): void => {
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e, next) => {
     try {
     const el = $.ui.resolve(e)
-    const { Box, Text, Button } = el
+    const { Box } = el
     const tab = (await read($, tabAtom)) ?? 'overzicht'
     const modus = (await skinPrefs($)).isLight ? 'licht' : 'donker'
     const p = palet(modus)
-    // Alleen de terminal tekent geen Svg. Niet `'Svg' in el` gebruiken: de tabel antwoordt daar ook in de terminal ja.
-    const Svg = e.surface !== 'terminal' && 'Svg' in el ? el.Svg : undefined
-
+    const k = await actieveKleuren($)
+    const ui = paneelVan(el, e, k)
+    // Geen woordmerk bovenaan: de titel van het paneel zegt al FutureFlowAI. Het paneel begint met de tabs.
     const inhoud =
       tab === 'slots' ? await slotsTab($, e)
       : tab === 'minify' ? await minifyTab($, e)
-      : tab === 'overzicht' ? await overzichtTab($, e, p)
+      : tab === 'overzicht' ? await overzichtTab($, e, p, ui)
       : tab === 'connectors' ? await connectorsTab($, e)
-      : tab === 'api' ? await apiTab($, e, await actieveKleuren($))
-      : tab === 'accounts' ? await accountsTab($, e, await actieveKleuren($))
-      : await stijlTab($, e, p)
+      : tab === 'api' ? await apiTab($, e, k)
+      : tab === 'accounts' ? await accountsTab($, e, k)
+      : await stijlTab($, ui)
+
+    const kies = (i: number) => async () => {
+      const t = TABS[i]!
+      await update($, tabAtom, () => t)
+      if ((t === 'slots' || t === 'overzicht') && !(await oud($)).slots) await startSlotsTicker($)
+      if (t === 'api') await verversApi($)
+      if (t === 'connectors') await openConnectors($)
+      if (t === 'accounts') await openAccounts($)
+    }
 
     return (
-      <Box flexDirection="column" gap={1} padding={1}>
-        <Box flexDirection="column">
-          {Svg ? (
-            <Svg source={woordmerkSvg(modus, 220)} alt="FutureFlowAI" />
-          ) : (
-            <Text bold>
-              <Text>FutureFlow</Text>
-              <Text color={p.groen}>AI</Text>
-            </Text>
-          )}
-          <Box flexDirection="row" gap={2}>
-            {TABS.map((t, i) => (
-              <Button
-                key={`tab-${t}`}
-                hotkey={String(i + 1)}
-                onPress={async () => {
-                  await update($, tabAtom, () => t)
-                  if ((t === 'slots' || t === 'overzicht') && !(await oud($)).slots) await startSlotsTicker($)
-                  if (t === 'api') await verversApi($)
-                  if (t === 'connectors') await openConnectors($)
-                  if (t === 'accounts') await openAccounts($)
-                }}
-              >
-                {t === tab ? <Text color={p.groen} bold>{NAMEN[t]}</Text> : NAMEN[t]}
-              </Button>
-            ))}
-          </Box>
-        </Box>
+      <Box flexDirection="column" gap={1} paddingX={1}>
+        {tabs(ui, TABS, TABS.indexOf(tab), kies)}
         {inhoud}
       </Box>
     )

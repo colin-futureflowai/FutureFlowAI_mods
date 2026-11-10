@@ -6,6 +6,7 @@ import type { OverflowJob, SlotsHolder, SlotsSnapshot } from '../types'
 import { accountsSessieEinde } from './accounts'
 import { failOpen, log, oud } from './ctx'
 import { openDashboard, PANE } from './paneel'
+import { kaart, leeg, meter, paneelVan, vinkje } from './paneel-ui'
 import { actieveKleuren, stopSkins } from './skins/register'
 
 import { classify, hasShellBackground, maskSecrets, unwrapCommand, wrapCommand } from '../lib/classify.mjs'
@@ -300,16 +301,17 @@ function slotsKaartenSvg(inv: KaartInvoer, c: KaartKleuren): string {
     '</svg>'
 }
 
-// Inhoud van de tab Slots in het dashboard (was het losse paneel agent-slots).
+// Inhoud van de tab Slots in het dashboard (was het losse paneel agent-slots), in kaarten.
 export async function slotsTab($: Engine, e: any) {
     const el = $.ui.resolve(e)
-    const { Box, Text, Button } = el
+    const { Box, Text } = el
     // Alleen de desktop tekent kaarten (Svg); de terminal krijgt tekst. `'Svg' in el` zegt in de terminal niets.
     const Svg = e.surface !== 'terminal' && 'Svg' in el ? el.Svg : undefined
     const k = await actieveKleuren($)
-    if ((await oud($)).slots) return <Text dimColor>De oude agent-slots-plugin staat nog aan en beheert dit onderdeel.</Text>
+    const ui = paneelVan(el, e, k)
+    if ((await oud($)).slots) return leeg(ui, 'De oude agent-slots-plugin staat nog aan en beheert dit onderdeel.')
     const snap = await read($, snapshot)
-    if (!snap) return <Text dimColor>Laden…</Text>
+    if (!snap) return leeg(ui, 'Laden…')
 
     const { memory, config, slots, refusals } = snap
     const free = memory.freePercent
@@ -319,6 +321,14 @@ export async function slotsTab($: Engine, e: any) {
     const state = free < config.criticalPercent ? 'kritiek' : free < config.floorPercent ? 'krap: nieuwe zware taken worden geweigerd' : 'ok'
 
     const isOff = config.enabled === false
+    const zetEnabled = async () => {
+      await cli($, ['config', 'set', 'enabled', isOff ? 'on' : 'off'])
+      await refresh($)
+    }
+    const zetOverflow = async () => {
+      await cli($, ['config', 'set', 'cloudOverflow', config.cloudOverflow ? 'off' : 'on'])
+      await refresh($)
+    }
 
     return (
       <Box flexDirection="column" gap={1}>
@@ -328,94 +338,58 @@ export async function slotsTab($: Engine, e: any) {
             alt={`Geheugen: ${meterTekst(free, memory.totalGB)}. Slots: ${kaartSlots.map(c => `${c.kind} ${c.n}/${c.limit}`).join(', ')}`}
           />
         ) : null}
-        <Box flexDirection="column">
-          <Button
-            key="enabled"
-            hotkey="a"
-            onPress={async () => {
-              await cli($, ['config', 'set', 'enabled', isOff ? 'on' : 'off'])
-              await refresh($)
-            }}
-          >
-            {isOff ? '☐' : '☑'} agent-slots aan
-          </Button>
+
+        {kaart(ui, 'Geheugen', [
+          <Text color={toonKleur} bold>{meterTekst(free, memory.totalGB)}</Text>,
+          meter(ui, free / 100, Math.min(24, ui.binnen), toonKleur),
+          <Text color={k.mut}>grens {config.floorPercent}% · kritiek {config.criticalPercent}% · {state}</Text>,
+        ], { rechts: state === 'ok' ? 'ok' : state === 'kritiek' ? 'kritiek' : 'krap' })}
+
+        {kaart(ui, 'Slots', Object.entries(config.limits).map(([kind, limit]) => {
+          const held = slots.filter(s => s.kind === kind)
+          const full = held.length >= limit
+          return (
+            <Box key={`slot-${kind}`} flexDirection="column">
+              <Text>
+                <Text color={full ? k.warn : k.ok}>{'●'}</Text>
+                {'  '}{kind.padEnd(8)}<Text color={k.mut}>bezet </Text>{held.length}/{limit}
+              </Text>
+              {held.map(holder => <Text color={k.mut} wrap="truncate-end">{'   '}{holderLine(holder)}</Text>)}
+            </Box>
+          )
+        }))}
+
+        {kaart(ui, 'Laatste weigeringen', refusals.length === 0 ? leeg(ui, 'Geen — alles mocht door.') : [...refusals].reverse().map(r => (
+          <Text wrap="truncate-end">
+            <Text color={k.mut}>{clock(r.t)}  {(r.kind ?? r.tool ?? '').padEnd(8)}</Text><Text color={k.warn}>{r.reason ?? ''}</Text><Text color={k.mut}>  {r.command ?? ''}</Text>
+          </Text>
+        )))}
+
+        {(snap.overflow ?? []).length > 0 ? kaart(ui, 'Cloud-workers', [...(snap.overflow ?? [])].reverse().slice(0, 5).map(job => (
+          <Box flexDirection="column">
+            <Text wrap="truncate-end">
+              <Text color={job.status === 'done' ? k.ok : k.warn}>{job.status === 'done' ? '✓' : '…'}</Text>
+              {'  '}{job.branch.replace(/^overflow\//, '')}  <Text color={k.mut}>{job.status === 'done' ? `klaar ${clock(job.finished ?? job.started)}${job.delivered ? ' · gemeld' : ''}` : `loopt sinds ${clock(job.started)}`}</Text>
+            </Text>
+            {job.task ? <Text color={k.mut} wrap="truncate-end">{'   '}{job.task}</Text> : null}
+            {job.error ? <Text color={k.err} wrap="truncate-end">{'   '}{job.error}</Text> : null}
+          </Box>
+        ))) : null}
+
+        {kaart(ui, 'Instellingen', [
+          vinkje(ui, 'enabled', !isOff, 'agent-slots aan', zetEnabled, 'a'),
           <Text color={isOff ? k.warn : k.mut}>
             {isOff
-              ? 'Uit: niets wordt tegengehouden of ingepakt, in alle sessies op deze computer. Slots en geheugen hieronder zijn alleen ter info.'
+              ? 'Uit: niets wordt tegengehouden of ingepakt, in alle sessies op deze computer. Slots en geheugen hierboven zijn alleen ter info.'
               : 'Aan: zware commando\'s, browsers en sessies wachten als er geen slot of geheugen vrij is.'}
-          </Text>
-        </Box>
-
-        <Box flexDirection="column">
-          <Text bold color={k.accent}>Geheugen</Text>
-          <Text>
-            <Text color={toonKleur}>{meterTekst(free, memory.totalGB)}</Text>
-          </Text>
-          <Text color={k.mut}>
-            grens {config.floorPercent}% · kritiek {config.criticalPercent}% · {state}
-          </Text>
-        </Box>
-
-        <Box flexDirection="column">
-          <Text bold color={k.accent}>Slots</Text>
-          {Object.entries(config.limits).map(([kind, limit]) => {
-            const held = slots.filter(s => s.kind === kind)
-            const full = held.length >= limit
-            return (
-              <Box flexDirection="column">
-                <Text>
-                  <Text color={full ? k.warn : k.ok}>{'●'}</Text>
-                  {'  '}{kind.padEnd(8)}<Text color={k.mut}>bezet </Text>{held.length}/{limit}
-                </Text>
-                {held.map(holder => <Text color={k.mut} wrap="truncate-end">{"    "}{holderLine(holder)}</Text>)}
-              </Box>
-            )
-          })}
-        </Box>
-
-        <Box flexDirection="column">
-          <Text bold color={k.accent}>Laatste weigeringen</Text>
-          {refusals.length === 0 && <Text color={k.mut}>Geen.</Text>}
-          {[...refusals].reverse().map(r => (
-            <Text wrap="truncate-end">
-              <Text color={k.mut}>{clock(r.t)}  {(r.kind ?? r.tool ?? '').padEnd(8)}</Text><Text color={k.warn}>{r.reason ?? ''}</Text><Text color={k.mut}>  {r.command ?? ''}</Text>
-            </Text>
-          ))}
-        </Box>
-
-        {(snap.overflow ?? []).length > 0 && (
-          <Box flexDirection="column">
-            <Text bold color={k.accent}>Cloud-workers</Text>
-            {[...(snap.overflow ?? [])].reverse().slice(0, 5).map(job => (
-              <Box flexDirection="column">
-                <Text wrap="truncate-end">
-                  <Text color={job.status === 'done' ? k.ok : k.warn}>{job.status === 'done' ? '✓' : '…'}</Text>
-                  {'  '}{job.branch.replace(/^overflow\//, '')}  <Text color={k.mut}>{job.status === 'done' ? `klaar ${clock(job.finished ?? job.started)}${job.delivered ? ' · gemeld' : ''}` : `loopt sinds ${clock(job.started)}`}</Text>
-                </Text>
-                {job.task ? <Text color={k.mut} wrap="truncate-end">{'    '}{job.task}</Text> : null}
-                {job.error ? <Text color={k.err} wrap="truncate-end">{'    '}{job.error}</Text> : null}
-              </Box>
-            ))}
-          </Box>
-        )}
-
-        <Box flexDirection="column">
-          <Button
-            key="overflow"
-            hotkey="c"
-            onPress={async () => {
-              await cli($, ['config', 'set', 'cloudOverflow', config.cloudOverflow ? 'off' : 'on'])
-              await refresh($)
-            }}
-          >
-            {config.cloudOverflow ? '☑' : '☐'} Cloud-overflow
-          </Button>
+          </Text>,
+          vinkje(ui, 'overflow', !!config.cloudOverflow, 'Cloud-overflow', zetOverflow, 'c'),
           <Text color={k.mut}>
             {config.cloudOverflow
               ? 'Aan: bij een weigering voor een taak (tests, builds, subagents) stelt de agent voor om hem uit te besteden aan een cloud-worker.'
               : 'Uit: bij een weigering wacht de agent tot er lokaal plek is.'}
-          </Text>
-        </Box>
+          </Text>,
+        ])}
 
         <Text color={k.mut}>
           Bijgewerkt {clock(snap.at)}{snap.error ? ` · fout: ${snap.error.slice(0, 80)}` : ''} · /agent-slots status voor tekst

@@ -7,7 +7,8 @@ import { accountsBeurtKlaar } from './accounts'
 import { apiMeetLos, apiTurnComplete } from './api'
 import { failOpen, log, oud } from './ctx'
 import { openDashboard } from './paneel'
-import { skinsTurnComplete } from './skins/register'
+import { kaart, knop, knoppen, leeg, paneelVan, raster, stat, uitleg } from './paneel-ui'
+import { actieveKleuren, skinsTurnComplete } from './skins/register'
 import { onthoudOpdracht } from './voortgang'
 
 import { herinnering, isUitVerzoek, leesCommando, NIVEAUS, regelsVoor, STANDAARD, subagentRegel } from '../lib/regels.mjs'
@@ -413,12 +414,13 @@ export const registerMinify = (on: Parameters<Register>[0]): void => {
   })
 }
 
-// Inhoud van de tab Minify in het dashboard (was het losse paneel minify).
+// Inhoud van de tab Minify in het dashboard (was het losse paneel minify), in kaarten.
 // Leest de atoms, dus elke beurt en elke inkorting tekent het opnieuw. Svg op desktop, tekstbalken in de terminal.
 export async function minifyTab($: Engine, e: any) {
     const el = $.ui.resolve(e)
-    const { Box, Text, Button } = el
-    if ((await oud($)).minify) return <Text dimColor>De oude minify-plugin staat nog aan en beheert dit onderdeel.</Text>
+    const { Box, Text } = el
+    const ui = paneelVan(el, e, await actieveKleuren($))
+    if ((await oud($)).minify) return leeg(ui, 'De oude minify-plugin staat nog aan en beheert dit onderdeel.')
     // Alleen de terminal tekent geen Svg. Niet `'Svg' in el` gebruiken: de tabel antwoordt daar ook in de terminal ja.
     const Svg = e.surface !== 'terminal' && 'Svg' in el ? el.Svg : undefined
     const n = await niveauLezen($)
@@ -435,80 +437,63 @@ export async function minifyTab($: Engine, e: any) {
       .filter(x => per[x]?.beurten)
       .map(x => ({ label: x, waarde: per[x]!.output / per[x]!.beurten, nadruk: x === n, tekst: `${kort(per[x]!.output / per[x]!.beurten)} · ${per[x]!.beurten}×` }))
 
-    const kaart = (titel: string, waarde: string, onder: string) => (
-      <Box flexDirection="column" borderStyle="round" borderDimColor paddingX={2} paddingY={1} minWidth={22} flexGrow={1}>
-        <Text dimColor size="caption">{titel}</Text>
-        <Text size="title" weight="bold" tabular>{waarde}</Text>
-        <Text dimColor size="footnote">{onder}</Text>
-      </Box>
-    )
-
     const lijnSvg = Svg ? lijn(reeks) : null
     const stavenSvg = Svg ? staven(niveauRijen) : null
     const maxNiveau = Math.max(1, ...niveauRijen.map(r => r.waarde))
+    // Balken en de sparkline passen in een kaart: label (5) + balk + tekst (~12).
+    const balk = Math.max(6, Math.min(20, ui.binnen - 18))
+    const vonk = Math.max(10, Math.min(30, ui.binnen))
 
     return (
-      <Box flexDirection="column" gap={1} padding={1}>
-        <Box flexDirection="row" justifyContent="space-between" alignItems="center" flexWrap="wrap" gap={1}>
-          <Box flexDirection="column">
-            <Text size="title" weight="bold">minify</Text>
-            <Text dimColor size="footnote">{n === 'uit' ? 'uit: Claude antwoordt normaal' : `-${n} · regels meegegeven: ${regelsRegel(n, gemeld)}`}</Text>
-          </Box>
-          <Box flexDirection="row" gap={1}>
-            {(['O1', 'O2', 'O3', 'uit'] as const).map(x => (
-              <Button key={`niveau-${x}`} variant={x === n ? 'primary' : 'secondary'} onPress={() => void zetNiveau($, x)}>
-                {x === n ? `● ${x}` : x}
-              </Button>
-            ))}
-          </Box>
-        </Box>
+      <Box flexDirection="column" gap={1}>
+        {kaart(ui, 'Niveau', [
+          uitleg(ui, n === 'uit' ? 'Uit: Claude antwoordt normaal.' : `-${n} · regels meegegeven: ${regelsRegel(n, gemeld)}`),
+        ], {
+          rechts: n === 'uit' ? 'uit' : `-${n}`,
+          knoppen: knoppen(ui, (['O1', 'O2', 'O3', 'uit'] as const).map(x =>
+            knop(ui, `niveau-${x}`, x === n ? `● ${x}` : x, () => void zetNiveau($, x), { primary: x === n }))),
+        })}
 
-        <Box flexDirection="row" gap={1} flexWrap="wrap">
-          {kaart('Output per beurt', t.beurten ? kort(gem) : '–', `${t.beurten} beurten deze sessie`)}
-          {kaart('Uitvoer ingekort', t.ingekort ? `−${pct}%` : '–', `${t.ingekort}× · ${kort(t.uitvoerVoor)} → ${kort(t.uitvoerNa)} tekens`)}
-          {kaart('Niet gelezen', bespaard ? `~${kort(bespaard / 4)}` : '–', 'tokens (schatting: 4 tekens per token)')}
-        </Box>
+        {raster(ui, [
+          stat(ui, 'Output per beurt', t.beurten ? kort(gem) : '–', `${t.beurten} beurten deze sessie`),
+          stat(ui, 'Uitvoer ingekort', t.ingekort ? `−${pct}%` : '–', `${t.ingekort}× · ${kort(t.uitvoerVoor)} → ${kort(t.uitvoerNa)} tekens`, { kleur: ui.k.accent }),
+          stat(ui, 'Niet gelezen', bespaard ? `~${kort(bespaard / 4)}` : '–', 'tokens (schatting: 4 tekens per token)', { kleur: ui.k.accent }),
+        ])}
 
-        <Box flexDirection="column" gap={1}>
-          <Text weight="semibold">Output-tokens per beurt</Text>
-          {lijnSvg && Svg ? (
-            <Svg source={lijnSvg} alt={`Output-tokens per beurt, ${reeks.length} beurten, gemiddeld ${kort(gem)}`} />
-          ) : reeks.length ? (
-            <Text tabular>{reeks.slice(-30).map(v => '▁▂▃▄▅▆▇█'[Math.min(7, Math.floor((v / Math.max(...reeks)) * 7.99))]).join('')}</Text>
-          ) : (
-            <Text dimColor>Nog geen beurten gemeten.</Text>
-          )}
-        </Box>
+        {kaart(ui, 'Output-tokens per beurt', lijnSvg && Svg ? (
+          <Svg source={lijnSvg} alt={`Output-tokens per beurt, ${reeks.length} beurten, gemiddeld ${kort(gem)}`} />
+        ) : reeks.length ? (
+          <Text color={ui.k.accent} tabular>{reeks.slice(-vonk).map(v => '▁▂▃▄▅▆▇█'[Math.min(7, Math.floor((v / Math.max(...reeks)) * 7.99))]).join('')}</Text>
+        ) : (
+          leeg(ui, 'Nog geen meting — verschijnt na je eerste beurt.')
+        ), reeks.length ? { rechts: `⌀ ${kort(gem)}` } : {})}
 
-        <Box flexDirection="column" gap={1}>
-          <Text weight="semibold">Gemiddeld per niveau, alle sessies</Text>
-          {stavenSvg && Svg ? (
+        {kaart(ui, 'Per niveau, alle sessies', [
+          stavenSvg && Svg ? (
             <Svg source={stavenSvg} alt={niveauRijen.map(r => `${r.label}: ${r.tekst}`).join(', ')} />
           ) : niveauRijen.length ? (
             niveauRijen.map(r => (
-              <Text tabular>
-                {r.label.padEnd(4)} {tekstBalk(r.waarde, maxNiveau)} {r.tekst}
+              <Text tabular wrap="truncate-end">
+                <Text color={r.nadruk ? ui.k.accent : ui.k.fg} bold={r.nadruk}>{r.label.padEnd(4)}</Text>
+                {' '}<Text color={r.nadruk ? ui.k.accent : ui.k.mut}>{tekstBalk(r.waarde, maxNiveau, balk)}</Text>
+                <Text color={ui.k.mut}>{` ${r.tekst}`}</Text>
               </Text>
             ))
           ) : (
-            <Text dimColor>Nog niets gemeten.</Text>
-          )}
-          <Text dimColor size="footnote">Geen A/B-test: beurten verschillen per taak. Vergelijk pas bij veel beurten per niveau.</Text>
-        </Box>
+            leeg(ui, 'Nog niets gemeten.')
+          ),
+          uitleg(ui, 'Geen A/B-test: beurten verschillen per taak. Vergelijk pas bij veel beurten per niveau.'),
+        ])}
 
-        <Box flexDirection="column">
-          <Text weight="semibold">Laatst ingekort</Text>
-          {recent.length === 0 && <Text dimColor>Nog niets ingekort.</Text>}
-          {recent.map(r => (
-            <Box flexDirection="row" gap={1}>
-              <Text tabular>{tekstBalk(r.na, r.voor, 10)}</Text>
-              <Text tabular>{`${kort(r.voor)} → ${kort(r.na)}`.padEnd(14)}</Text>
-              <Text dimColor wrap="truncate-end">{r.tool.replace(/^mcp__(plugin_)?/, '').replace(/__/g, ' · ')}</Text>
-            </Box>
-          ))}
-        </Box>
+        {kaart(ui, 'Laatst ingekort', recent.length === 0 ? leeg(ui, 'Nog niets ingekort — lange uitvoer van Bash en MCP verschijnt hier.') : recent.map(r => (
+          <Text wrap="truncate-end">
+            <Text color={ui.k.accent} tabular>{tekstBalk(r.na, r.voor, 8)}</Text>
+            <Text tabular>{` ${`${kort(r.voor)} → ${kort(r.na)}`.padEnd(13)}`}</Text>
+            <Text color={ui.k.mut}>{r.tool.replace(/^mcp__(plugin_)?/, '').replace(/__/g, ' · ')}</Text>
+          </Text>
+        )))}
 
-        <Text dimColor size="footnote">/minify status · /minify stats · /minify bestand {'<pad>'} · originelen in ~/.claude/minify/uitvoer/</Text>
+        {uitleg(ui, '/minify status · /minify stats · /minify bestand <pad> · originelen in ~/.claude/minify/uitvoer/')}
       </Box>
     )
 }
