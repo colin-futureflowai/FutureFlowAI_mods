@@ -15,6 +15,8 @@
 //   accounts switch <id> [--van <id>] [--ikzelf <sessionId>] [--auto]  → { gewisseld, van, naar, email, plan }
 //                                              exit 7 → { fout, code, wie, sinds }
 //   accounts freshen <id>                      kopie vers maken (niet-actief) → { id, ververst, reden? }
+//   accounts usage --refresh [--id <n>] [--nu] verbruik ophalen (aan de beurt; --nu: alleen de vloer)
+//                                              → { opgehaald: id[], overgeslagen: id[], fouten: { id: tekst } }
 //
 // Uitvoer: altijd één JSON-regel op stdout, ook bij een fout ({ fout, code, … }; de melding staat ook
 // op stderr). Nooit een token, credential of volledig e-mailadres.
@@ -34,7 +36,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { GEDEELD, instellingenVan, KOPIE, LIVE, maskEmail, planLabel, REDDING, telBezig, VORIGE } from '../lib/accounts.mjs'
+import { GEDEELD, instellingenVan, KOPIE, LIVE, maskEmail, planLabel, POLL, pollPlan, REDDING, ruimte, telBezig, VORIGE } from '../lib/accounts.mjs'
 
 const THUIS = os.homedir()
 const CLAUDE_HOME = process.env.CLAUDE_HOME || path.join(THUIS, '.claude')
@@ -1064,8 +1066,158 @@ async function wissel(o) {
   })
 }
 
+// --- verbruik -------------------------------------------------------------------------------
+
+const BASIS_VENSTERS = new Set(['5u', '7d'])
+// Staat het actieve account binnen zoveel punten van zijn marge, dan worden kandidaten in de rotatie
+// bijgehaald als hun meting ouder is dan KANDIDAAT_VERS, zodat de keuze op verse metingen kan
+// (de vloer en een 429 gelden dan nog steeds).
+const ESCALATIE = 15
+const KANDIDAAT_VERS = 10 * 60_000
+
+function vensterLabel(k) {
+  if (k === 'five_hour') return '5u'
+  if (k === 'seven_day') return '7d'
+  if (k.startsWith('seven_day_')) return `7d ${k.slice('seven_day_'.length).replace(/_/g, ' ')}`
+  return undefined
+}
+
+// five_hour → 5u, seven_day → 7d, seven_day_opus → 7d opus. `utilization: null` = venster zonder pct.
+function vensters(d) {
+  const uit = []
+  if (!d || typeof d !== 'object') return uit
+  for (const [k, v] of Object.entries(d)) {
+    const label = vensterLabel(k)
+    if (!label || !v || typeof v !== 'object' || Array.isArray(v) || !('utilization' in v)) continue
+    const pct = typeof v.utilization === 'number' && Number.isFinite(v.utilization) && v.utilization >= 0 ? v.utilization : undefined
+    const r = typeof v.resets_at === 'string' ? Date.parse(v.resets_at) : NaN
+    uit.push({ label, ...(pct !== undefined ? { pct } : {}), ...(Number.isNaN(r) ? {} : { resetsAt: r }) })
+  }
+  return uit
+}
+
+async function haalUsage(accessToken) {
+  let r
+  try {
+    r = await haal(`${API}/api/oauth/usage`, { headers: { Authorization: `Bearer ${accessToken}`, 'anthropic-beta': 'oauth-2025-04-20' } })
+  } catch (err) {
+    return { fout: err?.name === 'TimeoutError' ? 'timeout' : 'netwerk' }
+  }
+  if (r.status === 429) {
+    const ra = Number(r.headers.get('retry-after'))
+    return { fout: 'te veel verzoeken (429)', is429: true, ...(Number.isFinite(ra) && ra >= 0 ? { retryAfter: ra * 1000 } : {}) }
+  }
+  if (!r.ok) return { fout: `http-${r.status}` }
+  let d
+  try { d = await r.json() } catch { return { fout: 'onleesbaar antwoord' } }
+  const v = vensters(d)
+  if (!v.length) return { fout: 'antwoord zonder vensters' }
+  return { vensters: v }
+}
+
+const basisPct = vs => {
+  let m
+  for (const v of vs) if (BASIS_VENSTERS.has(v.label) && typeof v.pct === 'number') m = m === undefined ? v.pct : Math.max(m, v.pct)
+  return m
+}
+
+// Eén account meten. Actief: access-token uit het live item (nooit verversen). Niet-actief: kopie,
+// eerst vers gemaakt als hij binnen 5 min verloopt.
+async function meetEen(a, isActief, t) {
+  let cred
+  if (isActief) {
+    const live = leesLive()
+    if (!live || !geldig(live.cred)) return { fout: 'geen login in de sleutelhanger', overslaan: true }
+    if (verloopt(live.cred) <= t) return { fout: 'token verlopen, ververst bij het volgende bericht', overslaan: true }
+    cred = live.cred
+  } else {
+    const f = await ververs(a, 5 * 60_000)
+    if (f.soort === 'invalid_grant') return { fout: 'opnieuw inloggen nodig', overslaan: true }
+    if (f.soort === 'kapot') return { fout: f.fout, overslaan: true }
+    if (f.soort !== 'ok') return { fout: `login niet ververst (${f.fout})` }
+    cred = f.cred
+  }
+  return { ...(await haalUsage(cred.claudeAiOauth.accessToken)), planBron: cred.claudeAiOauth }
+}
+
+// Uitkomst van een meting in gebruik.json: metingen + poll-plan. Mislukt: de laatste goede meting
+// blijft, alleen fout en backoff veranderen.
+function verwerk(x, r, isActief, t) {
+  const recent429 = !!r.is429 || (typeof x.laatste429 === 'number' && t - x.laatste429 < POLL.recent429)
+  const vorig = typeof x.interval === 'number' ? { interval: x.interval, ...(typeof x.pct === 'number' ? { pct: x.pct } : {}) } : undefined
+  if (r.vensters) {
+    const pct = basisPct(r.vensters)
+    const basis = r.vensters.filter(v => BASIS_VENSTERS.has(v.label) && typeof v.pct === 'number')
+    const vol = basis.filter(v => v.pct >= 100 && !(typeof v.resetsAt === 'number' && v.resetsAt <= t))
+    const resets = (vol.length ? vol : basis).map(v => v.resetsAt).filter(tijd => typeof tijd === 'number' && tijd > t)
+    const resetsAt = resets.length ? (vol.length ? Math.max(...resets) : Math.min(...resets)) : undefined
+    const plan = pollPlan({ vorig, nieuwPct: pct, actief: isActief, uitgeput: vol.length > 0, recent429, resetsAt, nu: t, rnd: Math.random })
+    return {
+      vensters: r.vensters, gemetenOp: t, poging: t, volgende: plan.volgende, interval: plan.interval,
+      ...(pct !== undefined ? { pct } : {}),
+      ...(typeof x.laatste429 === 'number' ? { laatste429: x.laatste429 } : {}),
+    }
+  }
+  if (r.overslaan) return { ...x, fout: r.fout, foutOp: t, poging: t, volgende: Math.max(Number(x.volgende) || 0, t + POLL.vloer) }
+  const plan = pollPlan({ vorig, actief: isActief, uitgeput: false, recent429, mislukt: true, ...(r.retryAfter !== undefined ? { retryAfter: r.retryAfter } : {}), nu: t, rnd: Math.random })
+  return {
+    ...x, fout: r.fout, foutOp: t, poging: t, volgende: plan.volgende, interval: plan.interval,
+    ...(r.is429 ? { laatste429: t, nietVoor: t + Math.max(POLL.na429Min, (r.retryAfter ?? 0) + POLL.retryMarge) } : {}),
+  }
+}
+
+// Verbruik ophalen voor de accounts die aan de beurt zijn (`volgende` uit gebruik.json), met --nu
+// alleen de vloer. Een 429 (`nietVoor`) en de vloer gelden altijd. Netwerk nooit onder een lock; een
+// account wordt eerst geclaimd onder staat.lock, zodat twee processen niet allebei ophalen.
+async function usage(o) {
+  eisStandaard()
+  if (!o.refresh || o._.length) throw new Fout(GEBRUIK, 1)
+  const staat = leesStaat()
+  const gebruik = leesGebruik()
+  const t = nu()
+  const actiefSleutel = identiteitNu()?.sleutel
+  const actief = staat.accounts.find(a => a.sleutel === actiefSleutel)
+  const doelen = o.id !== undefined ? [zoek(staat, o.id)] : staat.accounts
+  const rAct = actief ? ruimte(gebruik[actief.id], staat.instellingen, t) : null
+  const uit = { opgehaald: [], overgeslagen: [], fouten: {} }
+  for (const a of doelen) {
+    const isActief = a.id === actief?.id
+    const g = gebruik[a.id] ?? {}
+    const poging = Number(g.poging) || 0
+    const mag = t >= (Number(g.nietVoor) || 0) && t - poging >= POLL.vloer && (isActief || a.status === 'ok')
+    let aanDeBeurt = mag && (o.nu || t >= (Number(g.volgende) || 0))
+    if (mag && !aanDeBeurt && !isActief && a.inRotatie && rAct !== null && rAct <= ESCALATIE && !(t - (Number(g.gemetenOp) || 0) < KANDIDAAT_VERS)) aanDeBeurt = true
+    if (!aanDeBeurt) {
+      uit.overgeslagen.push(a.id)
+      continue
+    }
+    const geclaimd = await werkBij((_s, gb) => {
+      const x = gb[a.id] ?? {}
+      if ((Number(x.poging) || 0) !== poging) return false
+      gb[a.id] = { ...x, poging: t }
+      return true
+    })
+    if (!geclaimd) {
+      uit.overgeslagen.push(a.id)
+      continue
+    }
+    const r = await meetEen(a, isActief, t)
+    await werkBij((s, gb) => {
+      gb[a.id] = verwerk(gb[a.id] ?? {}, r, isActief, t)
+      const acc = s.accounts.find(x => x.id === a.id)
+      if (acc && r.planBron && t - (acc.planOp ?? 0) > 6 * UUR) {
+        acc.plan = planLabel(r.planBron)
+        acc.planOp = t
+      }
+    })
+    if (r.vensters) uit.opgehaald.push(a.id)
+    else uit.fouten[a.id] = r.fout
+  }
+  return uit
+}
+
 const GEBRUIK =
-  'Gebruik: accounts add [--label <tekst>] | list | status [--json] | remove <id> | zet <id> rotatie aan|uit | ' +
+  'Gebruik: accounts usage --refresh [--id <n>] [--nu] | accounts add [--label <tekst>] | list | status [--json] | remove <id> | zet <id> rotatie aan|uit | ' +
   "instellingen '<json>' | sync | sessie <sessionId> bezig|tussen|weg | bezig [--ikzelf <sessionId>] | " +
   'switch <id> [--van <id>] [--ikzelf <sessionId>] [--auto] | freshen <id>'
 
@@ -1092,6 +1244,7 @@ export async function main(args) {
       uit = bezig(o.ikzelf)
     } else if (cmd === 'switch') uit = await wissel(opties(rest, { van: 'waarde', ikzelf: 'waarde', auto: 'vlag' }))
     else if (cmd === 'freshen' && rest.length === 1) uit = await freshen(rest[0])
+    else if (cmd === 'usage') uit = await usage(opties(rest, { refresh: 'vlag', id: 'waarde', nu: 'vlag' }))
     else throw new Fout(GEBRUIK, 1)
     console.log(JSON.stringify(uit))
     return 0

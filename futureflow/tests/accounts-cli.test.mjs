@@ -628,3 +628,176 @@ test('switch vanaf een onbekende login → die login in redding; niets kwijt', a
   assert.equal(gered.mcpOAuth, undefined)
   geenGeheimen()
 })
+
+// --- Task 5 ---------------------------------------------------------------------------------
+
+const iso = ms => new Date(ms).toISOString()
+const usageVerzoeken = () => t.verzoeken.filter(v => v.pad === '/api/oauth/usage')
+const refreshVerzoeken = () => t.verzoeken.filter(v => v.pad === '/v1/oauth/token')
+function usageRoute(pct = n => 40 + n) {
+  t.route['/api/oauth/usage'] = ({ auth }) => {
+    const n = t.tokens[auth]
+    if (!n) return { status: 401, json: {} }
+    return {
+      json: {
+        five_hour: { utilization: pct(n), resets_at: iso(Date.now() + 2 * UUR) },
+        seven_day: { utilization: 10, resets_at: iso(Date.now() + 72 * UUR) },
+        seven_day_opus: { utilization: null, resets_at: null },
+        extra_usage: { is_enabled: false },
+      },
+    }
+  }
+}
+const gebruikJson = () => leesJson(path.join(t.home, 'gebruik.json'))
+
+test('usage: headers, vensters, vloer 360 s (twee keer kort na elkaar → één verzoek per account)', async () => {
+  const { c1, c2 } = await tweeAccounts()
+  usageRoute()
+  const T0 = Date.now()
+  let r = await cli(['usage', '--refresh'], { ACCOUNTS_TEST_NU: String(T0) })
+  assert.equal(r.status, 0, r.stderr)
+  assert.deepEqual(r.json, { opgehaald: [1, 2], overgeslagen: [], fouten: {} })
+  const vz = usageVerzoeken()
+  assert.equal(vz.length, 2)
+  assert.deepEqual(vz.map(v => v.auth), [c1.claudeAiOauth.accessToken, c2.claudeAiOauth.accessToken], 'niet-actief: kopie; actief: live item')
+  for (const v of vz) {
+    assert.equal(v.beta, 'oauth-2025-04-20')
+    assert.match(v.ua, /^futureflow-accounts\//)
+  }
+  assert.equal(refreshVerzoeken().length, 0)
+
+  r = await cli(['usage', '--refresh'], { ACCOUNTS_TEST_NU: String(T0 + 10_000) })
+  assert.deepEqual(r.json, { opgehaald: [], overgeslagen: [1, 2], fouten: {} })
+  r = await cli(['usage', '--refresh', '--nu'], { ACCOUNTS_TEST_NU: String(T0 + 60_000) })
+  assert.deepEqual(r.json.overgeslagen, [1, 2])
+  assert.equal(usageVerzoeken().length, 2)
+  r = await cli(['usage', '--refresh', '--nu', '--id', '1'], { ACCOUNTS_TEST_NU: String(T0 + 361_000) })
+  assert.deepEqual(r.json.opgehaald, [1])
+  assert.equal(usageVerzoeken().length, 3)
+
+  const g = gebruikJson()
+  assert.deepEqual(g[1].vensters.map(v => v.label), ['5u', '7d', '7d opus'])
+  assert.equal(g[1].vensters[2].pct, undefined)
+  assert.ok(g[1].volgende >= T0 + 361_000 + 360_000, 'nooit binnen de vloer')
+  const s = await cli(['status', '--json'], { ACCOUNTS_TEST_NU: String(T0 + 400_000) })
+  const a1 = s.json.accounts.find(a => a.id === 1)
+  assert.equal(a1.gebruik['5u'].pct, 41)
+  assert.equal(a1.gebruik['7d'].pct, 10)
+  assert.equal(a1.leeftijdS, 39)
+  assert.equal(s.json.accounts.find(a => a.id === 2).gebruik['5u'].pct, 42)
+  geenGeheimen()
+})
+
+test('usage: 429 met Retry-After → laatste meting blijft, volgende poging pas daarna', async () => {
+  await tweeAccounts()
+  usageRoute()
+  const T0 = Date.now()
+  await cli(['usage', '--refresh', '--id', '1'], { ACCOUNTS_TEST_NU: String(T0) })
+  t.route['/api/oauth/usage'] = () => ({ status: 429, headers: { 'Retry-After': '1200' }, json: { error: 'rate_limited' } })
+  let r = await cli(['usage', '--refresh', '--nu', '--id', '1'], { ACCOUNTS_TEST_NU: String(T0 + 400_000) })
+  assert.deepEqual(r.json.fouten, { 1: 'te veel verzoeken (429)' })
+  const g = gebruikJson()[1]
+  assert.equal(g.gemetenOp, T0, 'laatste goede meting blijft')
+  assert.equal(g.vensters[0].pct, 41)
+  assert.equal(g.nietVoor, T0 + 400_000 + 1_260_000)
+  assert.ok(g.interval >= 600_000)
+  usageRoute()
+  const aantal = usageVerzoeken().length
+  r = await cli(['usage', '--refresh', '--nu', '--id', '1'], { ACCOUNTS_TEST_NU: String(T0 + 1_500_000) })
+  assert.deepEqual(r.json.overgeslagen, [1])
+  assert.equal(usageVerzoeken().length, aantal)
+  r = await cli(['usage', '--refresh', '--nu', '--id', '1'], { ACCOUNTS_TEST_NU: String(T0 + 1_700_000) })
+  assert.deepEqual(r.json.opgehaald, [1])
+  const na = gebruikJson()[1]
+  assert.equal(na.fout, undefined)
+  assert.equal(na.laatste429, T0 + 400_000)
+  assert.ok(na.interval >= 600_000, 'na een 429 een uur lang minstens 600 s')
+  const s = await cli(['status'], { ACCOUNTS_TEST_NU: String(T0 + 1_700_000) })
+  assert.equal(s.json.accounts.find(a => a.id === 1).fout, undefined)
+})
+
+test('usage: actief verlopen token → geen refresh, overslaan met uitleg', async () => {
+  await voegToe(1)
+  await voegToe(2, { expiresAt: Date.now() - 1000 })
+  usageRoute()
+  const r = await cli(['usage', '--refresh', '--id', '2'])
+  assert.deepEqual(r.json.fouten, { 2: 'token verlopen, ververst bij het volgende bericht' })
+  assert.equal(refreshVerzoeken().length, 0)
+  assert.equal(usageVerzoeken().length, 0)
+  geenGeheimen()
+})
+
+test('usage: niet-actief verlopen → refresh, nieuwe kopie bewaard vóór het usage-verzoek', async () => {
+  await voegToe(1, { expiresAt: Date.now() + 60_000 })
+  await voegToe(2)
+  const nieuwAt = 'sk-ant-oat01-GEHEIM-VERS-AT-1'
+  t.geheimen.push(nieuwAt, 'sk-ant-ort01-GEHEIM-VERS-RT-1')
+  t.tokens[nieuwAt] = 1
+  t.route['/v1/oauth/token'] = () => ({ json: { access_token: nieuwAt, refresh_token: 'sk-ant-ort01-GEHEIM-VERS-RT-1', expires_in: 28800 } })
+  let kopieBijUsage
+  usageRoute()
+  const gewoon = t.route['/api/oauth/usage']
+  t.route['/api/oauth/usage'] = a => {
+    kopieBijUsage = JSON.parse(kcGet('futureflow-accounts', sleutel(1))).claudeAiOauth.accessToken
+    return gewoon(a)
+  }
+  const r = await cli(['usage', '--refresh', '--id', '1'])
+  assert.deepEqual(r.json.opgehaald, [1], r.stderr)
+  assert.deepEqual(t.verzoeken.map(v => v.pad).slice(-2), ['/v1/oauth/token', '/api/oauth/usage'])
+  assert.equal(kopieBijUsage, nieuwAt, 'opvolger bewaard vóór het usage-verzoek')
+  assert.equal(usageVerzoeken().at(-1).auth, nieuwAt)
+  geenGeheimen()
+})
+
+test('usage: invalid_grant → opnieuw-inloggen, daarna overgeslagen', async () => {
+  await voegToe(1, { expiresAt: Date.now() - 1000 })
+  await voegToe(2)
+  usageRoute()
+  t.route['/v1/oauth/token'] = () => ({ status: 400, json: { error: 'invalid_grant' } })
+  let r = await cli(['usage', '--refresh', '--id', '1'])
+  assert.deepEqual(r.json.fouten, { 1: 'opnieuw inloggen nodig' })
+  assert.equal(usageVerzoeken().length, 0)
+  const s = await cli(['status'])
+  assert.equal(s.json.accounts.find(a => a.id === 1).status, 'opnieuw-inloggen')
+  r = await cli(['usage', '--refresh', '--nu', '--id', '1'], { ACCOUNTS_TEST_NU: String(Date.now() + UUR) })
+  assert.deepEqual(r.json.overgeslagen, [1])
+  assert.equal(refreshVerzoeken().length, 1)
+  geenGeheimen()
+})
+
+test('usage: schrijffout na refresh → opvolger in redding, status onbekend', async () => {
+  const c1 = await voegToe(1, { expiresAt: Date.now() - 1000 })
+  await voegToe(2)
+  usageRoute()
+  t.geheimen.push('sk-ant-oat01-GEHEIM-R-AT', 'sk-ant-ort01-GEHEIM-R-RT')
+  t.route['/v1/oauth/token'] = () => ({ json: { access_token: 'sk-ant-oat01-GEHEIM-R-AT', refresh_token: 'sk-ant-ort01-GEHEIM-R-RT', expires_in: 28800 } })
+  const r = await cli(['usage', '--refresh', '--id', '1'], { NEP_FAAL: JSON.stringify([{ op: 'add', svc: 'futureflow-accounts' }]) })
+  assert.ok(r.json.fouten[1])
+  assert.equal(usageVerzoeken().length, 0)
+  assert.equal(JSON.parse(kcGet('futureflow-accounts-redding', sleutel(1))).claudeAiOauth.refreshToken, 'sk-ant-ort01-GEHEIM-R-RT')
+  assert.equal(JSON.parse(kcGet('futureflow-accounts', sleutel(1))).claudeAiOauth.refreshToken, c1.claudeAiOauth.refreshToken)
+  const a1 = (await cli(['status'])).json.accounts.find(a => a.id === 1)
+  assert.equal(a1.status, 'onbekend')
+  assert.match(a1.statusUitleg, /redding/)
+  assert.equal((await cli(['switch', '1'])).status, 9, 'niet naar een account met status onbekend')
+  geenGeheimen()
+})
+
+test('usage: actief dicht bij zijn marge → kandidaat met een meting > 10 min wordt bijgehaald', async () => {
+  await tweeAccounts()
+  usageRoute()
+  const T0 = Date.now()
+  fs.writeFileSync(path.join(t.home, 'gebruik.json'), JSON.stringify({
+    1: { vensters: [{ label: '5u', pct: 30 }], gemetenOp: T0 - 11 * 60_000, poging: T0 - 11 * 60_000, volgende: T0 + 300_000, interval: 900_000 },
+    2: { vensters: [{ label: '5u', pct: 80 }], gemetenOp: T0 - 60_000, poging: T0 - 60_000, volgende: T0 + 300_000, interval: 360_000 },
+  }))
+  let r = await cli(['usage', '--refresh'], { ACCOUNTS_TEST_NU: String(T0) })
+  assert.deepEqual(r.json, { opgehaald: [1], overgeslagen: [2], fouten: {} })
+  // Zonder escalatie (actief op 50 %): wacht op `volgende`.
+  fs.writeFileSync(path.join(t.home, 'gebruik.json'), JSON.stringify({
+    1: { vensters: [{ label: '5u', pct: 30 }], gemetenOp: T0 - 11 * 60_000, poging: T0 - 11 * 60_000, volgende: T0 + 300_000, interval: 900_000 },
+    2: { vensters: [{ label: '5u', pct: 50 }], gemetenOp: T0 - 60_000, poging: T0 - 60_000, volgende: T0 + 300_000, interval: 360_000 },
+  }))
+  r = await cli(['usage', '--refresh'], { ACCOUNTS_TEST_NU: String(T0) })
+  assert.deepEqual(r.json.opgehaald, [])
+})
