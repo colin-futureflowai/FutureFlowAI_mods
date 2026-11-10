@@ -103,6 +103,7 @@ async function zetStap($: Engine, stap: Stap): Promise<void> {
       const status = await read($, apiStatusAtom)
       const key = status ? status.orHeeftKey === true : (await $.store.get('openrouter.heeftKey')) === true
       if (!key || !k.model || !k.snel) $.ui.toast('OpenRouter staat in de lijst, maar wordt overgeslagen tot er een key en beide modellen zijn.')
+      else $.ui.toast('OpenRouter wisselt nooit vanzelf: zit je abonnement vol, dan zegt futureflow dat je een sessie met claude-or kunt starten.')
     }
   } catch (err) {
     failOpen($, err)
@@ -211,7 +212,7 @@ export async function wisselKaart($: Engine, e: any, k: PaneelKleuren): Promise<
       <Box key="wissel-stappen" flexDirection="row" flexWrap="wrap" columnGap={2}>
         {vinkje(ui, 'wissel-stap-account', o.accAuto, 'Ander abonnement', () => zetStapAccount($))}
         {vinkje(ui, 'wissel-stap-api', stapAan('api'), 'Anthropic API', () => zetStap($, 'api'))}
-        {vinkje(ui, 'wissel-stap-openrouter', stapAan('openrouter'), 'OpenRouter', () => zetStap($, 'openrouter'))}
+        {vinkje(ui, 'wissel-stap-openrouter', stapAan('openrouter'), 'OpenRouter (melding)', () => zetStap($, 'openrouter'))}
       </Box>,
       <Input key="wissel-hoog" label="Wissel vanaf % " value={String(t.hoog)} submitLabel="zet" onSubmit={(waarde: string) => zetVanaf($, waarde)} />,
       <Input key="wissel-laag" label="Terug onder %  " value={String(t.laag)} submitLabel="zet" onSubmit={(waarde: string) => zetTerug($, waarde)} />,

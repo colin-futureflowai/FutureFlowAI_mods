@@ -38,7 +38,7 @@ test('vier stappen met hun stand; ← nu bij het abonnement; e-mail gemaskeerd',
     '1. Je abonnement — 5u 70% · 7d 20%',
     '2. Ander abonnement — account 2, ruimte 60%',
     '3. Anthropic API — key ✓',
-    '4. OpenRouter — openai/gpt-5 (uit)',
+    '4. OpenRouter — melding: start claude-or (openai/gpt-5) (uit)',
   ])
   assert.deepEqual(o.regels.map(r => r.nu), [true, false, false, false])
   assert.deepEqual(o.regels.map(r => r.dim), [false, false, false, true])
@@ -57,7 +57,7 @@ test('op OpenRouter: nu bij OpenRouter, volgorde volgt stappen, redenen voor wat
   assert.deepEqual(o.regels.map(r => r.tekst), [
     '1. Je abonnement — 5u 70% · 7d 20%',
     '2. Ander abonnement — geen tweede account',
-    '3. OpenRouter — openai/gpt-5',
+    '3. OpenRouter — melding: start claude-or (openai/gpt-5)',
     '4. Anthropic API — geen key',
   ])
   assert.deepEqual(o.regels.map(r => r.nu), [false, false, true, false])

@@ -1,10 +1,11 @@
 // node --test futureflow/tests/openrouter-cli.test.mjs
 // Alleen met een tijdelijk settings-bestand (SETTINGS_JSON), een nep-`security` (SECURITY_BIN), een
-// tijdelijke map voor marker en cache (OPENROUTER_DIR) en een lokale http-server (OPENROUTER_URL);
+// tijdelijke map voor marker, cache en eigen settings (OPENROUTER_DIR), een tijdelijke map voor de
+// shim (SHIM_DIR) en een lokale http-server (OPENROUTER_URL);
 // nooit met het echte ~/.claude, de echte sleutelhanger of openrouter.ai.
 import { test, beforeEach, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import http from 'node:http'
 import os from 'node:os'
@@ -16,7 +17,7 @@ import { HELPER, OR_HELPER } from '../lib/api.mjs'
 const CLI = fileURLToPath(new URL('../cli/api.mjs', import.meta.url))
 const ORKEY = 'sk-or-v1-0123456789abcdef0123456789abcdefQRST'
 const APIKEY = 'sk-ant-api03-ABCDEFGHIJKLMNOPQRSTUVWXYZ_abc-WXYZ'
-let dir, bestand, nep, log, ordir, server, url, verzoeken, antwoord
+let dir, bestand, nep, log, ordir, shim, server, url, verzoeken, antwoord
 
 // Nep-security per service: bewaart een key (uit `-i … -s <service> … -w <key>`) in sleutel-<service>.
 const NEP = `#!/bin/sh
@@ -52,6 +53,7 @@ beforeEach(async () => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), 'or-test-'))
   bestand = path.join(dir, 'settings.json')
   ordir = path.join(dir, 'or')
+  shim = path.join(dir, 'bin', 'claude-or')
   const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'or-security-'))
   nep = path.join(bin, 'security')
   log = path.join(bin, 'log')
@@ -78,7 +80,7 @@ afterEach(() => new Promise(r => server.close(r)))
 function cli(args, stdin) {
   return new Promise(resolve => {
     const p = spawn(process.execPath, [CLI, ...args], {
-      env: { ...process.env, SETTINGS_JSON: bestand, SECURITY_BIN: nep, OPENROUTER_DIR: ordir, OPENROUTER_URL: url },
+      env: { ...process.env, SETTINGS_JSON: bestand, SECURITY_BIN: nep, OPENROUTER_DIR: ordir, OPENROUTER_URL: url, SHIM_DIR: path.dirname(shim) },
     })
     let stdout = ''
     let stderr = ''
@@ -120,126 +122,138 @@ test('modus openrouter zonder key: exit 4, niets geschreven; zonder model: exit 
   assert.equal((await cli(['modus', 'openrouter'])).status, 1)
   assert.equal((await cli(['modus', 'openrouter', '--model', 'gpt 5', '--snel', 'a/b'])).status, 1)
   assert.equal(fs.readFileSync(bestand, 'utf8'), '{}\n')
-  assert.equal(fs.existsSync(path.join(ordir, 'marker.json')), false)
+  assert.equal(fs.existsSync(path.join(ordir, 'settings.json')), false)
+  assert.equal(fs.existsSync(shim), false)
 })
 
-test('heen en terug: openrouter zet alle sleutels, abonnement maakt het bestand byte-gelijk', async () => {
-  const begin = JSON.stringify({ model: 'opus', env: { FOO: 'bar', CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS: '1' }, permissions: { allow: ['Bash(ls)'] } }, null, 4) + '\n'
+test('klaarzetten: eigen settings-bestand en shim; ~/.claude/settings.json blijft byte-gelijk', async () => {
+  const begin = JSON.stringify({ model: 'opus', env: { FOO: 'bar' }, permissions: { allow: ['Bash(ls)'] } }, null, 4) + '\n'
   fs.writeFileSync(bestand, begin, { mode: 0o640 })
   await cli(['openrouter', 'zet-key'], ORKEY)
   const r = await cli(['modus', 'openrouter', ...MODEL])
   assert.equal(r.status, 0, r.stderr)
-  assert.deepEqual(json(r), { modus: 'openrouter', gewijzigd: true })
-  const d = lees()
-  assert.equal(d.apiKeyHelper, OR_HELPER)
-  assert.deepEqual(d.env, {
-    FOO: 'bar',
-    CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS: '1',
-    ANTHROPIC_BASE_URL: 'https://openrouter.ai/api',
-    ANTHROPIC_API_KEY: '',
-    ANTHROPIC_DEFAULT_OPUS_MODEL: 'openai/gpt-5',
-    ANTHROPIC_DEFAULT_SONNET_MODEL: 'openai/gpt-5',
-    ANTHROPIC_DEFAULT_FABLE_MODEL: 'openai/gpt-5',
-    ANTHROPIC_DEFAULT_HAIKU_MODEL: 'openai/gpt-5-mini',
-    CLAUDE_CODE_SUBAGENT_MODEL: 'openai/gpt-5-mini',
-  })
-  assert.equal(fs.statSync(bestand).mode & 0o777, 0o640)
-  const marker = JSON.parse(fs.readFileSync(path.join(ordir, 'marker.json'), 'utf8'))
-  assert.equal(marker.env.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS, undefined)
-  const s = json(await cli(['status']))
-  assert.equal(s.modus, 'openrouter')
-  assert.equal(s.orModel, 'openai/gpt-5')
-  assert.equal(s.orSnel, 'openai/gpt-5-mini')
-  assert.equal(s.vreemdeBasis, false)
-  // Zelfde keuze nog eens: niets te doen.
-  assert.deepEqual(json(await cli(['modus', 'openrouter', ...MODEL])), { modus: 'openrouter', gewijzigd: false })
-  // Ander model: alleen de modelregels anders.
-  assert.deepEqual(json(await cli(['modus', 'openrouter', '--model', 'anthropic/claude-sonnet-4.5', '--snel', 'openai/gpt-5-mini'])), { modus: 'openrouter', gewijzigd: true })
-  assert.equal(lees().env.ANTHROPIC_DEFAULT_SONNET_MODEL, 'anthropic/claude-sonnet-4.5')
-  // Terug.
-  assert.deepEqual(json(await cli(['modus', 'abonnement'])), { modus: 'abonnement', gewijzigd: true })
+  const uit = json(r)
+  assert.equal(uit.modus, 'openrouter')
+  assert.equal(uit.gewijzigd, true)
+  assert.equal(uit.start, 'claude-or')
+  assert.equal(uit.settings, path.join(ordir, 'settings.json'))
+  assert.equal(uit.shim, shim)
   assert.equal(fs.readFileSync(bestand, 'utf8'), begin)
   assert.equal(fs.existsSync(path.join(ordir, 'marker.json')), false)
-  assert.deepEqual(fs.readdirSync(dir).sort(), ['or', 'settings.json'])
-})
-
-test('openrouter → api → openrouter: onze helpers wisselen, de rest blijft', async () => {
-  const begin = JSON.stringify({ env: { X: '1' } }, null, 2) + '\n'
-  fs.writeFileSync(bestand, begin)
-  await cli(['openrouter', 'zet-key'], ORKEY)
-  await cli(['zet-key'], APIKEY)
-  assert.equal((await cli(['modus', 'openrouter', ...MODEL])).status, 0)
-  assert.deepEqual(json(await cli(['modus', 'api'])), { modus: 'api', gewijzigd: true })
-  assert.deepEqual(lees(), { env: { X: '1' }, apiKeyHelper: HELPER })
-  assert.deepEqual(json(await cli(['modus', 'openrouter', ...MODEL])), { modus: 'openrouter', gewijzigd: true })
-  assert.equal(lees().apiKeyHelper, OR_HELPER)
-  await cli(['modus', 'abonnement'])
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(ordir, 'settings.json'), 'utf8')), {
+    apiKeyHelper: OR_HELPER,
+    env: {
+      ANTHROPIC_BASE_URL: 'https://openrouter.ai/api',
+      ANTHROPIC_API_KEY: '',
+      ANTHROPIC_DEFAULT_OPUS_MODEL: 'openai/gpt-5',
+      ANTHROPIC_DEFAULT_SONNET_MODEL: 'openai/gpt-5',
+      ANTHROPIC_DEFAULT_FABLE_MODEL: 'openai/gpt-5',
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: 'openai/gpt-5-mini',
+      CLAUDE_CODE_SUBAGENT_MODEL: 'openai/gpt-5-mini',
+      CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS: '1',
+    },
+  })
+  assert.equal(fs.statSync(shim).mode & 0o777, 0o755)
+  assert.match(fs.readFileSync(shim, 'utf8'), /# futureflow: claude-or/)
+  const s = json(await cli(['status']))
+  assert.equal(s.modus, 'abonnement')
+  assert.equal(s.orKlaar, true)
+  assert.equal(s.orShim, true)
+  assert.equal(s.orModel, 'openai/gpt-5')
+  assert.equal(s.orSnel, 'openai/gpt-5-mini')
+  assert.equal(s.oudeOr, false)
+  // Zelfde keuze nog eens: niets te doen. Ander model: alleen het eigen bestand anders.
+  assert.equal(json(await cli(['modus', 'openrouter', ...MODEL])).gewijzigd, false)
+  assert.equal(json(await cli(['modus', 'openrouter', '--model', 'anthropic/claude-sonnet-4.5[1m]', '--snel', 'openai/gpt-5-mini'])).gewijzigd, true)
+  assert.equal(JSON.parse(fs.readFileSync(path.join(ordir, 'settings.json'), 'utf8')).env.ANTHROPIC_DEFAULT_SONNET_MODEL, 'anthropic/claude-sonnet-4.5[1m]')
   assert.equal(fs.readFileSync(bestand, 'utf8'), begin)
+  // Terug naar abonnement raakt claude-or niet.
+  assert.equal(json(await cli(['modus', 'abonnement'])).gewijzigd, false)
+  assert.equal(json(await cli(['status'])).orKlaar, true)
 })
 
-test('marker kwijt: terug naar abonnement of api haalt onze bekende waarden weg; eigen regels blijven', async () => {
-  const begin = JSON.stringify({ env: { FOO: 'bar', ANTHROPIC_DEFAULT_OPUS_MODEL: 'claude-opus-5-5' } }, null, 2) + '\n'
-  for (const naar of ['abonnement', 'api']) {
-    fs.writeFileSync(bestand, begin)
-    await cli(['openrouter', 'zet-key'], ORKEY)
-    await cli(['zet-key'], APIKEY)
-    // Eigen OPUS-regel staat er al met een andere waarde: geweigerd. Dus eerst zonder die regel.
-    fs.writeFileSync(bestand, JSON.stringify({ env: { FOO: 'bar' } }, null, 2) + '\n')
-    assert.equal((await cli(['modus', 'openrouter', ...MODEL])).status, 0)
+test('shim start claude met --settings en het eigen bestand; zonder bestand een melding', async () => {
+  await cli(['openrouter', 'zet-key'], ORKEY)
+  await cli(['modus', 'openrouter', ...MODEL])
+  const nepBin = fs.mkdtempSync(path.join(os.tmpdir(), 'or-claude-'))
+  fs.writeFileSync(path.join(nepBin, 'claude'), '#!/bin/sh\nprintf "%s\\n" "$@"\n', { mode: 0o755 })
+  const env = { ...process.env, PATH: `${nepBin}:/usr/bin:/bin` }
+  const r = spawnSync(shim, ['-p', 'hoi'], { env, encoding: 'utf8' })
+  assert.equal(r.status, 0, r.stderr)
+  assert.deepEqual(r.stdout.trim().split('\n'), ['--settings', path.join(ordir, 'settings.json'), '-p', 'hoi'])
+  fs.rmSync(path.join(ordir, 'settings.json'))
+  const r2 = spawnSync(shim, [], { env, encoding: 'utf8' })
+  assert.equal(r2.status, 1)
+  assert.match(r2.stderr, /Zet klaar/)
+})
+
+test('een claude-or die niet van futureflow is: exit 3 en blijft staan', async () => {
+  await cli(['openrouter', 'zet-key'], ORKEY)
+  fs.mkdirSync(path.dirname(shim), { recursive: true })
+  fs.writeFileSync(shim, '#!/bin/sh\necho eigen\n', { mode: 0o755 })
+  const r = await cli(['modus', 'openrouter', ...MODEL])
+  assert.equal(r.status, 3)
+  assert.match(r.stderr, /niet van futureflow/)
+  assert.equal(fs.readFileSync(shim, 'utf8'), '#!/bin/sh\necho eigen\n')
+})
+
+// De toestand die futureflow < 0.9 in settings.json achterliet: alle OpenRouter-regels plus de marker.
+function oudeStand(env = {}) {
+  const or = { ANTHROPIC_BASE_URL: 'https://openrouter.ai/api', ANTHROPIC_API_KEY: '', ANTHROPIC_DEFAULT_OPUS_MODEL: 'openai/gpt-5', ANTHROPIC_DEFAULT_SONNET_MODEL: 'openai/gpt-5', ANTHROPIC_DEFAULT_FABLE_MODEL: 'openai/gpt-5', ANTHROPIC_DEFAULT_HAIKU_MODEL: 'openai/gpt-5-mini', CLAUDE_CODE_SUBAGENT_MODEL: 'openai/gpt-5-mini', CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS: '1' }
+  const marker = { env: Object.fromEntries(Object.entries(or).filter(([k]) => !(k in env))), apiKeyHelper: OR_HELPER }
+  fs.mkdirSync(ordir, { recursive: true })
+  fs.writeFileSync(path.join(ordir, 'marker.json'), JSON.stringify(marker))
+  fs.writeFileSync(bestand, JSON.stringify({ env: { ...env, ...or }, apiKeyHelper: OR_HELPER }, null, 2) + '\n')
+}
+
+test('opruimen: haalt precies de oude OpenRouter-regels weg; eigen regels blijven; marker weg', async () => {
+  oudeStand({ FOO: 'bar', CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS: '1' })
+  assert.equal(json(await cli(['status'])).oudeOr, true)
+  assert.equal(json(await cli(['status'])).modus, 'abonnement')
+  const r = await cli(['openrouter', 'opruimen'])
+  assert.equal(r.status, 0, r.stderr)
+  assert.deepEqual(json(r), { gewijzigd: true })
+  assert.deepEqual(lees(), { env: { FOO: 'bar', CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS: '1' } })
+  assert.equal(fs.existsSync(path.join(ordir, 'marker.json')), false)
+  assert.equal(json(await cli(['status'])).oudeOr, false)
+  assert.deepEqual(json(await cli(['openrouter', 'opruimen'])), { gewijzigd: false })
+})
+
+test('opruimen: met de hand veranderde modelregel blijft; een API-helper blijft', async () => {
+  oudeStand()
+  const d = lees()
+  d.env.ANTHROPIC_DEFAULT_OPUS_MODEL = 'eigen/model'
+  fs.writeFileSync(bestand, JSON.stringify(d, null, 2) + '\n')
+  await cli(['openrouter', 'opruimen'])
+  assert.deepEqual(lees(), { env: { ANTHROPIC_DEFAULT_OPUS_MODEL: 'eigen/model' } })
+  fs.writeFileSync(bestand, JSON.stringify({ apiKeyHelper: HELPER, env: { X: '1' } }))
+  assert.deepEqual(json(await cli(['openrouter', 'opruimen'])), { gewijzigd: false })
+  assert.deepEqual(lees(), { apiKeyHelper: HELPER, env: { X: '1' } })
+})
+
+test('marker kwijt: opruimen, abonnement of api halen de vaste OpenRouter-waarden weg', async () => {
+  await cli(['zet-key'], APIKEY)
+  for (const cmd of [['openrouter', 'opruimen'], ['modus', 'abonnement'], ['modus', 'api']]) {
+    oudeStand({ FOO: 'bar' })
     fs.rmSync(path.join(ordir, 'marker.json'))
-    assert.equal(json(await cli(['status'])).vreemdeBasis, false)
-    const r = await cli(['modus', naar])
+    const r = await cli(cmd)
     assert.equal(r.status, 0, r.stderr)
     const d = lees()
-    assert.deepEqual(d.env, { FOO: 'bar' })
-    assert.equal(d.apiKeyHelper, naar === 'api' ? HELPER : undefined)
+    assert.deepEqual(d.env, { FOO: 'bar' }, cmd.join(' '))
+    assert.equal(d.apiKeyHelper, cmd[1] === 'api' ? HELPER : undefined)
   }
 })
 
-test('marker kwijt en helper al weg: de base-URL van OpenRouter blokkeert niet en gaat weg', async () => {
-  fs.writeFileSync(bestand, JSON.stringify({ env: { ANTHROPIC_BASE_URL: 'https://openrouter.ai/api', ANTHROPIC_DEFAULT_HAIKU_MODEL: 'openai/gpt-5-mini', ANTHROPIC_API_KEY: '', Y: '2' } }, null, 2) + '\n')
-  await cli(['zet-key'], APIKEY)
-  const r = await cli(['modus', 'api'])
-  assert.equal(r.status, 0, r.stderr)
-  // Lege ANTHROPIC_API_KEY alleen samen met onze helper: hier blijft hij staan.
-  assert.deepEqual(lees(), { env: { ANTHROPIC_API_KEY: '', Y: '2' }, apiKeyHelper: HELPER })
-})
-
-test('vreemde waarden: andere base-URL of modelregel geweigerd met exit 3; terug naar abonnement mag', async () => {
+test('vreemde base-URL blokkeert de API, niet terug naar het abonnement en niet claude-or', async () => {
   await cli(['openrouter', 'zet-key'], ORKEY)
   await cli(['zet-key'], APIKEY)
-  for (const [env, melding] of [
-    [{ ANTHROPIC_BASE_URL: 'https://gw.example' }, /ANTHROPIC_BASE_URL/],
-    [{ ANTHROPIC_DEFAULT_OPUS_MODEL: 'claude-opus-4-6' }, /ANTHROPIC_DEFAULT_OPUS_MODEL/],
-    [{ ANTHROPIC_API_KEY: 'sk-ant-eigen' }, /ANTHROPIC_API_KEY/],
-  ]) {
-    const tekst = JSON.stringify({ env }, null, 2)
-    fs.writeFileSync(bestand, tekst)
-    const r = await cli(['modus', 'openrouter', ...MODEL])
-    assert.equal(r.status, 3, JSON.stringify(env))
-    assert.match(r.stderr, melding)
-    assert.equal(fs.readFileSync(bestand, 'utf8'), tekst)
-    assert.equal(fs.existsSync(path.join(ordir, 'marker.json')), false)
-  }
-  // Een vreemde base-URL blokkeert ook de API, maar niet terug naar het abonnement.
   fs.writeFileSync(bestand, JSON.stringify({ env: { ANTHROPIC_BASE_URL: 'https://gw.example' } }))
   assert.equal((await cli(['modus', 'api'])).status, 3)
   assert.equal((await cli(['modus', 'abonnement'])).status, 0)
   assert.equal(json(await cli(['status'])).vreemdeBasis, true)
-  // Een vreemde helper: niets.
-  fs.writeFileSync(bestand, JSON.stringify({ apiKeyHelper: '~/eigen.sh' }))
-  assert.equal((await cli(['modus', 'openrouter', ...MODEL])).status, 3)
-})
-
-test('na openrouter met de hand een modelregel veranderd: terug laat die staan', async () => {
-  fs.writeFileSync(bestand, '{}\n')
-  await cli(['openrouter', 'zet-key'], ORKEY)
-  await cli(['modus', 'openrouter', ...MODEL])
-  const d = lees()
-  d.env.ANTHROPIC_DEFAULT_OPUS_MODEL = 'eigen/model'
-  fs.writeFileSync(bestand, JSON.stringify(d, null, 2) + '\n')
-  await cli(['modus', 'abonnement'])
-  assert.deepEqual(lees(), { env: { ANTHROPIC_DEFAULT_OPUS_MODEL: 'eigen/model' } })
+  assert.deepEqual(json(await cli(['openrouter', 'opruimen'])), { gewijzigd: false })
+  assert.equal((await cli(['modus', 'openrouter', ...MODEL])).status, 0)
+  assert.deepEqual(lees(), { env: { ANTHROPIC_BASE_URL: 'https://gw.example' } })
 })
 
 test('modellen: ophalen met tools-filter, cache 6 u, --ververs haalt opnieuw, fout met cache valt terug', async () => {

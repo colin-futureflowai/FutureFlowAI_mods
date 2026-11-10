@@ -158,7 +158,8 @@ export function kiesAccount(s) {
 
 // Het hele besluit: eerst een ander abonnement met ruimte, pas als alle abonnementen vol zitten de
 // eerste beschikbare stap (API of OpenRouter, volgens `api.stappen` en `beschikbaar`; bestaande
-// `beslis`), en terug van de API of OpenRouter zodra een abonnement weer ruimte heeft.
+// `beslis`; OpenRouter is alleen een melding: start `claude-or`), en terug van de API zodra een
+// abonnement weer ruimte heeft.
 // Minder dan twee accounts in de rotatie, of auto voor accounts uit: precies het oude gedrag (`beslis`).
 export function ketting(s) {
   const { api, nu } = s
@@ -169,7 +170,7 @@ export function ketting(s) {
   const si = { ...s, metingen }
   const oud = () => {
     const b = beslis({ ...api, beschikbaar: s.beschikbaar, limieten: s.sessieLimieten, nu })
-    return b ? { soort: 'api', naar: b.naar, reden: b.reden, ...(b.door ? { door: b.door } : {}) } : null
+    return b ? { soort: 'api', naar: b.naar, reden: b.reden, ...(b.door ? { door: b.door } : {}), ...(b.alleenMelding ? { alleenMelding: true } : {}) } : null
   }
   const rotatie = s.accounts.filter(a => a.inRotatie)
   if (rotatie.length < 2 || !i.auto) return oud()

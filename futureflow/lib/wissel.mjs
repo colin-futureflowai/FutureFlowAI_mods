@@ -67,7 +67,7 @@ export function wisselOverzicht(s) {
       ? { sleutel: 'api', ...(s.apiKey ? { detail: 'key ✓' } : { kanNiet: 'geen key' }), uit: !stappen.includes('api') }
       : {
           sleutel: 'openrouter',
-          ...(!s.orKey ? { kanNiet: 'geen key' } : !s.orModel || !s.orSnel ? { kanNiet: 'geen model gekozen' } : { detail: s.orModel }),
+          ...(!s.orKey ? { kanNiet: 'geen key' } : !s.orModel || !s.orSnel ? { kanNiet: 'geen model gekozen' } : { detail: `melding: start claude-or (${s.orModel})` }),
           uit: !stappen.includes('openrouter'),
         }
   for (const x of stappen) lijst.push(stap(x))

@@ -25,7 +25,7 @@ export type KeuzeInvoer = {
 export type KettingInvoer = KeuzeInvoer & { api: Toestand; sessieLimieten: Limiet[]; handmatigTot?: number; beschikbaar?: Beschikbaar }
 export type KettingBesluit =
   | { soort: 'account'; naar: number; reden: string; door?: Door }
-  | { soort: 'api'; naar: Modus; reden: string; door?: Door }
+  | { soort: 'api'; naar: Modus; reden: string; door?: Door; alleenMelding?: true }
   | { soort: 'terug'; naar: number; reden: string }
 export type PollInvoer = {
   vorig?: { interval: number; pct?: number }

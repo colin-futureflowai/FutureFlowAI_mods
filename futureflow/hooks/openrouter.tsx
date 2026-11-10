@@ -8,11 +8,13 @@ import { failOpen } from './ctx'
 import { kaart, knop, knoppen, leeg, paneelVan, uitleg } from './paneel-ui'
 
 import { kostenOverzicht, usd } from '../lib/api.mjs'
-import { contextTekst, geldigeOrKey, geldigModel, isClaude, modellenVan, prijsTekst, sorteer, TOON } from '../lib/openrouter.mjs'
+import { contextTekst, geldigeOrKey, geldigModel, isClaude, modelIdVoor, modellenVan, prijsTekst, sorteer, START, teKlein, TOON } from '../lib/openrouter.mjs'
 
-// Tab OpenRouter: Claude Code zelf (nieuwe terminal-sessies) op een ander model via OpenRouter.
+// Tab OpenRouter: Claude Code op een ander model via OpenRouter, alleen in sessies die met `claude-or`
+// starten (eigen settings-bestand; ~/.claude/settings.json blijft van het abonnement, sinds 0.9.0).
 // Key in de macOS-sleutelhanger (alleen via stdin naar cli/api.mjs), modellen kiezen uit de lijst
-// van OpenRouter en met de hand wisselen. De ketting staat in de kaart Automatisch wisselen (wissel-kaart.tsx).
+// van OpenRouter en klaarzetten. De ketting (wissel-kaart.tsx) wisselt nooit naar OpenRouter: hij meldt
+// alleen dat je met `claude-or` verder kunt.
 // Alles buiten de plugin gaat via cli/api.mjs; de key komt nooit in state, store, log of toast.
 
 // Dezelfde atom als in hooks/api.tsx (de hooks-module leest ze statisch per bestand).
@@ -29,7 +31,8 @@ type Kleuren = { accent: string; mut: string; fg: string; ok: string; warn: stri
 const WAARSCHUWINGEN = [
   'Niet-Claude-modellen werken niet gegarandeerd in Claude Code: tools, denken en caching verschillen per model.',
   'Webzoeken werkt niet via OpenRouter.',
-  'Geldt voor nieuwe terminal-sessies; deze sessie en de desktop-app houden hun eigen login.',
+  `Start een OpenRouter-sessie met ${START}; andere sessies en de desktop-app blijven op je abonnement.`,
+  'Modellen met minder dan 200k context zijn te klein voor Claude Code: de context loopt dan snel vol en /compact faalt.',
   'Op OpenRouter laadt Claude Code de claude.ai-connectors niet.',
 ]
 const INVOER_UITLEG = 'Wat je typt is zichtbaar tot je op Enter drukt; daarna bewaart futureflow alleen de laatste 4 tekens in beeld.'
@@ -96,8 +99,6 @@ async function bewaarKey($: Engine, invoer: string): Promise<void> {
 async function wisKey($: Engine): Promise<void> {
   try {
     const status = (await read($, statusAtom)) ?? (await leesStatus($))
-    // Eerst terug naar het abonnement: zonder key kan een nieuwe terminal-sessie anders niet inloggen.
-    if (status.modus === 'openrouter' && !(await wissel($, 'abonnement', 'OpenRouter-key gewist'))) return
     const r = await cli($, ['openrouter', 'wis-key'])
     if (r.exitCode !== 0) $.ui.toast(`Key niet gewist: ${foutVan(r)}`)
     else $.ui.toast(laatsteJson(r.stdout).gewist ? 'OpenRouter-key gewist uit de sleutelhanger.' : 'Er stond geen OpenRouter-key in de sleutelhanger.')
@@ -107,18 +108,21 @@ async function wisKey($: Engine): Promise<void> {
   }
 }
 
-// Kiest het hoofd- of snelle model en bewaart zijn prijzen (voor de kostenschatting). Staan nieuwe
-// sessies al op OpenRouter, dan meteen de nieuwe modellen in settings.json zetten.
+// Kiest het hoofd- of snelle model (met `[1m]` bij ≥ 1M context) en bewaart zijn prijzen (voor de
+// kostenschatting). Staat claude-or al klaar, dan meteen de nieuwe modellen in het eigen bestand.
 async function kies($: Engine, rol: 'model' | 'snel', m: OrModel): Promise<void> {
   try {
-    if (!geldigModel(m.id)) return
+    const id = modelIdVoor(m)
+    if (!id || !geldigModel(id)) return
+    if (teKlein(m)) $.ui.toast(`Let op: ${m.id} heeft ${contextTekst(m.context)} context; dat is te klein voor Claude Code.`)
     const oud = await orKeuze($)
-    await $.store.set('openrouter.keuze', { ...oud, [rol]: m.id })
+    await $.store.set('openrouter.keuze', { ...oud, [rol]: id })
     const prijzen = ((await $.store.get('openrouter.prijzen')) ?? {}) as Record<string, { in?: number; uit?: number }>
-    await $.store.set('openrouter.prijzen', { ...prijzen, [m.id]: { ...(m.in !== undefined ? { in: m.in } : {}), ...(m.uit !== undefined ? { uit: m.uit } : {}) } })
+    const prijs = { ...(m.in !== undefined ? { in: m.in } : {}), ...(m.uit !== undefined ? { uit: m.uit } : {}) }
+    await $.store.set('openrouter.prijzen', { ...prijzen, [m.id]: prijs, [id]: prijs })
     const status = (await read($, statusAtom)) ?? (await leesStatus($))
     const nu = await orKeuze($)
-    if (status.modus === 'openrouter' && nu.model && nu.snel) await wissel($, 'openrouter', 'nieuw model')
+    if (status.orKlaar && nu.model && nu.snel) await wissel($, 'openrouter', 'nieuw model')
   } catch (err) {
     failOpen($, err)
   } finally {
@@ -161,14 +165,17 @@ async function blader($: Engine, stap: number, laatste: number): Promise<void> {
 
 // ---- tekenen ----
 
+const kaal = (id: string | undefined) => (id ?? '').replace(/\[1m\]$/, '')
+
 function regelVan(ui: ReturnType<typeof paneelVan>, $: Engine, m: OrModel, i: number, keuze: { model?: string; snel?: string }) {
   const { Box, Text } = ui.el
-  const hoofd = keuze.model === m.id
-  const snel = keuze.snel === m.id
+  const hoofd = kaal(keuze.model) === m.id
+  const snel = kaal(keuze.snel) === m.id
   return (
     <Box key={`or-regel-${i}`} flexDirection="row" flexWrap="wrap" columnGap={1}>
       <Text bold={hoofd || snel} color={hoofd || snel ? ui.k.accent : ui.k.fg} wrap="wrap">{m.id}</Text>
       <Text color={ui.k.mut} wrap="wrap">{`${contextTekst(m.context)} · ${prijsTekst(m.in)} in / ${prijsTekst(m.uit)} uit per Mtok`}</Text>
+      {teKlein(m) ? <Text color={ui.k.err} wrap="wrap">te klein voor Claude Code</Text> : ''}
       {knop(ui, `or-hoofd-${i}`, hoofd ? '● Hoofd' : 'Hoofd', () => kies($, 'model', m), { primary: hoofd })}
       {knop(ui, `or-snel-${i}`, snel ? '● Snel' : 'Snel', () => kies($, 'snel', m), { primary: snel })}
     </Box>
@@ -188,7 +195,8 @@ export async function openrouterTab($: Engine, e: any, k: Kleuren, wisselKaart?:
     const test = await read($, testAtom)
     const keuze = await orKeuze($)
     const geld = kostenOverzicht((await $.store.get('openrouter.kosten')) as Record<string, number> | undefined, await $.clock.now())
-    const opOr = status.modus === 'openrouter'
+    const klaar = status.orKlaar === true
+    const gekozen = (lijst?.modellen ?? []).filter(m => m.id === kaal(keuze.model) || m.id === kaal(keuze.snel))
 
     const gevonden = sorteer(lijst?.modellen ?? [], zoekTekst)
     const paginas = Math.max(1, Math.ceil(gevonden.length / TOON))
@@ -201,10 +209,11 @@ export async function openrouterTab($: Engine, e: any, k: Kleuren, wisselKaart?:
     return (
       <Box flexDirection="column" gap={1}>
         {kaart(ui, 'OpenRouter', [
-          <Text>
-            <Text color={k.mut}>Nieuwe terminal-sessies: </Text>
-            <Text bold color={status.modus === 'abonnement' ? k.ok : k.warn}>{opOr ? 'OpenRouter' : status.modus === 'api' ? 'API-key' : 'abonnement'}</Text>
+          <Text wrap="wrap">
+            <Text color={k.mut}>{'Start: '}</Text>
+            <Text bold color={klaar ? k.ok : k.mut}>{klaar ? START : `${START} (nog niet klaargezet)`}</Text>
           </Text>,
+          uitleg(ui, `Start een OpenRouter-sessie met ${START}; andere sessies en de desktop-app blijven op je abonnement.`, 'or-start-uitleg'),
           <Text>
             <Text color={k.mut}>{'Key: '}</Text>
             {status.orHeeftKey ? <Text>{`sk-or-…${status.orStaart ?? ''}`}</Text> : <Text color={k.mut}>geen key</Text>}
@@ -217,18 +226,22 @@ export async function openrouterTab($: Engine, e: any, k: Kleuren, wisselKaart?:
             <Text color={k.mut}>{'Snel model: '}</Text>
             {keuze.snel ? <Text>{keuze.snel}</Text> : <Text color={k.mut}>nog niet gekozen</Text>}
           </Text>,
-          opOr && status.orModel && status.orModel !== keuze.model ? (
-            <Text color={k.warn} wrap="wrap">In settings.json staat nog {status.orModel}; klik OpenRouter om de keuze te zetten.</Text>
+          klaar && status.orModel && (status.orModel !== keuze.model || status.orSnel !== keuze.snel) ? (
+            <Text color={k.warn} wrap="wrap">{START} start nog met {status.orModel}; klik Zet klaar om je keuze te gebruiken.</Text>
           ) : '',
+          klaar && !status.orOpPad ? (
+            <Text color={k.warn} wrap="wrap">~/.local/bin staat niet op je PATH: start met ~/.local/bin/{START}.</Text>
+          ) : '',
+          ...gekozen.filter(m => teKlein(m)).map(m => (
+            <Text key={`or-klein-${m.id}`} color={k.err} wrap="wrap">{m.id} heeft {contextTekst(m.context)} context: te klein voor Claude Code.</Text>
+          )),
+          status.oudeOr ? <Text color={k.warn} wrap="wrap">In ~/.claude/settings.json staan nog oude OpenRouter-regels; futureflow haalt ze bij de volgende sessiestart weg.</Text> : '',
           test ? <Text color={test.startsWith('Verbinding werkt (') ? k.ok : test.startsWith('Bezig') ? k.mut : k.err} wrap="wrap">{test}</Text> : '',
-          status.vreemdeHelper ? <Text color={k.err} wrap="wrap">In ~/.claude/settings.json staat al een andere apiKeyHelper. futureflow laat die staan en wisselt niet.</Text> : '',
-          status.vreemdeBasis ? <Text color={k.err} wrap="wrap">In ~/.claude/settings.json staat al een andere ANTHROPIC_BASE_URL. futureflow laat die staan en wisselt niet.</Text> : '',
           status.fout ? <Text color={k.err} wrap="truncate-end">Status niet volledig gelezen: {status.fout}</Text> : '',
         ], {
-          rechts: opOr ? 'aan' : 'uit',
+          rechts: klaar ? 'klaar' : 'niet klaar',
           knoppen: knoppen(ui, [
-            knop(ui, 'or-naar', opOr ? '● OpenRouter' : 'OpenRouter', () => handmatig($, 'openrouter'), { primary: opOr }),
-            knop(ui, 'or-abonnement', status.modus === 'abonnement' ? '● Abonnement' : 'Abonnement', () => handmatig($, 'abonnement'), { primary: status.modus === 'abonnement' }),
+            knop(ui, 'or-naar', 'Zet klaar', () => handmatig($, 'openrouter'), { primary: !klaar }),
             status.orHeeftKey ? knop(ui, 'or-test', 'Test verbinding', () => testVerbinding($)) : null,
           ]),
         })}

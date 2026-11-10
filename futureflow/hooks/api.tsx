@@ -9,7 +9,7 @@ import { kaart, knop, knoppen, paneelVan, uitleg } from './paneel-ui'
 import { beslis, dagSleutel, geldigeKey, houdTot, kosten, kostenOverzicht, limietenVan, modusVan, telOp, toestandVan, usd } from '../lib/api.mjs'
 import type { Beschikbaar, Door, Modus } from '../lib/api.mjs'
 import { instellingenVan, kettingAan } from '../lib/accounts.mjs'
-import { geldigModel, orKosten } from '../lib/openrouter.mjs'
+import { geldigModel, orKosten, OR_URL, START } from '../lib/openrouter.mjs'
 
 // Tab API: de API-key in de macOS-sleutelhanger en wisselen tussen abonnement en API, met de hand
 // of automatisch op de rate limits. Alles buiten de plugin (settings.json, sleutelhanger) gaat via
@@ -24,7 +24,7 @@ type Kleuren = { accent: string; mut: string; fg: string; ok: string; warn: stri
 
 const UITLEG = [
   'Wisselen geldt voor nieuwe terminal-sessies; deze sessie houdt zijn login.',
-  'De desktop-app regelt zijn eigen login en negeert deze wissel.',
+  'De desktop-app regelt zijn eigen login en negeert deze wissel (gemeten 10-11-2026).',
   'In API-modus laadt Claude Code de claude.ai-connectors niet.',
 ]
 const INVOER_UITLEG = 'Wat je typt is zichtbaar tot je op Enter drukt; daarna bewaart futureflow alleen de laatste 4 tekens in beeld.'
@@ -123,6 +123,10 @@ export async function leesStatus($: Engine): Promise<ApiStatus> {
       orStaart: typeof d.orStaart === 'string' ? d.orStaart.slice(-4) : '',
       ...(geldigModel(d.orModel) ? { orModel: d.orModel } : {}),
       ...(geldigModel(d.orSnel) ? { orSnel: d.orSnel } : {}),
+      orKlaar: d.orKlaar === true,
+      orShim: d.orShim === true,
+      orOpPad: d.orOpPad !== false,
+      oudeOr: d.oudeOr === true,
       ...(typeof d.fout === 'string' ? { fout: d.fout.slice(0, 200) } : {}),
     }
   } catch (err) {
@@ -174,16 +178,30 @@ export async function verversApi($: Engine): Promise<ApiStatus> {
 }
 
 // De modus uit ~/.claude/settings.json, zonder de CLI (die start een Node-proces); undefined als
-// het bestand ontbreekt of onleesbaar is.
-async function modusUitSettings($: Engine): Promise<{ modus: Modus; vreemdeHelper: boolean } | undefined> {
+// het bestand ontbreekt of onleesbaar is. `oudeOr`: er staan nog OpenRouter-regels van futureflow < 0.9.
+async function modusUitSettings($: Engine): Promise<{ modus: Modus; vreemdeHelper: boolean; oudeOr: boolean } | undefined> {
   const home = (await $.env.get('HOME')) ?? (await $.env.get('USERPROFILE'))
   if (!home) return undefined
   try {
     const tekst = await $.fs.read(`${home}/.claude/settings.json`)
-    const { modus, vreemdeHelper } = modusVan(tekst ? JSON.parse(tekst) : {})
-    return { modus, vreemdeHelper }
+    const data = tekst ? JSON.parse(tekst) : {}
+    const { modus, vreemdeHelper } = modusVan(data)
+    const oudeOr = modus === 'openrouter' || data?.env?.ANTHROPIC_BASE_URL === OR_URL
+    return { modus: oudeOr ? 'abonnement' : modus, vreemdeHelper, oudeOr }
   } catch {
     return undefined
+  }
+}
+
+// Oude OpenRouter-regels uit ~/.claude/settings.json halen (los van de sessiestart).
+async function ruimOudeOrOp($: Engine): Promise<void> {
+  const r = await cli($, ['openrouter', 'opruimen'])
+  if (r.exitCode !== 0) {
+    $.ui.toast(`Oude OpenRouter-regels niet uit ~/.claude/settings.json gehaald: ${foutVan(r)}`)
+    return
+  }
+  if (laatsteJson(r.stdout).gewijzigd) {
+    $.ui.toast(`Oude OpenRouter-regels uit ~/.claude/settings.json gehaald: alle sessies gebruiken weer je abonnement. OpenRouter start je voortaan met ${START}.`)
   }
 }
 
@@ -194,7 +212,9 @@ export async function startApi($: Engine): Promise<void> {
   try {
     const gelezen = await modusUitSettings($)
     sessieOpApi = gelezen?.modus === 'api'
-    sessieOpOpenrouter = gelezen?.modus === 'openrouter'
+    // Gestart met claude-or: de env uit het eigen settings-bestand staat in deze sessie.
+    sessieOpOpenrouter = gelezen?.oudeOr === true || (await $.env.get('ANTHROPIC_BASE_URL')) === OR_URL
+    if (gelezen?.oudeOr) void ruimOudeOrOp($).catch(err => failOpen($, err))
     // Sinds 0.8 één schakelaar voor API en accounts: stond alleen accounts-auto aan, dan ook die van de API.
     const t0 = await leesToestand($)
     if (!t0.auto) {
@@ -229,7 +249,6 @@ export async function beschikbaarheid($: Engine): Promise<Beschikbaar> {
   return { api: (await $.store.get('api.heeftKey')) !== false, openrouter: (await $.store.get('openrouter.heeftKey')) === true && !!k.model && !!k.snel }
 }
 
-const NAAM: Record<Modus, string> = { abonnement: 'het abonnement', api: 'API', openrouter: 'OpenRouter' }
 
 // Wisselt via de CLI en bewaart de toestand. `door` = het venster bij een automatische wissel naar API
 // of OpenRouter; `handmatigTot` = tot wanneer auto een keuze met de hand laat staan.
@@ -248,23 +267,15 @@ export async function wissel(
   }
   wisselt = true
   try {
-    let args = ['modus', naar]
-    if (naar === 'openrouter') {
-      const k = await orKeuze($)
-      if (!k.model || !k.snel) {
-        if (!opties.auto) $.ui.toast('Niet gewisseld: kies eerst een hoofdmodel en een snel model in de tab OpenRouter.')
-        return false
-      }
-      args = [...args, '--model', k.model, '--snel', k.snel]
-    }
-    const r = await cli($, args)
+    if (naar === 'openrouter') return await zetOrKlaar($, reden, opties)
+    const r = await cli($, ['modus', naar])
     const t = await leesToestand($)
     const nu = await $.clock.now()
     const { overgeschakeldDoor: _oud, handmatigTot: _hand, ...rest } = t
     if (r.exitCode !== 0) {
       const uitleg =
         r.exitCode === 3 ? `${foutVan(r).replace(/^in \S+settings\.json/, 'in ~/.claude/settings.json')}.`
-        : r.exitCode === 4 ? (naar === 'openrouter' ? 'er staat nog geen OpenRouter-key in de sleutelhanger.' : 'er staat nog geen key in de sleutelhanger.')
+        : r.exitCode === 4 ? 'er staat nog geen key in de sleutelhanger.'
         : foutVan(r)
       if (opties.auto) {
         // Niet elke meting opnieuw proberen: auto uit en niets meer om terug te draaien.
@@ -278,9 +289,7 @@ export async function wissel(
     }
     if (laatsteJson(r.stdout).gewijzigd === false && !opties.auto) {
       $.ui.toast(
-        naar === 'api' ? 'Nieuwe terminal-sessies gebruiken je API-key al.'
-        : naar === 'openrouter' ? 'Nieuwe terminal-sessies gebruiken OpenRouter al met deze modellen.'
-        : 'Nieuwe terminal-sessies gebruiken je abonnement al.',
+        naar === 'api' ? 'Nieuwe terminal-sessies gebruiken je API-key al.' : 'Nieuwe terminal-sessies gebruiken je abonnement al.',
       )
       await verversApi($)
       return true
@@ -295,15 +304,46 @@ export async function wissel(
     $.ui.toast(
       naar === 'api'
         ? `Naar API (${reden}). Nieuwe terminal-sessies gebruiken je API-key en dat kost geld per token; de claude.ai-connectors staan daar uit. Deze sessie en de desktop-app houden hun eigen login.`
-        : naar === 'openrouter'
-          ? `Naar OpenRouter (${reden}). Nieuwe terminal-sessies draaien op ${(await orKeuze($)).model} via je OpenRouter-key en dat kost geld per token; webzoeken en de claude.ai-connectors werken daar niet. Deze sessie en de desktop-app houden hun eigen login.`
-          : `Terug naar het abonnement (${reden}). Nieuwe terminal-sessies gebruiken weer je abonnement. Deze sessie en de desktop-app houden hun eigen login.`,
+        : `Terug naar het abonnement (${reden}). Nieuwe terminal-sessies gebruiken weer je abonnement. Deze sessie en de desktop-app houden hun eigen login.`,
     )
     await verversApi($)
     return true
   } finally {
     wisselt = false
   }
+}
+
+// OpenRouter wisselt nooit: futureflow zet `claude-or` klaar (eigen settings-bestand en shim, via de
+// CLI) en zegt dat de gebruiker daar zelf een sessie mee start. Andere sessies en de desktop-app
+// blijven op het abonnement. Automatisch (`opties.auto`): alleen een melding, hoogstens één per venster
+// (store `api.orGemeldTot`). Geeft false: er is niet gewisseld.
+async function zetOrKlaar($: Engine, reden: string, opties: { door?: Door; auto?: boolean }): Promise<boolean> {
+  const nu = await $.clock.now()
+  if (opties.auto) {
+    const tot = Number(await $.store.get('api.orGemeldTot')) || 0
+    if (nu < tot) return false
+    await $.store.set('api.orGemeldTot', opties.door?.resetsAt ?? nu + 5 * 3_600_000)
+  }
+  const k = await orKeuze($)
+  if (!k.model || !k.snel) {
+    if (!opties.auto) $.ui.toast('Kies eerst een hoofdmodel en een snel model in de lijst.')
+    return false
+  }
+  const r = await cli($, ['modus', 'openrouter', '--model', k.model, '--snel', k.snel])
+  await verversApi($)
+  if (r.exitCode !== 0) {
+    const uitleg = r.exitCode === 4 ? 'er staat nog geen OpenRouter-key in de sleutelhanger.' : `${foutVan(r)}.`
+    $.ui.toast(`${START} niet klaargezet: ${uitleg}`)
+    return false
+  }
+  const d = laatsteJson(r.stdout)
+  const start = d.opPad === false && typeof d.shim === 'string' ? d.shim.replace(/^\/Users\/[^/]+/, '~') : START
+  $.ui.toast(
+    opties.auto
+      ? `Je abonnement zit vol (${reden}). Verder op OpenRouter? Start een nieuwe sessie met ${start}; andere sessies en de desktop-app blijven op je abonnement.`
+      : `Klaar. Start een OpenRouter-sessie met ${start}; andere sessies en de desktop-app blijven op je abonnement.`,
+  )
+  return false
 }
 
 // Na een meting (session.measure, via de skin) en na een beurt: automatisch wisselen of niet.
@@ -455,27 +495,25 @@ export async function apiTab($: Engine, e: any, k: Kleuren, wisselKaart?: Render
     const nu = await $.clock.now()
     const geld = kostenOverzicht((await $.store.get('api.kosten')) as Record<string, number> | undefined, nu)
     const opApi = status.modus === 'api'
-    const opOr = status.modus === 'openrouter'
-
     return (
       <Box flexDirection="column" gap={1}>
         {kaart(ui, 'API', [
           <Text>
             <Text color={k.mut}>Nieuwe terminal-sessies: </Text>
-            <Text bold color={opApi || opOr ? k.warn : k.ok}>{opApi ? 'API-key' : opOr ? 'OpenRouter' : 'abonnement'}</Text>
+            <Text bold color={opApi ? k.warn : k.ok}>{opApi ? 'API-key' : 'abonnement'}</Text>
           </Text>,
           <Text>
             <Text color={k.mut}>{'Key: '}</Text>
             {status.heeftKey ? <Text>{`sk-ant-…${status.staart}`}</Text> : <Text color={k.mut}>geen key</Text>}
           </Text>,
-          t.overgeschakeldDoor && (opApi || opOr) ? (
-            <Text color={k.warn}>Automatisch naar {NAAM[status.modus]} door het {t.overgeschakeldDoor.label}-venster; terug na de reset.</Text>
+          t.overgeschakeldDoor && opApi ? (
+            <Text color={k.warn}>Automatisch naar API door het {t.overgeschakeldDoor.label}-venster; terug na de reset.</Text>
           ) : '',
           t.auto && t.handmatigTot !== undefined && t.handmatigTot > nu ? (
             <Text color={k.warn}>Met de hand gekozen: automatisch wisselen wacht tot {wanneer(t.handmatigTot, nu)} (of tot je het uit- en aanzet).</Text>
           ) : '',
-          t.auto && (opApi || opOr) && !t.overgeschakeldDoor ? (
-            <Text color={k.warn}>Met de hand op {NAAM[status.modus]}: automatisch wisselen zet dit niet terug.</Text>
+          t.auto && opApi && !t.overgeschakeldDoor ? (
+            <Text color={k.warn}>Met de hand op API: automatisch wisselen zet dit niet terug.</Text>
           ) : '',
           status.vreemdeHelper ? (
             <Text color={k.err}>In ~/.claude/settings.json staat al een andere apiKeyHelper. futureflow laat die staan en wisselt niet.</Text>
@@ -485,11 +523,10 @@ export async function apiTab($: Engine, e: any, k: Kleuren, wisselKaart?: Render
           ) : '',
           status.fout ? <Text color={k.err} wrap="truncate-end">Status niet volledig gelezen: {status.fout}</Text> : '',
         ], {
-          rechts: opApi ? 'API' : opOr ? 'OpenRouter' : 'abonnement',
+          rechts: opApi ? 'API' : 'abonnement',
           knoppen: knoppen(ui, [
-            knop(ui, 'api-abonnement', opApi || opOr ? 'Abonnement' : '● Abonnement', () => handmatig($, 'abonnement'), { primary: !opApi && !opOr }),
+            knop(ui, 'api-abonnement', opApi ? 'Abonnement' : '● Abonnement', () => handmatig($, 'abonnement'), { primary: !opApi }),
             knop(ui, 'api-api', opApi ? '● API' : 'API', () => handmatig($, 'api'), { primary: opApi }),
-            knop(ui, 'api-openrouter', opOr ? '● OpenRouter' : 'OpenRouter', () => handmatig($, 'openrouter'), { primary: opOr }),
           ]),
         })}
 

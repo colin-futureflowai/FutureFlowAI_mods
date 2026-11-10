@@ -72,6 +72,14 @@ export type ApiStatus = {
   /** Op OpenRouter: het hoofd- en snelle model zoals ze in settings.json staan. */
   orModel?: string
   orSnel?: string
+  /** claude-or staat klaar: eigen settings-bestand met modellen (sinds 0.9.0). */
+  orKlaar?: boolean
+  /** ~/.local/bin/claude-or bestaat en is van futureflow. */
+  orShim?: boolean
+  /** De map van de shim staat op het PATH van de CLI. */
+  orOpPad?: boolean
+  /** Oude OpenRouter-regels (futureflow < 0.9) in ~/.claude/settings.json. */
+  oudeOr?: boolean
   fout?: string
 }
 

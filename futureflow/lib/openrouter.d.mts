@@ -10,6 +10,13 @@ export const OR_URL: string
 export const OR_ACCOUNT: string
 export const CACHE_MS: number
 export const TOON: number
+export const CONTEXT_MIN: number
+export const CONTEXT_1M: number
+export const START: string
+export const SHIM_MERK: string
+export function modelIdVoor(m: { id: string; context?: number } | null | undefined): string | undefined
+export function teKlein(m: { context?: number } | null | undefined): boolean
+export function shimTekst(settingsPad: string): string
 
 export function geldigeOrKey(s: unknown): boolean
 export function geldigModel(s: unknown): boolean

@@ -1,5 +1,11 @@
-// Tab OpenRouter: key-controle, de instellingen die futureflow in ~/.claude/settings.json zet en
-// exact weer weghaalt, de modellijst en de kostenschatting. Pure functies, zonder Node-API's.
+// Tab OpenRouter: key-controle, het eigen settings-bestand voor `claude-or`, het opruimen van oude
+// OpenRouter-regels uit ~/.claude/settings.json, de modellijst en de kostenschatting. Pure functies,
+// zonder Node-API's.
+//
+// Sinds 0.9.0 schrijft futureflow OpenRouter nooit meer in ~/.claude/settings.json: Claude Code leest
+// dat bestand live in alle lopende sessies (ook de desktop-app), en die gingen dan via OpenRouter naar
+// een model met een kleiner contextvenster. OpenRouter staat nu in een eigen bestand dat alleen
+// `claude-or` (claude --settings <bestand>) laadt.
 
 import { OR_HELPER, OR_SERVICE, OR_URL } from './api.mjs'
 
@@ -22,7 +28,44 @@ export function geldigModel(s) {
   return typeof s === 'string' && s.length <= 120 && MODEL.test(s)
 }
 
-// Wat futureflow voor OpenRouter in settings.json zet: hoofdmodel voor opus/sonnet/fable, het snelle
+// Onder dit contextvenster is een model te klein voor Claude Code (systeemprompt, tools en compact).
+export const CONTEXT_MIN = 200_000
+// Vanaf dit contextvenster krijgt het model-id `[1m]`, zodat Claude Code met 1M context rekent.
+export const CONTEXT_1M = 1_000_000
+
+// Het model-id zoals futureflow het in het settings-bestand zet: met `[1m]` bij ≥ 1M context.
+export function modelIdVoor(m) {
+  if (!m || typeof m.id !== 'string') return undefined
+  const id = m.id.replace(/\[1m\]$/, '')
+  return typeof m.context === 'number' && m.context >= CONTEXT_1M ? `${id}[1m]` : id
+}
+
+// Te klein contextvenster voor Claude Code (onbekend telt niet als te klein).
+export const teKlein = m => typeof m?.context === 'number' && m.context > 0 && m.context < CONTEXT_MIN
+
+// Het start-commando en de shim in ~/.local/bin. De merkregel zegt dat het bestand van futureflow is:
+// alleen dan overschrijft futureflow het.
+export const START = 'claude-or'
+export const SHIM_MERK = '# futureflow: claude-or'
+
+// Inhoud van de shim: claude met het eigen settings-bestand, alleen voor die sessie.
+export function shimTekst(settingsPad) {
+  const pad = String(settingsPad).replace(/'/g, `'\\''`)
+  return [
+    '#!/bin/sh',
+    SHIM_MERK,
+    '# Start Claude Code via OpenRouter, alleen deze sessie. Andere sessies en de desktop-app blijven op je abonnement.',
+    `S='${pad}'`,
+    'if [ ! -f "$S" ]; then',
+    `  echo "${START}: nog geen OpenRouter-instellingen; kies modellen in /futureflow en klik Zet klaar." >&2`,
+    '  exit 1',
+    'fi',
+    'exec claude --settings "$S" "$@"',
+    '',
+  ].join('\n')
+}
+
+// Wat futureflow voor OpenRouter in het eigen settings-bestand zet: hoofdmodel voor opus/sonnet/fable, het snelle
 // model voor haiku (ook achtergrondtaken) en subagents.
 export function orInstellingen(model, snel) {
   return {

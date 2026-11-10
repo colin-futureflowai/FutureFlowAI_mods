@@ -10,7 +10,8 @@ export const WACHTTIJD = 5 * 60_000
 
 export const STANDAARD = { modus: 'abonnement', auto: false, hoog: 90, laag: 50, laatsteWissel: 0, stappen: ['api'] }
 
-// De drie modi van nieuwe terminal-sessies, op één plek.
+// De modi van de CLI, op één plek. `openrouter` zet alleen `claude-or` klaar (eigen settings-bestand);
+// ~/.claude/settings.json kent sinds 0.9.0 alleen abonnement en api.
 export const MODI = ['abonnement', 'api', 'openrouter']
 // Stappen van de ketting na de abonnementen, in volgorde; welke en in welke volgorde is instelbaar.
 export const STAPPEN = ['api', 'openrouter']
@@ -160,6 +161,8 @@ export function eersteStap(stappen, beschikbaar) {
 // geldt (`handmatigTot`).
 // Weg van het abonnement: auto aan, modus abonnement en een venster ≥ hoog (het volste telt), naar de
 // eerste beschikbare stap (`eersteStap`); zonder resetsAt rekent `door` met de lengte van het venster.
+// Is die stap OpenRouter, dan alleen een melding (`alleenMelding`): OpenRouter wisselt nooit stil, de
+// gebruiker start zelf een sessie met `claude-or` (0.9.0).
 // Terug: modus api of openrouter, overgeschakeld door een venster en geen enkel gemeten venster meer
 // ≥ hoog; is het venster van de wissel gemeten, dan pas onder `laag`, anders pas na zijn resetsAt.
 export function beslis(s) {
@@ -176,6 +179,7 @@ export function beslis(s) {
     if (!naar) return null
     return {
       naar,
+      ...(naar === 'openrouter' ? { alleenMelding: true } : {}),
       reden: `${vol.label}-venster op ${vol.percent}% (grens ${s.hoog}%)`,
       door: { label: vol.label, resetsAt: vol.resetsAt ?? nu + horizon(vol.label) },
     }

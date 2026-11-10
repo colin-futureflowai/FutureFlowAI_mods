@@ -5,7 +5,8 @@ import assert from 'node:assert/strict'
 import { beslis, eersteStap, HELPER, modusVan, OR_HELPER, toestandVan, WACHTTIJD } from '../lib/api.mjs'
 import { ketting } from '../lib/accounts.mjs'
 import {
-  contextTekst, eigenBasis, geldigeOrKey, geldigModel, haalWeg, modellenVan, orInstellingen, orKosten, pasToe, perMtok, prijsTekst, sorteer,
+  contextTekst, eigenBasis, geldigeOrKey, geldigModel, haalWeg, modelIdVoor, modellenVan, orInstellingen, orKosten, pasToe, perMtok, prijsTekst,
+  SHIM_MERK, shimTekst, sorteer, teKlein,
 } from '../lib/openrouter.mjs'
 
 const NU = Date.parse('2026-11-10T12:00:00Z')
@@ -155,7 +156,37 @@ test('beslis: tabel met stappen, beschikbaarheid en terug', () => {
   for (const [naam, s, limieten, verwacht] of tabel) {
     const b = beslis({ ...s, limieten, nu: NU })
     assert.equal(b ? b.naar : null, verwacht, naam)
+    // OpenRouter wisselt nooit stil (0.9.0): alleen een melding.
+    if (b?.naar === 'openrouter' && s.modus === 'abonnement') assert.equal(b.alleenMelding, true, naam)
+    if (b?.naar === 'api') assert.equal(b.alleenMelding, undefined, naam)
   }
+})
+
+test('ketting: OpenRouter als stap is alleen een melding', () => {
+  const b = ketting({
+    accounts: [acc(1), acc(2)], actief: 1, instellingen, laatsteWissel: 0, nu: NU, sessieLimieten: vol,
+    api: { ...basis, stappen: ['openrouter', 'api'] }, beschikbaar: { openrouter: true }, metingen: { 1: meting(95), 2: meting(96) },
+  })
+  assert.deepEqual({ soort: b.soort, naar: b.naar, alleenMelding: b.alleenMelding }, { soort: 'api', naar: 'openrouter', alleenMelding: true })
+})
+
+test('modelIdVoor en teKlein: [1m] vanaf 1M context, te klein onder 200k', () => {
+  assert.equal(modelIdVoor({ id: 'anthropic/claude-sonnet-4.5', context: 1_000_000 }), 'anthropic/claude-sonnet-4.5[1m]')
+  assert.equal(modelIdVoor({ id: 'anthropic/claude-sonnet-4.5[1m]', context: 1_000_000 }), 'anthropic/claude-sonnet-4.5[1m]')
+  assert.equal(modelIdVoor({ id: 'openai/gpt-5', context: 400_000 }), 'openai/gpt-5')
+  assert.equal(modelIdVoor({ id: 'x/y' }), 'x/y')
+  assert.ok(geldigModel(modelIdVoor({ id: 'a/b', context: 2_000_000 })))
+  assert.equal(teKlein({ context: 128_000 }), true)
+  assert.equal(teKlein({ context: 200_000 }), false)
+  assert.equal(teKlein({}), false)
+})
+
+test('shimTekst: merkregel, pad tussen enkele aanhalingstekens, exec claude --settings', () => {
+  const t = shimTekst("/Users/x/it's/settings.json")
+  assert.ok(t.startsWith('#!/bin/sh\n'))
+  assert.ok(t.split('\n').includes(SHIM_MERK))
+  assert.match(t, /S='\/Users\/x\/it'\\''s\/settings\.json'/)
+  assert.match(t, /exec claude --settings "\$S" "\$@"/)
 })
 
 const acc = (id, extra = {}) => ({ id, sleutel: String(id), email: `a${id}@x.nl`, plan: 'Max', inRotatie: true, status: 'ok', ...extra })

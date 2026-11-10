@@ -7,24 +7,30 @@
 //   api status                                                          → JSON { heeftKey, staart, modus, vreemdeHelper, fout? }
 //   api modus api|abonnement    zet of verwijdert alleen onze helper    → JSON { modus, gewijzigd }
 //   api modus openrouter --model <id> --snel <id>
-//                               OpenRouter-instellingen (zie lib/openrouter.mjs), vastgelegd in de marker
+//                               zet OpenRouter klaar voor `claude-or`: eigen settings-bestand
+//                               <OPENROUTER_DIR>/settings.json en de shim <SHIM_DIR>/claude-or
+//                               → JSON { modus, gewijzigd, settings, shim, start, opPad }
+//   api openrouter opruimen     oude OpenRouter-regels (van futureflow < 0.9) uit settings.json → JSON { gewijzigd }
 //   api takenlijst aan|uit|status  env.CLAUDE_CODE_ENABLE_TODO_TOOLS = "true" → JSON { aan } (aan/uit ook { gewijzigd })
 //   api openrouter zet-key      OpenRouter-key via stdin → sleutelhanger → JSON { ok, staart }
 //   api openrouter wis-key                                              → JSON { gewist }
 //   api openrouter modellen [--ververs]  lijst met tools-ondersteuning, cache 6 u → JSON { modellen, opgehaald, uitCache, fout? }
 //   api openrouter test --model <id>     één POST /v1/messages met max_tokens 1 → JSON { ok, status?, fout? }
 //
-// OpenRouter: de marker (<OPENROUTER_DIR>/marker.json) legt vast welke sleutels futureflow zelf in
-// settings.json zette; terugwisselen haalt precies die weg, en alleen als de waarde nog gelijk is.
-// Een vreemde waarde op een van die sleutels, een vreemde apiKeyHelper of ANTHROPIC_BASE_URL: exit 3.
+// OpenRouter komt sinds 0.9.0 nooit meer in ~/.claude/settings.json: Claude Code leest dat bestand live
+// in alle lopende sessies, ook de desktop-app. Alleen `claude-or` (claude --settings <eigen bestand>)
+// gebruikt OpenRouter. Oude regels (futureflow < 0.9): de marker (<OPENROUTER_DIR>/marker.json) zegt
+// welke sleutels futureflow toen zette; `openrouter opruimen`, `modus api` en `modus abonnement` halen
+// precies die weg, en alleen als de waarde nog gelijk is. Een bestaande claude-or die niet van
+// futureflow is: exit 3.
 //
 // De key staat nooit in argv (ook niet van `security`: die krijgt de opdracht via stdin van
 // `security -i`) en nooit op stdout of stderr; alleen de laatste 4 tekens.
 // Exitcodes: 1 gebruik of ongeldige key, 2 settings onleesbaar of geen geldige JSON (niets geschreven),
 // 3 er staat een andere apiKeyHelper of andere waarde (blijft staan), 4 geen key in de sleutelhanger,
 // 5 sleutelhanger-fout, 6 modellijst niet op te halen (en geen cache).
-// SETTINGS_JSON, SECURITY_BIN, OPENROUTER_DIR en OPENROUTER_URL overschrijven paden, programma en
-// adres (tests).
+// SETTINGS_JSON, SECURITY_BIN, OPENROUTER_DIR, OPENROUTER_URL en SHIM_DIR overschrijven paden,
+// programma en adres (tests).
 
 import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
@@ -34,7 +40,8 @@ import { fileURLToPath } from 'node:url'
 
 import { ACCOUNT, geldigeKey, HELPER, MODI, modusVan, SERVICE } from '../lib/api.mjs'
 import {
-  CACHE_MS, eigenBasis, geldigeOrKey, geldigModel, haalWeg, modellenVan, OR_ACCOUNT, OR_SERVICE, OR_URL, orInstellingen, pasToe,
+  CACHE_MS, eigenBasis, geldigeOrKey, geldigModel, haalWeg, modellenVan, OR_ACCOUNT, OR_SERVICE, OR_URL, orInstellingen,
+  SHIM_MERK, shimTekst, START,
 } from '../lib/openrouter.mjs'
 
 const BESTAND = process.env.SETTINGS_JSON || path.join(os.homedir(), '.claude', 'settings.json')
@@ -46,6 +53,9 @@ const OR_DIR = process.env.OPENROUTER_DIR || path.join(os.homedir(), '.claude', 
 const OR_BASIS = (process.env.OPENROUTER_URL || OR_URL).replace(/\/+$/, '')
 const MARKER = path.join(OR_DIR, 'marker.json')
 const CACHE = path.join(OR_DIR, 'modellen.json')
+const OR_SETTINGS = path.join(OR_DIR, 'settings.json')
+const SHIM_DIR = process.env.SHIM_DIR || path.join(os.homedir(), '.local', 'bin')
+const SHIM = path.join(SHIM_DIR, START)
 
 class Fout extends Error {
   constructor(bericht, code) {
@@ -167,6 +177,104 @@ function zetMarker(marker) {
   else fs.rmSync(MARKER, { force: true })
 }
 
+// ---- claude-or: eigen settings-bestand en shim ----
+
+const gelijk = (a, b) => JSON.stringify(a) === JSON.stringify(b)
+
+// De shim: alleen schrijven als hij er niet is of van futureflow is (merkregel); anders exit 3.
+function zetShim() {
+  let oud
+  try {
+    oud = fs.readFileSync(SHIM, 'utf8')
+  } catch (err) {
+    if (err.code !== 'ENOENT') throw new Fout(`${SHIM} niet gelezen (${err.code ?? err.message})`, 2)
+  }
+  if (oud !== undefined && !oud.split('\n').includes(SHIM_MERK)) {
+    throw new Fout(`${SHIM} bestaat al en is niet van futureflow; futureflow laat die staan`, 3)
+  }
+  const tekst = shimTekst(OR_SETTINGS)
+  if (oud === tekst) return false
+  fs.mkdirSync(SHIM_DIR, { recursive: true })
+  const tmp = `${SHIM}.${process.pid}-${Date.now()}.tmp`
+  try {
+    fs.writeFileSync(tmp, tekst, { mode: 0o755, flag: 'wx' })
+    fs.chmodSync(tmp, 0o755)
+    fs.renameSync(tmp, SHIM)
+  } catch (err) {
+    fs.rmSync(tmp, { force: true })
+    throw new Fout(`${SHIM} niet geschreven (${err.code ?? err.message})`, 2)
+  }
+  return true
+}
+
+const opPad = () => (process.env.PATH ?? '').split(path.delimiter).some(d => d && path.resolve(d) === path.resolve(SHIM_DIR))
+
+// Zet OpenRouter klaar voor `claude-or`. Raakt ~/.claude/settings.json nooit aan.
+function zetOpenrouter(opties) {
+  if (!geldigModel(opties.model) || !geldigModel(opties.snel)) throw new Fout('kies een model en een snel model (--model <id> --snel <id>)', 1)
+  if (leesKey(OR_SERVICE, OR_ACCOUNT) === undefined) throw new Fout('geen OpenRouter-key in de sleutelhanger; bewaar eerst een key', 4)
+  const gewenst = orInstellingen(opties.model, opties.snel)
+  let gewijzigd = false
+  if (!gelijk(leesJson(OR_SETTINGS), gewenst)) {
+    schrijfJson(OR_SETTINGS, gewenst)
+    gewijzigd = true
+  }
+  if (zetShim()) gewijzigd = true
+  return { modus: 'openrouter', gewijzigd, settings: OR_SETTINGS, shim: SHIM, start: START, opPad: opPad() }
+}
+
+// Wat er voor claude-or klaarstaat: modellen uit het eigen bestand, en of de shim van ons is.
+function orKlaar() {
+  const d = leesJson(OR_SETTINGS)
+  const env = isObject(d?.env) ? d.env : {}
+  const uit = {}
+  if (d?.apiKeyHelper === orInstellingen('a/b', 'a/b').apiKeyHelper && env.ANTHROPIC_BASE_URL === OR_URL && geldigModel(env.ANTHROPIC_DEFAULT_OPUS_MODEL) && geldigModel(env.ANTHROPIC_DEFAULT_HAIKU_MODEL)) {
+    uit.orKlaar = true
+    uit.orModel = env.ANTHROPIC_DEFAULT_OPUS_MODEL
+    uit.orSnel = env.ANTHROPIC_DEFAULT_HAIKU_MODEL
+  } else {
+    uit.orKlaar = false
+  }
+  try {
+    uit.orShim = fs.readFileSync(SHIM, 'utf8').split('\n').includes(SHIM_MERK)
+  } catch {
+    uit.orShim = false
+  }
+  uit.orOpPad = opPad()
+  return uit
+}
+
+// Sporen van OpenRouter in ~/.claude/settings.json (futureflow < 0.9): onze helper, de base-URL van
+// OpenRouter of een marker.
+function heeftOudeOr(data, marker) {
+  const env = isObject(data?.env) ? data.env : {}
+  return modusVan(data, eigenBasis(marker)).modus === 'openrouter' || env.ANTHROPIC_BASE_URL === OR_URL || marker !== undefined
+}
+
+// Haalt oude OpenRouter-regels uit settings.json (exact de waarden van futureflow, volgens de marker;
+// zonder marker de vaste waarden) en daarna de marker. Een eigen apiKeyHelper (API) blijft.
+function ruimOp() {
+  const doel = doelPad()
+  for (let poging = 1; poging <= POGINGEN; poging++) {
+    const gelezen = lees(doel)
+    const marker = leesMarker()
+    if (!gelezen) {
+      if (marker !== undefined) zetMarker(undefined)
+      return { gewijzigd: false }
+    }
+    if (!heeftOudeOr(gelezen.data, marker)) return { gewijzigd: false }
+    const nieuw = haalWeg(gelezen.data, marker)
+    if (gelijk(nieuw, gelezen.data)) {
+      zetMarker(undefined)
+      return { gewijzigd: false }
+    }
+    if (!schrijfSettings(doel, gelezen, nieuw)) continue
+    zetMarker(undefined)
+    return { gewijzigd: true }
+  }
+  throw new Fout(`${BESTAND} veranderde steeds tijdens het schrijven; niets gewijzigd, probeer het opnieuw`, 2)
+}
+
 // Schrijft settings.json atomisch. false = het bestand veranderde of ontstond intussen: opnieuw lezen.
 function schrijfSettings(doel, gelezen, data) {
   const tmp = path.join(path.dirname(doel), `.${path.basename(doel)}.futureflow-${process.pid}-${Date.now()}.tmp`)
@@ -208,12 +316,6 @@ function schrijfSettings(doel, gelezen, data) {
 
 const isObject = v => !!v && typeof v === 'object' && !Array.isArray(v)
 
-// Staan de gewenste OpenRouter-waarden er al allemaal?
-function alGezet(data, gewenst) {
-  const env = isObject(data?.env) ? data.env : {}
-  return data?.apiKeyHelper === gewenst.apiKeyHelper && Object.entries(gewenst.env).every(([k, v]) => env[k] === v)
-}
-
 function vlagen(rest) {
   const uit = {}
   for (let i = 0; i < rest.length; i++) {
@@ -227,11 +329,7 @@ function vlagen(rest) {
 
 function zetModus(naar, opties = {}) {
   if (!MODI.includes(naar)) throw new Fout('kies: modus api|abonnement|openrouter', 1)
-  let gewenst
-  if (naar === 'openrouter') {
-    if (!geldigModel(opties.model) || !geldigModel(opties.snel)) throw new Fout('kies een model en een snel model (--model <id> --snel <id>)', 1)
-    gewenst = orInstellingen(opties.model, opties.snel)
-  }
+  if (naar === 'openrouter') return zetOpenrouter(opties)
   const doel = doelPad()
   for (let poging = 1; poging <= POGINGEN; poging++) {
     const gelezen = lees(doel)
@@ -244,38 +342,16 @@ function zetModus(naar, opties = {}) {
     if (huidig.vreemdeBasis && naar !== 'abonnement') {
       throw new Fout(`in ${BESTAND} staat al een andere ANTHROPIC_BASE_URL; futureflow laat die staan en wisselt niet`, 3)
     }
-    if (huidig.modus === naar && (naar !== 'openrouter' || alGezet(data, gewenst))) return { modus: naar, gewijzigd: false }
+    if (huidig.modus === naar && !heeftOudeOr(data, oudeMarker)) return { modus: naar, gewijzigd: false }
     // Alleen met een key, anders kan een nieuwe terminal-sessie niet inloggen.
     if (naar === 'api' && leesKey() === undefined) throw new Fout('geen key in de sleutelhanger; bewaar eerst een key', 4)
-    if (naar === 'openrouter' && leesKey(OR_SERVICE, OR_ACCOUNT) === undefined) {
-      throw new Fout('geen OpenRouter-key in de sleutelhanger; bewaar eerst een key', 4)
-    }
 
-    // Eerst alles van ons weg (OpenRouter volgens de marker, onze API-helper), dan het nieuwe erbij.
-    let nieuw = haalWeg(data, oudeMarker)
+    // Eerst alles van ons weg (oude OpenRouter-regels volgens de marker, onze API-helper), dan het nieuwe erbij.
+    const nieuw = haalWeg(data, oudeMarker)
     if (nieuw.apiKeyHelper === HELPER) delete nieuw.apiKeyHelper
-    let marker
     if (naar === 'api') nieuw.apiKeyHelper = HELPER
-    if (naar === 'openrouter') {
-      const r = pasToe(nieuw, gewenst)
-      if (r.vreemd) throw new Fout(`${r.vreemd} in ${BESTAND} heeft al een andere waarde; futureflow laat die staan en wisselt niet`, 3)
-      nieuw = r.data
-      marker = r.marker
-    }
-    // Marker vóór settings: valt het schrijven daarna uit, dan de oude marker terug.
-    if (marker) zetMarker(marker)
-    let gelukt
-    try {
-      gelukt = schrijfSettings(doel, gelezen, nieuw)
-    } catch (err) {
-      if (marker) zetMarker(oudeMarker)
-      throw err
-    }
-    if (!gelukt) {
-      if (marker) zetMarker(oudeMarker)
-      continue
-    }
-    if (!marker && oudeMarker !== undefined) zetMarker(undefined)
+    if (!schrijfSettings(doel, gelezen, nieuw)) continue
+    if (oudeMarker !== undefined) zetMarker(undefined)
     return { modus: naar, gewijzigd: true }
   }
   throw new Fout(`${BESTAND} veranderde steeds tijdens het schrijven; niets gewijzigd, probeer het opnieuw`, 2)
@@ -316,7 +392,7 @@ async function test(opties) {
       method: 'POST',
       signal: AbortSignal.timeout(30_000),
       headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json', 'anthropic-version': '2023-06-01' },
-      body: JSON.stringify({ model: opties.model, max_tokens: 1, messages: [{ role: 'user', content: 'ping' }] }),
+      body: JSON.stringify({ model: opties.model.replace(/\[1m\]$/, ''), max_tokens: 1, messages: [{ role: 'user', content: 'ping' }] }),
     })
     if (r.ok) return { ok: true, status: r.status }
     let bericht = ''
@@ -420,15 +496,15 @@ function status() {
   }
   try {
     const data = lees(doelPad())?.data
-    Object.assign(uit, modusVan(data, eigenBasis(leesMarker())))
-    const env = isObject(data?.env) ? data.env : {}
-    if (uit.modus === 'openrouter') {
-      if (typeof env.ANTHROPIC_DEFAULT_OPUS_MODEL === 'string') uit.orModel = env.ANTHROPIC_DEFAULT_OPUS_MODEL
-      if (typeof env.ANTHROPIC_DEFAULT_HAIKU_MODEL === 'string') uit.orSnel = env.ANTHROPIC_DEFAULT_HAIKU_MODEL
-    }
+    const marker = leesMarker()
+    Object.assign(uit, modusVan(data, eigenBasis(marker)))
+    // OpenRouter is geen modus van settings.json meer; oude regels zijn op te ruimen.
+    uit.oudeOr = heeftOudeOr(data, marker)
+    if (uit.modus === 'openrouter') uit.modus = 'abonnement'
   } catch (err) {
     fouten.push(err.message)
   }
+  Object.assign(uit, orKlaar())
   return fouten.length ? { ...uit, fout: fouten.join('; ') } : uit
 }
 
@@ -445,10 +521,11 @@ export async function main(args) {
     else if (cmd === 'openrouter' && sub === 'wis-key' && vlag.length === 0) console.log(JSON.stringify(wisKey(true)))
     else if (cmd === 'openrouter' && sub === 'modellen') console.log(JSON.stringify(await modellen(vlagen(vlag))))
     else if (cmd === 'openrouter' && sub === 'test') console.log(JSON.stringify(await test(vlagen(vlag))))
+    else if (cmd === 'openrouter' && sub === 'opruimen' && vlag.length === 0) console.log(JSON.stringify(ruimOp()))
     else {
       console.error(
         'Gebruik: api zet-key (key via stdin) | api wis-key | api status | api modus api|abonnement | api modus openrouter --model <id> --snel <id>' +
-          ' | api takenlijst aan|uit|status | api openrouter zet-key|wis-key | api openrouter modellen [--ververs] | api openrouter test --model <id>',
+          ' | api takenlijst aan|uit|status | api openrouter zet-key|wis-key|opruimen | api openrouter modellen [--ververs] | api openrouter test --model <id>',
       )
       return 1
     }
