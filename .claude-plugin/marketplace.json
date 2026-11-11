@@ -21,16 +21,6 @@
       "description": "Content and social media skills (reels, hooks, carousels, captions, planning), based on Ootto's claude-content-skills"
     },
     {
-      "name": "agent-slots",
-      "source": "./agent-slots",
-      "description": "Keeps agents from starting more dev servers, test runs, browsers and sessions than your machine's memory can handle"
-    },
-    {
-      "name": "minify",
-      "source": "./minify",
-      "description": "Makes Claude Code answer tersely (levels O1-O3) and shrinks long tool output and memory files, to spend fewer tokens"
-    },
-    {
       "name": "futureflow",
       "source": "./futureflow",
       "description": "FutureFlowAI's all-in-one mod: fewer tokens in and out, a Mac that doesn't freeze, a branded look and progress you can see"

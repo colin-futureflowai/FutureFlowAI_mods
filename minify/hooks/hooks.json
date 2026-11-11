@@ -1,8 +1,0 @@
-{
-  "modules": ["./register.tsx"],
-  "hooks": {
-    "SessionStart": [{ "hooks": [{ "type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/regels.sh\" start", "timeout": 5 }] }],
-    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/regels.sh\" prompt", "timeout": 5 }] }],
-    "SubagentStart": [{ "hooks": [{ "type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/regels.sh\" subagent", "timeout": 5 }] }]
-  }
-}

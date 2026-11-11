@@ -5,8 +5,7 @@ Claude Code plugins, skills and mods by FutureFlowAI, published as one marketpla
 | Plugin | Type | What it does |
 | --- | --- | --- |
 | [voice-chat](voice-chat/) | mod | Talk to your Claude Code session through a fast Inworld voice agent. It handles small talk itself, hands real tasks to Claude Code and tells you the outcome (`/voice`). |
-| [agent-slots](agent-slots/) | mod | Keeps agents from starting more dev servers, test runs, browsers and sessions than your machine's memory can handle. Shared slots across all sessions and worktrees, with a memory floor (`/agent-slots`). |
-| [minify](minify/) | mod | Fewer tokens: Claude answers tersely (levels `O1`–`O3`), and long tool output and memory files are shrunk before Claude reads them (`/minify`). Based on [Caveman](https://github.com/JuliusBrussee/caveman). |
+| [futureflow](futureflow/) | mod | One mod with agent slots, short answers and output trimming (minify), a terminal skin, a progress bar and the `/futureflow` dashboard: usage, switching between subscriptions, the API and OpenRouter (`claude-or`), connectors. |
 | [futureflow-skills](futureflow-skills/) | skills | FutureFlowAI's own working methods, picked up by Claude Code automatically. |
 | [content-skills](content-skills/) | skills | 54 content and social media skills (reels, hooks, carousels, captions, planning), based on [Ootto's claude-content-skills](https://github.com/Ootto-AI/claude-content-skills). |
 
@@ -14,9 +13,8 @@ Claude Code plugins, skills and mods by FutureFlowAI, published as one marketpla
 
 ```bash
 claude plugin marketplace add colin-futureflowai/FutureFlowAI_mods
+claude plugin install futureflow@futureflowai-mods
 claude plugin install voice-chat@futureflowai-mods
-claude plugin install agent-slots@futureflowai-mods
-claude plugin install minify@futureflowai-mods
 claude plugin install futureflow-skills@futureflowai-mods
 claude plugin install content-skills@futureflowai-mods
 ```
@@ -39,4 +37,4 @@ If you also have Ootto's original plugin (`claude-content-skills`) installed, un
 
 ## License
 
-[MIT](LICENSE). `content-skills` contains work by Ootto and Panniantong, also under MIT; see [content-skills/LICENSE](content-skills/LICENSE). `minify` is Apache-2.0, based on Caveman by Julius Brussee; see [minify/NOTICE](minify/NOTICE).
+[MIT](LICENSE). `content-skills` contains work by Ootto and Panniantong, also under MIT; see [content-skills/LICENSE](content-skills/LICENSE). `futureflow` includes work under MIT and Apache-2.0 (claude-skins, claude-swap, Caveman); see [futureflow/NOTICE](futureflow/NOTICE).

@@ -13,8 +13,7 @@ FutureFlowAI_mods/
 │   ├── .claude-plugin/plugin.json
 │   └── skills/<skill-naam>/SKILL.md  ← één map per skill (+ eventuele scripts/referenties)
 ├── content-skills/                   ← skills-plugin, overgenomen van Ootto (MIT)
-├── agent-slots/                      ← mod + losse CLI (cli/agent-slot.mjs), gedeelde lib/ en node-tests
-├── minify/                           ← mod (korte antwoorden, uitvoer inkorten), pure lib/ en node-tests
+├── futureflow/                       ← één mod: slots, minify, skin, voortgang, dashboard /futureflow
 └── voice-chat/                       ← één mod
     ├── .claude-plugin/plugin.json    ← naam, versie, beschrijving
     ├── hooks/hooks.json              ← { "modules": ["./register.tsx"] }
@@ -45,8 +44,7 @@ FutureFlowAI_mods/
 claude plugin validate <mod>
 claude plugin test <mod>
 node --check <mod>/bridge/*.mjs
-node --test agent-slots/tests/*.test.mjs   # CLI en commando-herkenning van agent-slots
-node --test minify/tests/*.test.mjs        # regels, uitvoer inkorten en bestandscontrole van minify
+node --test futureflow/tests/*.test.mjs    # pure lib en CLI's van futureflow
 ```
 
 Types voor de editor legt Claude Code zelf in `<mod>/.claude-plugin/types/` zodra de mod geladen is (gitignored); `tsc -p <mod>` type-checkt dan.
@@ -60,8 +58,7 @@ Vast installeren (alle sessies):
 ```bash
 claude plugin marketplace add /pad/naar/FutureFlowAI_mods
 claude plugin install voice-chat@futureflowai-mods
-claude plugin install agent-slots@futureflowai-mods
-claude plugin install minify@futureflowai-mods
+claude plugin install futureflow@futureflowai-mods
 claude plugin install futureflow-skills@futureflowai-mods
 claude plugin install content-skills@futureflowai-mods
 ```
@@ -104,7 +101,8 @@ Eén mod die agent-slots, minify en een skin bundelt, met voortgangsbalk en dash
 - Ketting-stappen: `api.toestand.stappen` (deelverzameling en volgorde van `api`, `openrouter`, standaard `['api']`); `beslis`/`ketting` kiezen de eerste beschikbare (`beschikbaarheid($)`: OpenRouter alleen met key-stand in store `openrouter.heeftKey` en beide modellen in `openrouter.keuze`; OpenRouter = alleen melding) en gaan terug vanaf API.
 - Testen: `claude plugin test futureflow` (ook de tests van claude-skins als `tests/skins-*`; die kiezen noir via de store) en `node --test futureflow/tests/*.test.mjs`. Werk die los van `next(e)` loopt (auto-wissel) test je met `clock.settle()` van `mock.clock`.
 
-### agent-slots
+### agent-slots (sinds 11-11-2026 alleen nog in futureflow)
+De losse plugin `agent-slots/` is van `main` gehaald; de code leeft in `futureflow/` (slots). Paden hieronder als `agent-slots/…` heten nu `futureflow/…`; de regels gelden nog.
 Houdt agents tegen voordat ze zoveel dev-servers, tests, browsers of sessies starten dat de computer vastloopt. Werkt voor Claude Code automatisch; andere agents gebruiken de CLI `agent-slot`. Ontwerp en regels: `agent-slots/DESIGN.md`.
 - **CLI** `cli/agent-slot.mjs` (niet `bin/`: de pluginbibliotheek op claude.ai weigert een `bin/`-map op het hoogste niveau; de kopie in `~/.claude/agent-slots/bin/` staat buiten de plugin en blijft): alle state in `~/.claude/agent-slots/` (locks met `O_EXCL`, `config.json`, `log.jsonl`). Alleen Node-builtins, want het bestand wordt los gekopieerd naar `~/.claude/agent-slots/bin/` (bij elke `session.start`) en de shim in `~/.local/bin` wijst daarheen.
 - **Mod**: `tool.call` op Bash herkent zware commando's (`lib/classify.mjs`) en pakt ze in als `'node' '<cli>' run <soort> --session '<id>' -- sh -c '<cmd>'`; `tool.check` beoordeelt toestemming op het originele commando (`unwrapCommand`), maar alleen voor commando's die de mod zelf heeft ingepakt (Set `produced`); een nagemaakte wrapper wordt als geheel beoordeeld. Playwright-MCP-tools: browser-slot per sessie. `Agent` bij kritiek geheugen, `Workflow`/`start_session` onder de grens.
@@ -120,7 +118,8 @@ Houdt agents tegen voordat ze zoveel dev-servers, tests, browsers of sessies sta
 - Geheimen: alles wat agent-slots bewaart of toont gaat door `maskSecrets` (lib én CLI, gelijk gehouden door een test). Nieuwe velden met commando- of taaktekst toevoegen aan `MASKED_FIELDS` in de CLI.
 - Testen: `node --test agent-slots/tests/*.test.mjs` (CLI met echte processen, `AGENT_SLOT_HOME` en `AGENT_SLOT_FAKE_FREE`) en `claude plugin test agent-slots` (hook-logica met nep-CLI).
 
-### minify
+### minify (sinds 11-11-2026 alleen nog in futureflow)
+De losse plugin `minify/` is van `main` gehaald; de code leeft in `futureflow/`. Paden hieronder als `minify/…` heten nu `futureflow/…`; de regels gelden nog.
 Minder tokens: Claude antwoordt kort (`/minify O1|O2|O3|uit`, standaard `O2`, staat standaard aan) en lange tooluitvoer en geheugenbestanden worden ingekort. Ontwerp: `minify/DESIGN.md`.
 - Gebaseerd op [Caveman](https://github.com/JuliusBrussee/caveman) (Apache-2.0, commit `9b68f7e`, 25-10-2026). Regels vertaald en aangepast in `lib/regels.mjs` en `lib/bestand.mjs`; code is eigen werk. `LICENSE` (Apache) en `NOTICE` blijven staan. "Caveman" is een merk: niet als naam gebruiken.
 - Korte antwoorden via command hooks in `hooks/hooks.json` (naast `modules`), zoals caveman: `scripts/regels.sh start|prompt|subagent` (gewone `sh`). De mod-hooks `prompt.compose`/`prompt.section` werken níet: de ingebouwde `cc-plugin-sec-default` slaat ze voor zelf geïnstalleerde plugins altijd over. De mod schrijft teksten naar `~/.claude/minify/regels/` en het niveau per sessie naar `niveau/<sessie>`; het script leest, `lib/regels.mjs` is de enige bron. `/minify` toont of de regels meegingen (`gemeld/<sessie>`).
