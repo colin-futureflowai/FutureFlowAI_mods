@@ -20,9 +20,12 @@ export function shimTekst(settingsPad: string): string
 
 export function geldigeOrKey(s: unknown): boolean
 export function geldigModel(s: unknown): boolean
-export const STANDEN: readonly ['opus', 'sonnet', 'fable']
-export type Stand = 'opus' | 'sonnet' | 'fable'
-export function orInstellingen(model: string, snel: string, standen?: Partial<Record<Stand, string>>): OrInstellingen
+export type Slot = 'm1' | 'm2' | 'm3' | 'm4' | 'm5'
+export type OrKeuze = Partial<Record<Slot, string>>
+export const SLOTS: readonly Slot[]
+export const SLOT_UITLEG: Readonly<Record<Slot, string>>
+export function keuzeVan(ruw: unknown): OrKeuze
+export function orInstellingen(k: OrKeuze & { m1: string }): OrInstellingen
 export function pasToe(data: unknown, gewenst: OrInstellingen): { data: Record<string, any>; marker: OrMarker; vreemd?: undefined } | { vreemd: string; data?: undefined; marker?: undefined }
 export function haalWeg(data: unknown, marker: unknown): Record<string, any>
 export function eigenBasis(marker: unknown): string | undefined

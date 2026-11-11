@@ -310,20 +310,23 @@ test('test: één POST /v1/messages met Bearer uit de sleutelhanger; uitvoer zon
   assert.ok(!f.stdout.includes(ORKEY) && !f.stderr.includes(ORKEY))
 })
 
-test('modus openrouter met --opus/--sonnet/--fable: per stand in het eigen bestand, status meldt ze; ongeldig = exit 1', async () => {
+test('modus openrouter met --m1 … --m5; oude flags als alias; status meldt orM1-orM5; zonder --m1 of ongeldig = exit 1', async () => {
   await cli(['openrouter', 'zet-key'], ORKEY)
-  const r = await cli(['modus', 'openrouter', ...MODEL, '--opus', 'anthropic/claude-opus-4.5', '--fable', 'x/fable'])
+  const r = await cli(['modus', 'openrouter', '--m1', 'anthropic/claude-opus-4.5', '--m3', 'x/fable', '--m5', 'x/vijf'])
   assert.equal(r.status, 0, r.stderr)
   const env = JSON.parse(fs.readFileSync(path.join(ordir, 'settings.json'), 'utf8')).env
-  assert.equal(env.ANTHROPIC_MODEL, 'openai/gpt-5')
-  assert.equal(env.ANTHROPIC_DEFAULT_OPUS_MODEL, 'anthropic/claude-opus-4.5')
-  assert.equal(env.ANTHROPIC_DEFAULT_SONNET_MODEL, 'openai/gpt-5')
+  assert.equal(env.ANTHROPIC_MODEL, 'anthropic/claude-opus-4.5')
+  assert.equal(env.ANTHROPIC_DEFAULT_SONNET_MODEL, 'anthropic/claude-opus-4.5')
   assert.equal(env.ANTHROPIC_DEFAULT_FABLE_MODEL, 'x/fable')
+  assert.equal(env.ANTHROPIC_DEFAULT_HAIKU_MODEL, 'anthropic/claude-opus-4.5')
+  assert.equal(env.ANTHROPIC_CUSTOM_MODEL_OPTION, 'x/vijf')
   const s = json(await cli(['status']))
-  assert.equal(s.orModel, 'openai/gpt-5')
-  assert.equal(s.orOpus, 'anthropic/claude-opus-4.5')
-  assert.equal(s.orSonnet, 'openai/gpt-5')
-  assert.equal(s.orFable, 'x/fable')
-  assert.equal((await cli(['modus', 'openrouter', ...MODEL, '--sonnet', 'geen model'])).status, 1)
+  assert.deepEqual([s.orM1, s.orM2, s.orM3, s.orM4, s.orM5], ['anthropic/claude-opus-4.5', 'anthropic/claude-opus-4.5', 'x/fable', 'anthropic/claude-opus-4.5', 'x/vijf'])
+  // Oude flags: --model/--opus → 1, --sonnet → 2, --snel → 4.
+  await cli(['modus', 'openrouter', '--model', 'a/h', '--sonnet', 'a/so', '--snel', 'a/s'])
+  const e2 = JSON.parse(fs.readFileSync(path.join(ordir, 'settings.json'), 'utf8')).env
+  assert.deepEqual([e2.ANTHROPIC_MODEL, e2.ANTHROPIC_DEFAULT_SONNET_MODEL, e2.ANTHROPIC_DEFAULT_HAIKU_MODEL, e2.ANTHROPIC_CUSTOM_MODEL_OPTION], ['a/h', 'a/so', 'a/s', undefined])
+  assert.equal((await cli(['modus', 'openrouter', '--m2', 'a/b'])).status, 1)
+  assert.equal((await cli(['modus', 'openrouter', '--m1', 'a/b', '--m5', 'geen model'])).status, 1)
   assert.equal(fs.existsSync(bestand), false)
 })

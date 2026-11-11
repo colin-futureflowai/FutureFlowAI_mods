@@ -64,6 +64,9 @@ function fake(on: any) {
     if (cli('connectors.mjs') >= 0) return ok({ uit: ['claude.ai Gmail'], servers: ['n8n-mcp-met-een-hele-lange-servernaam'] })
     if (cli('api.mjs') >= 0) {
       const args = e.argv.slice(cli('api.mjs') + 1)
+      if (args[0] === 'openrouter' && args[1] === 'modellen') {
+        return ok({ modellen: [{ id: 'anthropic/claude-sonnet-4.5-met-een-hele-lange-naam', naam: 'Lang', context: 1000000, in: 3, uit: 15 }, { id: 'x/klein', naam: 'Klein', context: 32000, in: 0.1, uit: 0.2 }], opgehaald: NU })
+      }
       return args[0] === 'status' ? ok({ heeftKey: true, staart: 'WXYZ', modus: 'abonnement', vreemdeHelper: false }) : ok({ aan: true })
     }
     if (cli('accounts.mjs') >= 0) {
@@ -154,7 +157,12 @@ for (const kolommen of [44, 100]) {
       await run($, 'futureflow', tab)
       const ui = await $.ui.mount(PANE(kolommen))
       // Ingeklapt en, als de tab dat heeft, met Meer ▸ open.
-      for (const stap of ['dicht', 'open']) {
+      for (const stap of ['dicht', 'kies', 'open']) {
+        if (stap === 'kies') {
+          // Tab Wisselen: de modellenlijst voor Model 1 open (knop Kies).
+          if (!(await ui.find({ type: 'Button', key: 'or-model-1' }))) continue
+          await ui.press({ key: 'or-model-1' })
+        }
         if (stap === 'open') {
           if (!(await ui.find({ type: 'Button', key: `meer-${tab}` }))) break
           await ui.press({ key: `meer-${tab}` })

@@ -102,7 +102,7 @@ async function zetStap($: Engine, stap: Stap): Promise<void> {
       const k = await orKeuze($)
       const status = await read($, apiStatusAtom)
       const key = status ? status.orHeeftKey === true : (await $.store.get('openrouter.heeftKey')) === true
-      if (!key || !k.model || !k.snel) $.ui.toast('OpenRouter staat in de lijst, maar wordt overgeslagen tot er een key en beide modellen zijn.')
+      if (!key || !k.m1) $.ui.toast('OpenRouter staat in de lijst, maar wordt overgeslagen tot er een key en Model 1 is.')
       else $.ui.toast('OpenRouter wisselt nooit vanzelf: zit je abonnement vol, dan zegt futureflow dat je een sessie met claude-or kunt starten.')
     }
   } catch (err) {
@@ -175,8 +175,7 @@ async function overzichtVan($: Engine) {
     // Onbekend telt als wel, zoals in de ketting (`beschikbaarheid`).
     apiKey: status ? status.heeftKey : (await $.store.get('api.heeftKey')) !== false,
     orKey: status ? status.orHeeftKey === true : (await $.store.get('openrouter.heeftKey')) === true,
-    ...(keuze.model ? { orModel: keuze.model } : {}),
-    ...(keuze.snel ? { orSnel: keuze.snel } : {}),
+    ...(keuze.m1 ? { orModel: keuze.m1, orSnel: keuze.m4 ?? keuze.m1 } : {}),
     ...(status?.orModel ? { orNu: status.orModel } : {}),
   } as any)
   return { t, o }

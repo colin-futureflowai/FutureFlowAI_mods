@@ -6,7 +6,7 @@ import type { OrHerstart } from '../types'
 import { failOpen } from './ctx'
 import { openDashboard } from './paneel'
 
-import { contextTeGroot, herstartCommando, herstartScript, START } from '../lib/openrouter.mjs'
+import { contextTeGroot, herstartCommando, herstartScript, keuzeVan, START } from '../lib/openrouter.mjs'
 
 // Herstart op OpenRouter (0.11.0): de huidige sessie gaat verder in een nieuw Terminal-venster met
 // `claude-or --resume <sessie>` in dezelfde map. Alleen die sessie draait dan op OpenRouter;
@@ -45,10 +45,10 @@ async function opDesktop($: Engine): Promise<boolean> {
 async function klaar($: Engine): Promise<{ shim: string; model: string } | { reden: string }> {
   const h = await home($)
   const shim = h ? `${h}/.local/bin/${START}` : ''
-  const k = ((await $.store.get('openrouter.keuze')) ?? {}) as { model?: unknown; snel?: unknown }
-  if (typeof k.model !== 'string' || typeof k.snel !== 'string') return { reden: 'kies eerst een hoofd- en snel model' }
+  const k = keuzeVan(await $.store.get('openrouter.keuze'))
+  if (!k.m1) return { reden: 'kies eerst Model 1' }
   if (!shim || !(await $.fs.exists(shim).catch(() => false))) return { reden: `${START} staat nog niet klaar` }
-  return { shim, model: k.model }
+  return { shim, model: k.m1 }
 }
 
 // Contextvenster van het gekozen model (bewaard bij het kiezen), en de huidige vulling.
@@ -141,8 +141,8 @@ export async function herstartRij($: Engine, e: any, k: Kleuren): Promise<Render
       )
     }
     if (v.tot <= (await $.clock.now())) return null
-    const keuze = ((await $.store.get('openrouter.keuze')) ?? {}) as { model?: unknown }
-    const waarschuwing = typeof keuze.model === 'string' ? await contextWaarschuwing($, keuze.model) : undefined
+    const m1 = keuzeVan(await $.store.get('openrouter.keuze')).m1
+    const waarschuwing = m1 ? await contextWaarschuwing($, m1) : undefined
     return (
       <Box key="or-herstart" flexDirection="column">
         <Box flexDirection="row" columnGap={2}>

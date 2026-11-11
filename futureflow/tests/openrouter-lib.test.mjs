@@ -6,7 +6,7 @@ import { beslis, eersteStap, HELPER, modusVan, OR_HELPER, toestandVan, WACHTTIJD
 import { ketting } from '../lib/accounts.mjs'
 import {
   contextTekst, eigenBasis, geldigeOrKey, geldigModel, haalWeg, modelIdVoor, modellenVan, orInstellingen, orKosten, pasToe, perMtok, prijsTekst,
-  SHIM_MERK, shimTekst, sorteer, teKlein, herstartCommando, herstartScript, asString, contextTeGroot, geldigeSessie,
+  SHIM_MERK, shimTekst, sorteer, teKlein, keuzeVan, herstartCommando, herstartScript, asString, contextTeGroot, geldigeSessie,
 } from '../lib/openrouter.mjs'
 
 const NU = Date.parse('2026-11-10T12:00:00Z')
@@ -232,14 +232,26 @@ test('herstart: commando quoot map, shim en sessie; ongeldig id of relatieve map
   assert.equal(contextTeGroot(undefined, 200_000), false)
 })
 
-test('orInstellingen: eigen model per stand; leeg of ongeldig = hoofdmodel; haiku = snel', () => {
-  const e = orInstellingen('a/hoofd', 'a/snel', { opus: 'a/opus[1m]', sonnet: '', fable: 'onzin' }).env
-  assert.equal(e.ANTHROPIC_MODEL, 'a/hoofd')
-  assert.equal(e.ANTHROPIC_DEFAULT_OPUS_MODEL, 'a/opus[1m]')
-  assert.equal(e.ANTHROPIC_DEFAULT_SONNET_MODEL, 'a/hoofd')
-  assert.equal(e.ANTHROPIC_DEFAULT_FABLE_MODEL, 'a/hoofd')
-  assert.equal(e.ANTHROPIC_DEFAULT_HAIKU_MODEL, 'a/snel')
-  assert.equal(e.CLAUDE_CODE_SUBAGENT_MODEL, 'a/snel')
+test('orInstellingen: Model 1-5; lege 2-4 = Model 1, lege 5 = geen extra regel; 4 = haiku en subagents', () => {
+  const e = orInstellingen({ m1: 'a/een', m2: 'a/twee[1m]', m3: '', m4: 'a/vier' }).env
+  assert.equal(e.ANTHROPIC_MODEL, 'a/een')
+  assert.equal(e.ANTHROPIC_DEFAULT_OPUS_MODEL, 'a/een')
+  assert.equal(e.ANTHROPIC_DEFAULT_SONNET_MODEL, 'a/twee[1m]')
+  assert.equal(e.ANTHROPIC_DEFAULT_FABLE_MODEL, 'a/een')
+  assert.equal(e.ANTHROPIC_DEFAULT_HAIKU_MODEL, 'a/vier')
+  assert.equal(e.CLAUDE_CODE_SUBAGENT_MODEL, 'a/vier')
   assert.equal(e.ENABLE_TOOL_SEARCH, 'true')
-  assert.deepEqual(orInstellingen('a/h', 'a/s'), orInstellingen('a/h', 'a/s', {}))
+  assert.equal(e.ANTHROPIC_CUSTOM_MODEL_OPTION, undefined)
+  const v = orInstellingen({ m1: 'a/een', m5: 'x/vijf' }).env
+  assert.equal(v.ANTHROPIC_DEFAULT_HAIKU_MODEL, 'a/een')
+  assert.equal(v.ANTHROPIC_CUSTOM_MODEL_OPTION, 'x/vijf')
+  assert.equal(v.ANTHROPIC_CUSTOM_MODEL_OPTION_NAME, 'Model 5 · x/vijf')
+  assert.ok(v.ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION)
+})
+
+test('keuzeVan: oude vorm migreert (hoofd/opus → 1, sonnet → 2, fable → 3, snel → 4); onzin = leeg', () => {
+  assert.deepEqual(keuzeVan({ model: 'a/h', snel: 'a/s' }), { m1: 'a/h', m4: 'a/s' })
+  assert.deepEqual(keuzeVan({ model: 'a/h', opus: 'a/o', sonnet: 'a/so', fable: 'a/f', snel: 'a/s' }), { m1: 'a/o', m2: 'a/so', m3: 'a/f', m4: 'a/s' })
+  assert.deepEqual(keuzeVan({ m1: 'a/1', model: 'a/h', m5: 'a/5' }), { m1: 'a/1', m5: 'a/5' })
+  for (const ruw of [undefined, null, 'x', 42, ['a/b'], { model: 42, snel: null }]) assert.deepEqual(keuzeVan(ruw), {})
 })

@@ -75,10 +75,12 @@ export type ApiStatus = {
   /** Op OpenRouter: het hoofd- en snelle model zoals ze in settings.json staan. */
   orModel?: string
   orSnel?: string
-  /** Model per /model-stand in het eigen settings-bestand (0.12.0). */
-  orOpus?: string
-  orSonnet?: string
-  orFable?: string
+  /** Model 1 t/m 5 zoals claude-or ze nu gebruikt (0.13.0; 2-4 met terugval op 1, 5 alleen als gezet). */
+  orM1?: string
+  orM2?: string
+  orM3?: string
+  orM4?: string
+  orM5?: string
   /** claude-or staat klaar: eigen settings-bestand met modellen (sinds 0.9.0). */
   orKlaar?: boolean
   /** ~/.local/bin/claude-or bestaat en is van futureflow. */
@@ -233,6 +235,8 @@ declare module 'claude-code' {
       'slots.snapshot': SlotsSnapshot | null
       'dashboard.tab': DashboardTab | null
       'openrouter.herstart': OrHerstart | null
+      /** Voor welke rij (Model 1-5) de modellenlijst open staat (0.13.0). */
+      'openrouter.kiesVoor': 'm1' | 'm2' | 'm3' | 'm4' | 'm5' | null
       /** Per tab of Meer ▸ open staat; null = alles ingeklapt. */
       'dashboard.meer': Record<string, boolean> | null
       'minify.niveau': MinifyNiveau | null

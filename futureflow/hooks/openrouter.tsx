@@ -5,12 +5,13 @@ import type { ApiStatus, OrModel, OrModellen } from '../types'
 
 import { cli, foutVan, handmatig, laatsteJson, leesStatus, orKeuze, verversApi, wissel } from './api'
 import type { OrKeuze } from './api'
+import type { Slot } from '../lib/openrouter.mjs'
 import { failOpen } from './ctx'
 import { herstartOpOr } from './herstart'
 import { kaart, knop, knoppen, leeg, paneelVan, uitleg } from './paneel-ui'
 
 import { kostenOverzicht, usd } from '../lib/api.mjs'
-import { contextTekst, geldigeOrKey, geldigModel, isClaude, modelIdVoor, modellenVan, prijsTekst, sorteer, START, teKlein, TOON } from '../lib/openrouter.mjs'
+import { contextTekst, geldigeOrKey, geldigModel, isClaude, modelIdVoor, modellenVan, prijsTekst, SLOT_UITLEG, SLOTS, sorteer, START, teKlein, TOON } from '../lib/openrouter.mjs'
 
 // Tab OpenRouter: Claude Code op een ander model via OpenRouter, alleen in sessies die met `claude-or`
 // starten (eigen settings-bestand; ~/.claude/settings.json blijft van het abonnement, sinds 0.9.0).
@@ -26,6 +27,8 @@ const zoekAtom = atom({ plugin: 'futureflow', key: 'openrouter.zoek' } as const,
 // Welke pagina van de modellenlijst open staat (0 = eerste).
 const paginaAtom = atom({ plugin: 'futureflow', key: 'openrouter.pagina' } as const, 0)
 const versieAtom = atom({ plugin: 'futureflow', key: 'openrouter.versie' } as const, 0)
+// Voor welke rij (Model 1-5) de modellenlijst open staat; null = dicht.
+const kiesAtom = atom({ plugin: 'futureflow', key: 'openrouter.kiesVoor' } as const, null as Slot | null)
 const testAtom = atom({ plugin: 'futureflow', key: 'openrouter.test' } as const, null as string | null)
 
 type Kleuren = { accent: string; mut: string; fg: string; ok: string; warn: string; err: string }
@@ -110,28 +113,21 @@ async function wisKey($: Engine): Promise<void> {
   }
 }
 
-type Rol = 'model' | 'snel' | 'opus' | 'sonnet' | 'fable'
-const STAND_NAAM: Record<'opus' | 'sonnet' | 'fable', string> = { opus: 'Opus', sonnet: 'Sonnet', fable: 'Fable' }
-
-// Kiest het hoofd- of snelle model, of een eigen model voor een /model-stand (met `[1m]` bij ≥ 1M
-// context), en bewaart zijn prijzen (voor de kostenschatting). Hetzelfde model nog eens voor een stand
-// = die stand weer leeg (terug naar het hoofdmodel). Staat claude-or al klaar, dan meteen in het eigen bestand.
-async function kies($: Engine, rol: Rol, m: OrModel): Promise<void> {
+// Model 1 t/m 5 (0.13.0): "Kies" bij een rij opent de modellenlijst voor die rij (atom
+// `openrouter.kiesVoor`); een model kiezen zet het (met `[1m]` bij ≥ 1M context) in die rij, bewaart
+// zijn prijzen en context (kosten, waarschuwing) en sluit de lijst. Staat claude-or al klaar, dan meteen
+// in het eigen bestand.
+async function kies($: Engine, slot: Slot, m: OrModel): Promise<void> {
   try {
     const id = modelIdVoor(m)
     if (!id || !geldigModel(id)) return
-    const oud = await orKeuze($)
-    const weg = rol !== 'model' && rol !== 'snel' && kaal(oud[rol]) === m.id
-    if (teKlein(m) && !weg) $.ui.toast(`Let op: ${m.id} heeft ${contextTekst(m.context)} context; dat is te klein voor Claude Code.`)
-    const nieuw: OrKeuze = { ...oud, [rol]: id }
-    if (weg) delete nieuw[rol]
-    await $.store.set('openrouter.keuze', nieuw)
+    if (teKlein(m)) $.ui.toast(`Let op: ${m.id} heeft ${contextTekst(m.context)} context; dat is te klein voor Claude Code.`)
+    await $.store.set('openrouter.keuze', { ...(await orKeuze($)), [slot]: id })
     const prijzen = ((await $.store.get('openrouter.prijzen')) ?? {}) as Record<string, { in?: number; uit?: number }>
     const prijs = { ...(m.in !== undefined ? { in: m.in } : {}), ...(m.uit !== undefined ? { uit: m.uit } : {}), ...(m.context !== undefined ? { ctx: m.context } : {}) }
     await $.store.set('openrouter.prijzen', { ...prijzen, [m.id]: prijs, [id]: prijs })
-    const status = (await read($, statusAtom)) ?? (await leesStatus($))
-    const nu = await orKeuze($)
-    if (status.orKlaar && nu.model && nu.snel) await wissel($, 'openrouter', 'nieuw model')
+    await update($, kiesAtom, () => null)
+    await zetOpnieuw($)
   } catch (err) {
     failOpen($, err)
   } finally {
@@ -139,10 +135,35 @@ async function kies($: Engine, rol: Rol, m: OrModel): Promise<void> {
   }
 }
 
+// Een rij leeg maken (niet Model 1): 2-4 vallen dan terug op 1, 5 verdwijnt uit /model.
+async function maakLeeg($: Engine, slot: Slot): Promise<void> {
+  try {
+    const nieuw: OrKeuze = { ...(await orKeuze($)) }
+    delete nieuw[slot]
+    await $.store.set('openrouter.keuze', nieuw)
+    await update($, kiesAtom, () => null)
+    await zetOpnieuw($)
+  } catch (err) {
+    failOpen($, err)
+  } finally {
+    await hertekenen($).catch(() => undefined)
+  }
+}
+
+async function zetOpnieuw($: Engine): Promise<void> {
+  const status = (await read($, statusAtom)) ?? (await leesStatus($))
+  if (status.orKlaar && (await orKeuze($)).m1) await wissel($, 'openrouter', 'nieuw model')
+}
+
+async function openKies($: Engine, slot: Slot | null): Promise<void> {
+  await update($, kiesAtom, v => (v === slot ? null : slot))
+  if (slot !== null) void laadModellen($, false).catch(err => failOpen($, err))
+}
+
 async function testVerbinding($: Engine): Promise<void> {
   try {
     const k = await orKeuze($)
-    const model = k.snel ?? k.model
+    const model = k.m4 ?? k.m1
     if (!model) {
       $.ui.toast('Kies eerst een model; de test stuurt één kleine aanvraag naar dat model.')
       return
@@ -176,20 +197,16 @@ async function blader($: Engine, stap: number, laatste: number): Promise<void> {
 
 const kaal = (id: string | undefined) => (id ?? '').replace(/\[1m\]$/, '')
 
-function regelVan(ui: ReturnType<typeof paneelVan>, $: Engine, m: OrModel, i: number, keuze: OrKeuze, meer: boolean) {
+function regelVan(ui: ReturnType<typeof paneelVan>, $: Engine, m: OrModel, i: number, keuze: OrKeuze, slot: Slot) {
   const { Box, Text } = ui.el
-  const hoofd = kaal(keuze.model) === m.id
-  const snel = kaal(keuze.snel) === m.id
-  const stand = (s: 'opus' | 'sonnet' | 'fable') => kaal(keuze[s]) === m.id
-  const iets = hoofd || snel || stand('opus') || stand('sonnet') || stand('fable')
+  const hier = kaal(keuze[slot]) === m.id
+  const elders = SLOTS.filter(s => s !== slot && kaal(keuze[s]) === m.id).map(s => s.slice(1))
   return (
     <Box key={`or-regel-${i}`} flexDirection="row" flexWrap="wrap" columnGap={1}>
-      <Text bold={iets} color={iets ? ui.k.accent : ui.k.fg} wrap="wrap">{m.id}</Text>
-      <Text color={ui.k.mut} wrap="wrap">{`${contextTekst(m.context)} · ${prijsTekst(m.in)} in / ${prijsTekst(m.uit)} uit per Mtok`}</Text>
+      <Text bold={hier} color={hier ? ui.k.accent : ui.k.fg} wrap="truncate-end">{m.id}</Text>
+      <Text color={ui.k.mut} wrap="wrap">{`${contextTekst(m.context)} · ${prijsTekst(m.in)} in / ${prijsTekst(m.uit)} uit per Mtok${elders.length ? ` · nu model ${elders.join(', ')}` : ''}`}</Text>
       {teKlein(m) ? <Text color={ui.k.err} wrap="wrap">te klein voor Claude Code</Text> : ''}
-      {knop(ui, `or-hoofd-${i}`, hoofd ? '● Hoofd' : 'Hoofd', () => kies($, 'model', m), { primary: hoofd })}
-      {knop(ui, `or-snel-${i}`, snel ? '● Haiku/snel' : 'Haiku/snel', () => kies($, 'snel', m), { primary: snel })}
-      {meer ? (['opus', 'sonnet', 'fable'] as const).map(s => knop(ui, `or-${s}-${i}`, stand(s) ? `● ${STAND_NAAM[s]}` : STAND_NAAM[s], () => kies($, s, m), { primary: stand(s) })) : ''}
+      {knop(ui, `or-kies-${i}`, hier ? '● Gekozen' : 'Kies', () => kies($, slot, m), { primary: hier })}
     </Box>
   )
 }
@@ -205,25 +222,24 @@ export async function orBron($: Engine, e: any, k: Kleuren, meer = true): Promis
     const ui = paneelVan(el, e, k)
     const status = (await read($, statusAtom)) ?? (await leesStatus($))
     const lijst = await read($, modellenAtom)
-    const zoekTekst = meer ? await read($, zoekAtom) : ''
     const test = await read($, testAtom)
     const keuze = await orKeuze($)
     const geld = kostenOverzicht((await $.store.get('openrouter.kosten')) as Record<string, number> | undefined, await $.clock.now())
     const klaar = status.orKlaar === true
-    // Alle gekozen modellen (hoofd, snel en per stand): de waarschuwingen gelden per stand.
-    const ids = [keuze.model, keuze.snel, keuze.opus, keuze.sonnet, keuze.fable].map(kaal).filter(Boolean)
+    const kiesVoor = await read($, kiesAtom)
+    // Alle gekozen modellen: de waarschuwingen gelden per rij.
+    const ids = SLOTS.map(s => kaal(keuze[s])).filter(Boolean)
     const gekozen = (lijst?.modellen ?? []).filter(m => ids.includes(m.id))
-    // Wat claude-or nu per stand gebruikt, tegen de keuze (lege stand = hoofdmodel).
-    const per = (s: 'opus' | 'sonnet' | 'fable') => keuze[s] ?? keuze.model
-    const standAnders = (['opus', 'sonnet', 'fable'] as const).some(s => {
-      const nu = s === 'opus' ? status.orOpus : s === 'sonnet' ? status.orSonnet : status.orFable
-      return nu !== undefined && nu !== per(s)
-    })
-    const anders = klaar && !!status.orModel && (status.orModel !== keuze.model || status.orSnel !== keuze.snel || standAnders)
+    // Wat claude-or nu per rij gebruikt, tegen de keuze (lege 2-4 = Model 1, lege 5 = niets).
+    const effectief = (s: Slot) => (s === 'm5' ? keuze.m5 : keuze[s] ?? keuze.m1)
+    const nuIn: Record<Slot, string | undefined> = { m1: status.orM1, m2: status.orM2, m3: status.orM3, m4: status.orM4, m5: status.orM5 }
+    const anders = klaar && SLOTS.some(s => nuIn[s] !== effectief(s))
+    const toonLijst = kiesVoor !== null || meer
+    const zoekTekst = toonLijst ? await read($, zoekAtom) : ''
 
     const gevonden = sorteer(lijst?.modellen ?? [], zoekTekst)
     const paginas = Math.max(1, Math.ceil(gevonden.length / TOON))
-    const pagina = meer ? Math.min(paginas - 1, Math.max(0, await read($, paginaAtom))) : 0
+    const pagina = toonLijst ? Math.min(paginas - 1, Math.max(0, await read($, paginaAtom))) : 0
     const getoond = gevonden.slice(pagina * TOON, (pagina + 1) * TOON)
     const claude = getoond.filter(m => isClaude(m.id))
     const andere = getoond.filter(m => !isClaude(m.id))
@@ -241,28 +257,24 @@ export async function orBron($: Engine, e: any, k: Kleuren, meer = true): Promis
           <Text color={k.mut}>{'  Key: '}</Text>
           {status.orHeeftKey ? <Text>{`sk-or-…${status.orStaart ?? ''}`}</Text> : <Text color={k.mut}>geen key</Text>}
         </Text>
-        <Text wrap="wrap">
-          <Text color={k.mut}>{'  Hoofdmodel: '}</Text>
-          {keuze.model ? <Text>{keuze.model}</Text> : <Text color={k.mut}>nog niet gekozen</Text>}
-        </Text>
-        <Text wrap="wrap">
-          <Text color={k.mut}>{'  Haiku/snel: '}</Text>
-          {keuze.snel ? <Text>{keuze.snel}</Text> : <Text color={k.mut}>nog niet gekozen</Text>}
-        </Text>
-        {(['opus', 'sonnet', 'fable'] as const).map(s => (meer || keuze[s] ? (
-          <Text key={`or-stand-${s}`} wrap="wrap">
-            <Text color={k.mut}>{`  ${STAND_NAAM[s]}: `}</Text>
-            {keuze[s] ? <Text>{keuze[s]}</Text> : <Text color={k.mut}>{keuze.model ? `= hoofdmodel` : 'nog niet gekozen'}</Text>}
-          </Text>
-        ) : ''))}
+        {SLOTS.map((s, n) => (
+          <Box key={`or-rij-${s}`} flexDirection="column" paddingLeft={2}>
+            <Box flexDirection="row" flexWrap="wrap" columnGap={1}>
+              <Text bold color={kiesVoor === s ? k.accent : k.fg}>{`Model ${n + 1}`}</Text>
+              <Text color={keuze[s] ? k.fg : k.mut} wrap="truncate-end">{keuze[s] ?? '—'}</Text>
+              {knop(ui, `or-model-${n + 1}`, kiesVoor === s ? '● Kies' : 'Kies', () => openKies($, s))}
+            </Box>
+            {uitleg(ui, `${n + 1} · ${SLOT_UITLEG[s]}${!keuze[s] && s !== 'm1' && s !== 'm5' && keuze.m1 ? ' (leeg: Model 1)' : ''}`, `or-rij-uitleg-${s}`)}
+          </Box>
+        ))}
         {anders ? (
-          <Text color={k.warn} wrap="wrap">{START} start nog met {status.orModel}; klik Gebruik nu om je keuze te gebruiken.</Text>
+          <Text color={k.warn} wrap="wrap">{START} gebruikt nog de vorige modellen; klik Gebruik nu om je keuze te gebruiken.</Text>
         ) : ''}
         {klaar && !status.orOpPad ? (
           <Text color={k.warn} wrap="wrap">~/.local/bin staat niet op je PATH: start met ~/.local/bin/{START}.</Text>
         ) : ''}
         {gekozen.filter(m => teKlein(m)).map(m => (
-          <Text key={`or-klein-${m.id}`} color={k.err} wrap="wrap">{m.id} heeft {contextTekst(m.context)} context: te klein voor Claude Code.</Text>
+          <Text key={`or-klein-${m.id}`} color={k.err} wrap="truncate-end">{m.id} heeft {contextTekst(m.context)} context: te klein voor Claude Code.</Text>
         ))}
         {status.oudeOr ? <Text color={k.warn} wrap="wrap">In ~/.claude/settings.json staan nog oude OpenRouter-regels; futureflow haalt ze bij de volgende sessiestart weg.</Text> : ''}
         {test ? <Text color={test.startsWith('Verbinding werkt (') ? k.ok : test.startsWith('Bezig') ? k.mut : k.err} wrap="wrap">{test}</Text> : ''}
@@ -282,25 +294,31 @@ export async function orBron($: Engine, e: any, k: Kleuren, meer = true): Promis
     ]
 
     const kaarten: RenderElement[] = []
-    if (status.orHeeftKey || meer) {
-      kaarten.push(kaart(ui, 'OpenRouter-modellen', [
-        meer ? <Input key="or-zoek" label="Zoek " placeholder="naam of id" value={zoekTekst} submitLabel="zoek" onSubmit={(waarde: string) => zoek($, waarde)} /> : '',
+    if (toonLijst) {
+      const slot: Slot = kiesVoor ?? 'm1'
+      const nr = SLOTS.indexOf(slot) + 1
+      kaarten.push(kaart(ui, kiesVoor ? `Kies Model ${nr}` : 'OpenRouter-modellen', [
+        <Input key="or-zoek" label="Zoek " placeholder="naam of id" value={zoekTekst} submitLabel="zoek" onSubmit={(waarde: string) => zoek($, waarde)} />,
         lijst === null ? leeg(ui, 'Lijst laden…') : '',
         lijst?.fout ? <Text color={k.err} wrap="wrap">{lijst.fout}</Text> : '',
         lijst !== null && !gevonden.length && !lijst.fout ? leeg(ui, 'Geen model gevonden.') : '',
         claude.length ? <Text key="or-groep-claude" bold color={k.mut}>Claude via OpenRouter</Text> : '',
-        ...claude.map(m => regelVan(ui, $, m, index(m), keuze, meer)),
+        ...claude.map(m => regelVan(ui, $, m, index(m), keuze, slot)),
         andere.length ? <Text key="or-groep-andere" bold color={k.mut}>Andere modellen</Text> : '',
-        ...andere.map(m => regelVan(ui, $, m, index(m), keuze, meer)),
-        paginas > 1 ? uitleg(ui, meer ? `Pagina ${pagina + 1} van ${paginas} · ${gevonden.length} modellen` : `${gevonden.length} modellen; zoeken en bladeren onder Meer ▸`, 'or-meer') : '',
-        meer && paginas > 1 ? knoppen(ui, [
+        ...andere.map(m => regelVan(ui, $, m, index(m), keuze, slot)),
+        paginas > 1 ? uitleg(ui, `Pagina ${pagina + 1} van ${paginas} · ${gevonden.length} modellen`, 'or-meer') : '',
+        paginas > 1 ? knoppen(ui, [
           pagina > 0 ? knop(ui, 'or-vorige', '◂ Vorige', () => blader($, -1, paginas - 1), { hotkey: 'p' }) : null,
           pagina < paginas - 1 ? knop(ui, 'or-volgende', 'Volgende ▸', () => blader($, 1, paginas - 1), { hotkey: 'n' }) : null,
         ]) : '',
-        uitleg(ui, 'Hoofd = het model waarmee een claude-or-sessie start. Haiku/snel = het goedkopere model voor bijtaken, de stand Haiku en subagents. Opus, Sonnet en Fable (onder Meer ▸) = een eigen model per stand van /model; leeg = het hoofdmodel, nog eens klikken maakt de stand leeg. Alleen modellen die tools kunnen gebruiken.', 'or-rollen'),
+        uitleg(ui, 'Model 1 is verplicht: daarmee start een claude-or-sessie. Lege 2, 3 en 4 gebruiken Model 1; een lege 5 staat niet in /model. Alleen modellen die tools kunnen gebruiken.', 'or-rollen'),
       ], {
         rechts: lijst?.modellen.length ? `${lijst.modellen.length} met tools` : '',
-        knoppen: meer ? knoppen(ui, [knop(ui, 'or-ververs', 'Lijst verversen', () => laadModellen($, true))]) : null,
+        knoppen: knoppen(ui, [
+          kiesVoor && kiesVoor !== 'm1' && keuze[kiesVoor] ? knop(ui, 'or-leeg', `Model ${nr} leeg`, () => maakLeeg($, kiesVoor)) : null,
+          kiesVoor ? knop(ui, 'or-sluit', 'Sluiten', () => openKies($, null)) : null,
+          knop(ui, 'or-ververs', 'Lijst verversen', () => laadModellen($, true)),
+        ]),
       }))
     }
     if (meer) {

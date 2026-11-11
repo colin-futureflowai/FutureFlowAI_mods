@@ -10,7 +10,8 @@ import { kaart, knop, knoppen, paneelVan, uitleg } from './paneel-ui'
 import { beslis, dagSleutel, geldigeKey, houdTot, kosten, kostenOverzicht, limietenVan, modusVan, telOp, toestandVan, usd } from '../lib/api.mjs'
 import type { Beschikbaar, Door, Modus } from '../lib/api.mjs'
 import { instellingenVan, kettingAan } from '../lib/accounts.mjs'
-import { geldigModel, orKosten, OR_URL, START } from '../lib/openrouter.mjs'
+import { geldigModel, keuzeVan, orKosten, OR_URL, SLOTS, START } from '../lib/openrouter.mjs'
+import type { OrKeuze as LibOrKeuze } from '../lib/openrouter.mjs'
 
 // Tab API: de API-key in de macOS-sleutelhanger en wisselen tussen abonnement en API, met de hand
 // of automatisch op de rate limits. Alles buiten de plugin (settings.json, sleutelhanger) gaat via
@@ -119,9 +120,7 @@ export async function leesStatus($: Engine): Promise<ApiStatus> {
       orStaart: typeof d.orStaart === 'string' ? d.orStaart.slice(-4) : '',
       ...(geldigModel(d.orModel) ? { orModel: d.orModel } : {}),
       ...(geldigModel(d.orSnel) ? { orSnel: d.orSnel } : {}),
-      ...(geldigModel(d.orOpus) ? { orOpus: d.orOpus } : {}),
-      ...(geldigModel(d.orSonnet) ? { orSonnet: d.orSonnet } : {}),
-      ...(geldigModel(d.orFable) ? { orFable: d.orFable } : {}),
+      ...Object.fromEntries((['orM1', 'orM2', 'orM3', 'orM4', 'orM5'] as const).filter(s => geldigModel(d[s])).map(s => [s, d[s]])),
       orKlaar: d.orKlaar === true,
       orShim: d.orShim === true,
       orOpPad: d.orOpPad !== false,
@@ -231,16 +230,11 @@ export async function startApi($: Engine): Promise<void> {
   }
 }
 
-// De gekozen OpenRouter-modellen (store `openrouter.keuze`); alleen geldige ids. Sinds 0.12.0 ook een
-// eigen model per /model-stand (opus, sonnet, fable); een oude keuze zonder die velden werkt gewoon,
-// onzin (geen object, verkeerd type) telt als niet gekozen.
-export type OrKeuze = { model?: string; snel?: string; opus?: string; sonnet?: string; fable?: string }
+// De gekozen OpenRouter-modellen (store `openrouter.keuze`): Model 1 t/m 5 (0.13.0). Een oude keuze
+// (model/snel/opus/sonnet/fable) wordt meegenomen (hoofd → 1, snel → 4), onzin telt als niet gekozen.
+export type OrKeuze = LibOrKeuze
 export async function orKeuze($: Engine): Promise<OrKeuze> {
-  const ruw = await $.store.get('openrouter.keuze')
-  const k = (ruw && typeof ruw === 'object' && !Array.isArray(ruw) ? ruw : {}) as Record<string, unknown>
-  const uit: OrKeuze = {}
-  for (const veld of ['model', 'snel', 'opus', 'sonnet', 'fable'] as const) if (geldigModel(k[veld])) uit[veld] = k[veld] as string
-  return uit
+  return keuzeVan(await $.store.get('openrouter.keuze'))
 }
 
 // Welke stappen van de ketting kunnen (zonder CLI): de API tenzij de laatste status zei dat er geen
@@ -248,7 +242,7 @@ export async function orKeuze($: Engine): Promise<OrKeuze> {
 // beide modellen gekozen.
 export async function beschikbaarheid($: Engine): Promise<Beschikbaar> {
   const k = await orKeuze($)
-  return { api: (await $.store.get('api.heeftKey')) !== false, openrouter: (await $.store.get('openrouter.heeftKey')) === true && !!k.model && !!k.snel }
+  return { api: (await $.store.get('api.heeftKey')) !== false, openrouter: (await $.store.get('openrouter.heeftKey')) === true && !!k.m1 }
 }
 
 
@@ -327,12 +321,11 @@ async function zetOrKlaar($: Engine, reden: string, opties: { door?: Door; auto?
     await $.store.set('api.orGemeldTot', opties.door?.resetsAt ?? nu + 5 * 3_600_000)
   }
   const k = await orKeuze($)
-  if (!k.model || !k.snel) {
-    if (!opties.auto) $.ui.toast('Kies eerst een hoofdmodel en een snel model in de lijst.')
+  if (!k.m1) {
+    if (!opties.auto) $.ui.toast('Kies eerst Model 1 in de OpenRouter-kaart.')
     return false
   }
-  const standen = (['opus', 'sonnet', 'fable'] as const).flatMap(s => (k[s] ? [`--${s}`, k[s]!] : []))
-  const r = await cli($, ['modus', 'openrouter', '--model', k.model, '--snel', k.snel, ...standen])
+  const r = await cli($, ['modus', 'openrouter', ...SLOTS.flatMap(s => (k[s] ? [`--${s}`, k[s]!] : []))])
   await verversApi($)
   if (r.exitCode !== 0) {
     const uitleg = r.exitCode === 4 ? 'er staat nog geen OpenRouter-key in de sleutelhanger.' : `${foutVan(r)}.`
@@ -382,7 +375,7 @@ export async function apiTurnComplete($: Engine, e: { usage?: any }): Promise<vo
       // Prijzen per model (per Mtok) bewaard bij het kiezen; onbekend model → het hoofdmodel.
       const prijzen = ((await $.store.get('openrouter.prijzen')) ?? {}) as Record<string, { in?: number; uit?: number }>
       const model = typeof e.usage.model === 'string' ? e.usage.model : ''
-      const prijs = prijzen[model] ?? prijzen[(await orKeuze($)).model ?? '']
+      const prijs = prijzen[model] ?? prijzen[(await orKeuze($)).m1 ?? '']
       const bedrag = orKosten(e.usage, prijs)
       if (bedrag > 0) {
         const dag = dagSleutel(await $.clock.now())

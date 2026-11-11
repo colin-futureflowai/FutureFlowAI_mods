@@ -67,30 +67,64 @@ export function shimTekst(settingsPad) {
 
 // Wat futureflow voor OpenRouter in het eigen settings-bestand zet: hoofdmodel voor opus/sonnet/fable, het snelle
 // model voor haiku (ook achtergrondtaken) en subagents.
-// De standen van /model met een eigen model (0.12.0). Haiku is het snelle model.
-export const STANDEN = ['opus', 'sonnet', 'fable']
+// Model 1 t/m 5 (0.13.0), gekoppeld aan /model: 1 = Opus en het startmodel (ANTHROPIC_MODEL), 2 = Sonnet,
+// 3 = Fable, 4 = Haiku, subagents en achtergrondtaken, 5 = een extra regel in /model
+// (ANTHROPIC_CUSTOM_MODEL_OPTION). Lege 2, 3 en 4 vallen terug op 1; een lege 5 komt er niet in.
+export const SLOTS = ['m1', 'm2', 'm3', 'm4', 'm5']
 
-// `standen`: per stand een eigen model-id; een lege of ongeldige stand valt terug op het hoofdmodel.
-export function orInstellingen(model, snel, standen = {}) {
-  const per = s => (standen && geldigModel(standen[s]) ? standen[s] : model)
-  return {
-    apiKeyHelper: OR_HELPER,
-    env: {
-      ANTHROPIC_BASE_URL: OR_URL,
-      ANTHROPIC_API_KEY: '',
-      // Wint van een vast model-id in ~/.claude/settings.json (bv. claude-fable-5-1[1m]); de DEFAULT_*-sleutels
-      // vervangen alleen aliassen.
-      ANTHROPIC_MODEL: model,
-      ANTHROPIC_DEFAULT_OPUS_MODEL: per('opus'),
-      ANTHROPIC_DEFAULT_SONNET_MODEL: per('sonnet'),
-      ANTHROPIC_DEFAULT_FABLE_MODEL: per('fable'),
-      ANTHROPIC_DEFAULT_HAIKU_MODEL: snel,
-      CLAUDE_CODE_SUBAGENT_MODEL: snel,
-      CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS: '1',
-      // Met een eigen base-URL laadt Claude Code anders alle tool-schema's vooraf (~660k tokens gemeten).
-      ENABLE_TOOL_SEARCH: 'true',
-    },
+// Uitleg per rij in de kaart.
+export const SLOT_UITLEG = {
+  m1: 'start + /model opus',
+  m2: '/model sonnet',
+  m3: '/model fable',
+  m4: 'subagents + /model haiku',
+  m5: 'extra regel in /model',
+}
+
+const isObj = v => !!v && typeof v === 'object' && !Array.isArray(v)
+
+// Keuze uit de store, ook de oude vorm (0.9-0.12: model/snel/opus/sonnet/fable): hoofd of opus → 1,
+// sonnet → 2, fable → 3, snel → 4. Alleen geldige ids; onzin = niets gekozen, nooit een fout.
+export function keuzeVan(ruw) {
+  const k = isObj(ruw) ? ruw : {}
+  const uit = {}
+  const zet = (slot, ...kandidaten) => {
+    const v = kandidaten.find(x => geldigModel(x))
+    if (v !== undefined) uit[slot] = v
   }
+  zet('m1', k.m1, k.opus, k.model)
+  zet('m2', k.m2, k.sonnet)
+  zet('m3', k.m3, k.fable)
+  zet('m4', k.m4, k.snel)
+  zet('m5', k.m5)
+  return uit
+}
+
+// Wat futureflow in het eigen settings-bestand van claude-or zet. Alleen m1 is verplicht.
+export function orInstellingen(k) {
+  const m1 = k.m1
+  const of1 = v => (geldigModel(v) ? v : m1)
+  const env = {
+    ANTHROPIC_BASE_URL: OR_URL,
+    ANTHROPIC_API_KEY: '',
+    // Wint van een vast model-id in ~/.claude/settings.json (bv. claude-fable-5-1[1m]); de DEFAULT_*-sleutels
+    // vervangen alleen aliassen.
+    ANTHROPIC_MODEL: m1,
+    ANTHROPIC_DEFAULT_OPUS_MODEL: m1,
+    ANTHROPIC_DEFAULT_SONNET_MODEL: of1(k.m2),
+    ANTHROPIC_DEFAULT_FABLE_MODEL: of1(k.m3),
+    ANTHROPIC_DEFAULT_HAIKU_MODEL: of1(k.m4),
+    CLAUDE_CODE_SUBAGENT_MODEL: of1(k.m4),
+    CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS: '1',
+    // Met een eigen base-URL laadt Claude Code anders alle tool-schema's vooraf (~660k tokens gemeten).
+    ENABLE_TOOL_SEARCH: 'true',
+  }
+  if (geldigModel(k.m5)) {
+    env.ANTHROPIC_CUSTOM_MODEL_OPTION = k.m5
+    env.ANTHROPIC_CUSTOM_MODEL_OPTION_NAME = `Model 5 · ${k.m5}`
+    env.ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION = 'Via OpenRouter (futureflow)'
+  }
+  return { apiKeyHelper: OR_HELPER, env }
 }
 
 const kloon = d => (d && typeof d === 'object' ? JSON.parse(JSON.stringify(d)) : {})

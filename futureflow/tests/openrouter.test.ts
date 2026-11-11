@@ -86,8 +86,8 @@ function fake(on: any, o: Opties = {}) {
       if (args[1] === 'api') return fout(4, 'geen key in de sleutelhanger; bewaar eerst een key')
       if (args[1] === 'openrouter') {
         // claude-or klaarzetten: settings.json (de modus) blijft.
-        const model = args[args.indexOf('--model') + 1]
-        const snel = args[args.indexOf('--snel') + 1]
+        const model = args[args.indexOf('--m1') + 1]
+        const snel = args.includes('--m4') ? args[args.indexOf('--m4') + 1] : model
         const gewijzigd = cli.model !== model || cli.snel !== snel
         cli.model = model
         cli.snel = snel
@@ -132,8 +132,12 @@ test('tab Wisselen: OpenRouter met waarschuwingen (onder Meer), Claude-groep eer
   expect(await ui.find({ type: 'Text', text: /\$3 in \/ \$15 uit per Mtok/ })).toBeDefined()
   // De eerste rij is het Claude-model.
   expect(await ui.find({ type: 'Text', text: 'anthropic/claude-sonnet-4.5' })).toBeDefined()
-  const hoofd0 = await ui.find({ type: 'Button', key: 'or-hoofd-0' } as any)
-  expect(hoofd0).toBeDefined()
+  expect(await ui.find({ type: 'Button', key: 'or-kies-0' } as any)).toBeDefined()
+  // Vijf rijen Model 1-5 met dimme uitleg; de woorden hoofd en snel zijn weg.
+  for (const n of [1, 2, 3, 4, 5]) expect(await ui.find({ type: 'Button', key: `or-model-${n}` } as any)).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /1 · start \+ \/model opus/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /4 · subagents \+ \/model haiku/ })).toBeDefined()
+  expect(JSON.stringify(await ui.drawn())).not.toMatch(/Hoofd|hoofdmodel|Snel model|Haiku\/snel/)
   const boom = JSON.stringify(await ui.drawn())
   expect(boom.indexOf('anthropic/claude-sonnet-4.5')).toBeLessThan(boom.indexOf('openai/gpt-5'))
   expect(boom).toContain('"flexWrap":"wrap"')
@@ -163,24 +167,27 @@ test('key alleen via stdin; een Anthropic-key wordt geweigerd', async ($, on) =>
   await ui.unmount()
 })
 
-test('zoeken filtert; Hoofd en Snel kiezen bewaart de keuze en de prijzen', async ($, on) => {
+test('Kies bij Model 4 opent de lijst; zoeken filtert; kiezen zet model 4 en sluit de lijst; Model 1 met [1m]', async ($, on) => {
   const f = fake(on)
   await run($, 'futureflow', 'openrouter')
   await f.clock.settle()
   const ui = await $.ui.mount(PANE('terminal'))
-  await ui.press({ key: 'meer-wisselen' } as any)
+  expect(await ui.find({ type: 'Input', key: 'or-zoek' } as any)).toBeUndefined()
+  await ui.press({ key: 'or-model-4' } as any)
+  expect(await ui.find({ type: 'Text', text: 'Kies Model 4' })).toBeDefined()
   await (ui as any).input({ key: 'or-zoek', text: 'mini' } as any)
   expect(await ui.find({ type: 'Text', text: 'openai/gpt-5-mini' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: 'anthropic/claude-sonnet-4.5' })).toBeUndefined()
-  await ui.press({ key: 'or-snel-0' } as any)
+  await ui.press({ key: 'or-kies-0' } as any)
+  expect(await ui.find({ type: 'Input', key: 'or-zoek' } as any)).toBeUndefined()
+  await ui.press({ key: 'or-model-1' } as any)
   await (ui as any).input({ key: 'or-zoek', text: '' } as any)
-  await ui.press({ key: 'or-hoofd-0' } as any)
-  // 1M context: met [1m], zodat Claude Code met 1M rekent.
-  expect(f.store.get('openrouter.keuze')).toEqual({ snel: 'openai/gpt-5-mini', model: 'anthropic/claude-sonnet-4.5[1m]' })
+  await ui.press({ key: 'or-kies-0' } as any)
+  expect(f.store.get('openrouter.keuze')).toEqual({ m4: 'openai/gpt-5-mini', m1: 'anthropic/claude-sonnet-4.5[1m]' })
   expect(f.store.get('openrouter.prijzen')).toEqual({
     'openai/gpt-5-mini': { in: 0.25, uit: 2, ctx: 400000 }, 'anthropic/claude-sonnet-4.5': { in: 3, uit: 15, ctx: 1000000 }, 'anthropic/claude-sonnet-4.5[1m]': { in: 3, uit: 15, ctx: 1000000 },
   })
-  expect(await ui.find({ type: 'Text', text: /Hoofdmodel: anthropic\/claude-sonnet-4\.5\[1m\]/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'anthropic/claude-sonnet-4.5[1m]' })).toBeDefined()
   // Nog niet klaargezet: kiezen zet niets klaar.
   expect(f.modusAanroepen()).toEqual([])
   await ui.unmount()
@@ -194,18 +201,19 @@ test('Gebruik nu: zonder modellen een uitleg; met modellen claude-or klaar, sett
   expect(await ui.find({ type: 'Button', key: 'or-abonnement' } as any)).toBeUndefined()
   await ui.press({ key: 'or-naar' } as any)
   expect(f.modusAanroepen()).toEqual([])
-  expect(f.toasts[0]).toContain('Kies eerst een hoofdmodel en een snel model')
+  expect(f.toasts[0]).toContain('Kies eerst Model 1')
   f.store.set('openrouter.keuze', { model: 'openai/gpt-5', snel: 'openai/gpt-5-mini' })
   await ui.press({ key: 'or-naar' } as any)
-  expect(f.modusAanroepen()).toEqual(['openrouter --model openai/gpt-5 --snel openai/gpt-5-mini'])
+  expect(f.modusAanroepen()).toEqual(['openrouter --m1 openai/gpt-5 --m4 openai/gpt-5-mini'])
   expect(f.toasts[1]).toBe('Klaar. Klik Herstart op OpenRouter boven de prompt, of start een OpenRouter-sessie met claude-or; andere sessies en de desktop-app blijven op je abonnement.')
   expect((f.store.get('api.toestand') as any)?.modus ?? 'abonnement').toBe('abonnement')
   expect(f.cli.modus).toBe('abonnement')
   expect(await ui.find({ type: 'Text', text: 'claude-or' })).toBeDefined()
-  // Klaar en een ander hoofdmodel kiezen zet het meteen in het eigen bestand.
+  // Klaar en een ander Model 1 kiezen zet het meteen in het eigen bestand.
   await f.clock.settle()
-  await ui.press({ key: 'or-hoofd-0' } as any)
-  expect(f.modusAanroepen()[1]).toBe('openrouter --model anthropic/claude-sonnet-4.5[1m] --snel openai/gpt-5-mini')
+  await ui.press({ key: 'or-model-1' } as any)
+  await ui.press({ key: 'or-kies-0' } as any)
+  expect(f.modusAanroepen()[1]).toBe('openrouter --m1 anthropic/claude-sonnet-4.5[1m] --m4 openai/gpt-5-mini')
   await ui.unmount()
 })
 
@@ -215,9 +223,10 @@ test('model met te weinig context: waarschuwing in de lijst en bij kiezen', asyn
   await f.clock.settle()
   const ui = await $.ui.mount(PANE('terminal'))
   await ui.press({ key: 'meer-wisselen' } as any)
+  await ui.press({ key: 'or-model-2' } as any)
   await (ui as any).input({ key: 'or-zoek', text: 'x/m-0' } as any)
   expect(await ui.find({ type: 'Text', text: 'te klein voor Claude Code' })).toBeDefined()
-  await ui.press({ key: 'or-hoofd-0' } as any)
+  await ui.press({ key: 'or-kies-0' } as any)
   expect(f.toasts.some(t => t.includes('x/m-0') && t.includes('te klein voor Claude Code'))).toBe(true)
   expect(await ui.find({ type: 'Text', text: /x\/m-0 heeft 128k context: te klein voor Claude Code/ })).toBeDefined()
   await ui.unmount()
@@ -248,7 +257,7 @@ test('ketting: OpenRouter is alleen een melding (claude-or), één keer per vens
   f.store.set('openrouter.heeftKey', true)
   f.store.set('openrouter.keuze', { model: 'openai/gpt-5', snel: 'openai/gpt-5-mini' })
   await meet($, [{ kind: 'five_hour', percentUsed: 95, resetsAt }], f.clock)
-  expect(f.modusAanroepen()).toEqual(['openrouter --model openai/gpt-5 --snel openai/gpt-5-mini'])
+  expect(f.modusAanroepen()).toEqual(['openrouter --m1 openai/gpt-5 --m4 openai/gpt-5-mini'])
   expect(f.toasts.filter(t => t.includes('claude-or'))).toHaveLength(1)
   expect(f.toasts[0]).toContain('andere sessies en de desktop-app blijven op je abonnement')
   const t = f.store.get('api.toestand') as any
@@ -279,7 +288,7 @@ test('ketting: API zonder key wordt overgeslagen, door naar OpenRouter (auto bli
   f.store.set('openrouter.heeftKey', true)
   f.store.set('openrouter.keuze', { model: 'openai/gpt-5', snel: 'openai/gpt-5-mini' })
   await meet($, [{ kind: 'five_hour', percentUsed: 95, resetsAt: '2026-11-10T14:00:00Z' }], f.clock)
-  expect(f.modusAanroepen()).toEqual(['openrouter --model openai/gpt-5 --snel openai/gpt-5-mini'])
+  expect(f.modusAanroepen()).toEqual(['openrouter --m1 openai/gpt-5 --m4 openai/gpt-5-mini'])
   expect((f.store.get('api.toestand') as any).auto).toBe(true)
   expect((f.store.get('api.toestand') as any).modus).toBe('abonnement')
 })
@@ -292,7 +301,7 @@ test('volgorde en stappen in de tab', async ($, on) => {
   expect(await ui.find({ type: 'Button', key: 'wissel-volgorde' } as any)).toBeUndefined()
   await ui.press({ key: 'wissel-stap-openrouter' } as any)
   expect((f.store.get('api.toestand') as any).stappen).toEqual(['api', 'openrouter'])
-  expect(f.toasts[0]).toContain('overgeslagen tot er een key en beide modellen zijn')
+  expect(f.toasts[0]).toContain('overgeslagen tot er een key en Model 1 is')
   await ui.press({ key: 'wissel-volgorde' } as any)
   expect((f.store.get('api.toestand') as any).stappen).toEqual(['openrouter', 'api'])
   expect(await ui.find({ type: 'Text', text: /^3\. OpenRouter — geen key$/ })).toBeDefined()
@@ -327,22 +336,24 @@ test('lange lijst: bladeren met Volgende (n) en Vorige (p) tekent op de terminal
   await ui.unmount()
 })
 
-test('per /model-stand een eigen model onder Meer: Opus kiezen, nog eens = leeg; Gebruik nu geeft --opus mee', async ($, on) => {
+test('Model 2 en 5 kiezen en leegmaken; Gebruik nu geeft --m1 … --m5 mee', async ($, on) => {
   const f = fake(on, { orKey: true, store: { 'openrouter.keuze': { model: 'openai/gpt-5', snel: 'openai/gpt-5-mini' } } })
   await $.session.start(START)
   await run($, 'futureflow', 'openrouter')
   await f.clock.settle()
   const ui = await $.ui.mount(PANE('terminal'))
-  expect(await ui.find({ type: 'Button', key: 'or-opus-0' } as any)).toBeUndefined()
-  await ui.press({ key: 'meer-wisselen' } as any)
-  // Rij 0 is het Claude-model (1M context): met [1m].
-  await ui.press({ key: 'or-opus-0' } as any)
-  expect(f.store.get('openrouter.keuze')).toEqual({ model: 'openai/gpt-5', snel: 'openai/gpt-5-mini', opus: 'anthropic/claude-sonnet-4.5[1m]' })
-  expect(await ui.find({ type: 'Text', text: /Sonnet: = hoofdmodel/ })).toBeDefined()
+  // Oude keuze: hoofd → 1, snel → 4.
+  expect(await ui.find({ type: 'Text', text: /2 · \/model sonnet \(leeg: Model 1\)/ })).toBeDefined()
+  await ui.press({ key: 'or-model-2' } as any)
+  await ui.press({ key: 'or-kies-0' } as any)
+  await ui.press({ key: 'or-model-5' } as any)
+  await ui.press({ key: 'or-kies-1' } as any)
+  expect(f.store.get('openrouter.keuze')).toEqual({ m1: 'openai/gpt-5', m4: 'openai/gpt-5-mini', m2: 'anthropic/claude-sonnet-4.5[1m]', m5: 'openai/gpt-5' })
   await ui.press({ key: 'or-naar' } as any)
-  expect(f.modusAanroepen().at(-1)).toBe('openrouter --model openai/gpt-5 --snel openai/gpt-5-mini --opus anthropic/claude-sonnet-4.5[1m]')
-  await ui.press({ key: 'or-opus-0' } as any)
-  expect(f.store.get('openrouter.keuze')).toEqual({ model: 'openai/gpt-5', snel: 'openai/gpt-5-mini' })
+  expect(f.modusAanroepen().at(-1)).toBe('openrouter --m1 openai/gpt-5 --m2 anthropic/claude-sonnet-4.5[1m] --m4 openai/gpt-5-mini --m5 openai/gpt-5')
+  await ui.press({ key: 'or-model-2' } as any)
+  await ui.press({ key: 'or-leeg' } as any)
+  expect(f.store.get('openrouter.keuze')).toEqual({ m1: 'openai/gpt-5', m4: 'openai/gpt-5-mini', m5: 'openai/gpt-5' })
   await ui.unmount()
 })
 
@@ -355,7 +366,7 @@ test('oude of kapotte keuze in de store crasht de tab niet', async ($, on) => {
     const ui = await $.ui.mount(PANE('terminal'))
     await ui.press({ key: 'meer-wisselen' } as any)
     expect(await ui.find({ type: 'Text', text: /laden lukte niet/ })).toBeUndefined()
-    expect(await ui.find({ type: 'Text', text: /Opus: / })).toBeDefined()
+    expect(await ui.find({ type: 'Button', key: 'or-model-5' } as any)).toBeDefined()
     await ui.press({ key: 'meer-wisselen' } as any)
     await ui.unmount()
   }
