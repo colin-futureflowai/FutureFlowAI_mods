@@ -40,6 +40,7 @@ function fake(on: any, o: Opties = {}) {
   on('command.register', () => ({ value: undefined }) as any)
   on('ui.panes', () => ({ value: [] }))
   on('fs.write', () => ({ value: undefined }))
+  on('tool.call', ($: any, e: any) => ({ result: `uitgevoerd: ${e.tool}` }))
   on('process.run', ($: any, e: { argv: string[] }) => {
     runs.push(e.argv)
     if (e.argv[0]?.endsWith('/orca') && o.orcaFout) return { value: { exitCode: 2, stdout: '', stderr: 'orca draait niet', isStdoutTruncated: false, isStderrTruncated: false } }
@@ -214,4 +215,23 @@ test('claude-or-sessie (FUTUREFLOW_OPENROUTER=1): tab Overzicht zegt OpenRouter,
   expect(await ui.find({ type: 'Text', text: /^OpenRouter/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /^Abonnement/ })).toBeUndefined()
   await ui.unmount()
+})
+
+test('claude-or-sessie: orca worker-start --agent claude wordt geweigerd met de route via claude-or; --terminal mag', async ($, on) => {
+  const f = fake(on, { orca: { FUTUREFLOW_OPENROUTER: '1' } })
+  await $.session.start(START)
+  await f.clock.settle()
+  const r = (await $.tool.call({ tool: 'Bash', command: 'orca orchestration worker-start --spec "x" --worktree current --agent claude --json' } as any)) as any
+  expect(String(r.deny ?? '')).toContain('claude-or')
+  const ok = (await $.tool.call({ tool: 'Bash', command: 'orca orchestration worker-start --spec "x" --terminal t1 --worktree current --json' } as any)) as any
+  expect(ok.deny).toBeUndefined()
+})
+
+test('gewone sessie: geen OpenRouter-weigering voor orca agent launch --agent claude', async ($, on) => {
+  const f = fake(on)
+  await $.session.start(START)
+  await f.clock.settle()
+  const r = (await $.tool.call({ tool: 'Bash', command: 'orca agent launch --agent claude --json' } as any)) as any
+  // (slots kan een agent-start om geheugen weigeren; de OpenRouter-weigering mag er niet bij zijn)
+  expect(String(r.deny ?? '')).not.toContain('OpenRouter')
 })

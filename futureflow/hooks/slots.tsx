@@ -1,3 +1,5 @@
+import { opOpenrouter } from './api'
+import { ORCA_WEIGER, orcaClaudeStart } from '../lib/openrouter.mjs'
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface as Engine, Register } from 'claude-code'
 
@@ -191,6 +193,9 @@ export const registerSlots = (on: Parameters<Register>[0]): void => {
 
   // Zware Bash-commando's: inpakken in `agent-slot run`, of weigeren met een volgende stap.
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
+    // OpenRouter-sessie (claude-or) die een Orca-worker als gewone claude wil starten: weigeren met de
+    // route via een claude-or-terminal (0.13.1; Orca-config blijft onaangeraakt).
+    if (opOpenrouter() && orcaClaudeStart(e.command)) return { deny: ORCA_WEIGER }
     if ((await oud($)).slots) return next(e)
     if (await bypassed($)) return next(e)
     const c = classify(e.command)

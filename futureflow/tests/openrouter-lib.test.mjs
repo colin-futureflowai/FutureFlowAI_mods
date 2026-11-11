@@ -6,7 +6,7 @@ import { beslis, eersteStap, HELPER, modusVan, OR_HELPER, toestandVan, WACHTTIJD
 import { ketting } from '../lib/accounts.mjs'
 import {
   contextTekst, eigenBasis, geldigeOrKey, geldigModel, haalWeg, modelIdVoor, modellenVan, orInstellingen, orKosten, pasToe, perMtok, prijsTekst,
-  SHIM_MERK, OR_MARKER, orModelAlsStandaard, orcaArgs, shimTekst, sorteer, teKlein, keuzeVan, herstartCommando, herstartScript, asString, contextTeGroot, geldigeSessie,
+  SHIM_MERK, OR_MARKER, orModelAlsStandaard, orcaArgs, orcaClaudeStart, shimTekst, sorteer, teKlein, keuzeVan, herstartCommando, herstartScript, asString, contextTeGroot, geldigeSessie,
 } from '../lib/openrouter.mjs'
 
 const NU = Date.parse('2026-11-10T12:00:00Z')
@@ -278,4 +278,18 @@ test('keuzeVan: oude vorm migreert (hoofd/opus → 1, sonnet → 2, fable → 3,
   assert.deepEqual(keuzeVan({ model: 'a/h', opus: 'a/o', sonnet: 'a/so', fable: 'a/f', snel: 'a/s' }), { m1: 'a/o', m2: 'a/so', m3: 'a/f', m4: 'a/s' })
   assert.deepEqual(keuzeVan({ m1: 'a/1', model: 'a/h', m5: 'a/5' }), { m1: 'a/1', m5: 'a/5' })
   for (const ruw of [undefined, null, 'x', 42, ['a/b'], { model: 42, snel: null }]) assert.deepEqual(keuzeVan(ruw), {})
+})
+
+test('orcaClaudeStart: claude-workers via Orca herkennen; --terminal, codex en andere commando\'s niet', () => {
+  assert.equal(orcaClaudeStart('orca orchestration worker-start --spec "x" --worktree current --agent claude --json'), true)
+  assert.equal(orcaClaudeStart("cd /a && '/o/bin/orca' agent launch --agent=claude --prompt 'p'"), true)
+  assert.equal(orcaClaudeStart('orca worktree create --repo id:r --name t --agent claude-agent-teams --json'), true)
+  assert.equal(orcaClaudeStart('orca orchestration worker-start --spec x --terminal t1 --worktree current --json'), false)
+  assert.equal(orcaClaudeStart('orca agent launch --agent codex --json'), false)
+  assert.equal(orcaClaudeStart('echo orca agent launch'), false)
+  assert.equal(orcaClaudeStart('claude --agent claude'), false)
+})
+
+test('orcaArgs: geen orca uit de projectmap', () => {
+  assert.equal(orcaArgs({ bin: '/proj/bin', worktree: 'r::/w', cwd: '/proj', commando: 'x' }), undefined)
 })

@@ -317,8 +317,32 @@ export function orModelAlsStandaard(model, keuze) {
 // ORCA_WORKTREE_ID (<repoId>::<pad>); zonder die id de map van de sessie. undefined zonder bin of commando.
 export function orcaArgs({ bin, worktree, cwd, commando }) {
   if (typeof bin !== 'string' || !bin.startsWith('/') || typeof commando !== 'string' || !commando) return undefined
+  // Geen orca uit de projectmap zelf (een gekloonde repo kan geen eigen 'orca' laten draaien).
+  if (typeof cwd === 'string' && cwd && (bin === cwd || bin.startsWith(`${cwd.replace(/\/+$/, '')}/`))) return undefined
   const kies = typeof worktree === 'string' && worktree.includes('::') ? `id:${worktree}`
     : typeof cwd === 'string' && cwd.startsWith('/') ? `path:${cwd}` : undefined
   if (!kies) return undefined
   return [`${bin.replace(/\/+$/, '')}/orca`, 'terminal', 'create', '--worktree', kies, '--title', START, '--command', commando, '--focus', '--json']
 }
+
+// Orca-orchestratie vanuit een claude-or-sessie: `--agent claude` start een gewone claude op het abonnement
+// (Orca kent geen eigen agentprofielen; alleen agentCmdOverrides, en die geldt voor heel Orca). Herkent
+// `orca … agent launch|orchestration worker-start|worktree create … --agent claude` zonder --terminal.
+export function orcaClaudeStart(command) {
+  if (typeof command !== 'string') return false
+  return command.split(/&&|\|\||;|\n/).some(deel =>
+    /(^|[\s/'"])orca(-dev|-ide)?['"]?\s/.test(deel) &&
+    /\s(agent\s+launch|orchestration\s+worker-start|worktree\s+create)\s/.test(` ${deel} `) &&
+    /\s--agent(\s+|=)['"]?claude(-agent-teams)?['"]?(\s|$)/.test(` ${deel} `) &&
+    !/\s--terminal(\s|=)/.test(` ${deel} `))
+}
+
+// Wat het model terugkrijgt: hoe de worker wél in claude-or start (eigen terminal + --terminal).
+export const ORCA_WEIGER = [
+  'futureflow: deze sessie loopt via OpenRouter (claude-or). `--agent claude` start in Orca een gewone claude op het abonnement.',
+  'Start de worker zo in claude-or:',
+  '1. orca terminal create --worktree <zelfde selector> --title worker --command "claude-or --dangerously-skip-permissions" --json  → neem `handle` uit het antwoord',
+  '2. wacht tot claude-or klaar staat: orca terminal wait --terminal <handle> --for tui-idle --timeout-ms 60000 --json',
+  '3. orca orchestration worker-start --spec "<taak>" --terminal <handle> --worktree <zelfde selector> --json  (zonder --agent en --model)',
+  'Wil je bewust een worker op het abonnement, zeg dat dan eerst tegen de gebruiker.',
+].join('\n')

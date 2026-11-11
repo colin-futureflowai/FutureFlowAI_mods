@@ -45,3 +45,5 @@ export function contextTeGroot(tokens: unknown, context: unknown): boolean
 export const OR_MARKER: string
 export function orModelAlsStandaard(model: unknown, keuze: unknown): boolean
 export function orcaArgs(a: { bin: unknown; worktree: unknown; cwd: unknown; commando: unknown }): string[] | undefined
+export function orcaClaudeStart(command: unknown): boolean
+export const ORCA_WEIGER: string
