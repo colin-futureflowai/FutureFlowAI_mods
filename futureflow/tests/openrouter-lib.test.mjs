@@ -6,7 +6,7 @@ import { beslis, eersteStap, HELPER, modusVan, OR_HELPER, toestandVan, WACHTTIJD
 import { ketting } from '../lib/accounts.mjs'
 import {
   contextTekst, eigenBasis, geldigeOrKey, geldigModel, haalWeg, modelIdVoor, modellenVan, orInstellingen, orKosten, pasToe, perMtok, prijsTekst,
-  SHIM_MERK, shimTekst, sorteer, teKlein, keuzeVan, herstartCommando, herstartScript, asString, contextTeGroot, geldigeSessie,
+  SHIM_MERK, OR_MARKER, orModelAlsStandaard, orcaArgs, shimTekst, sorteer, teKlein, keuzeVan, herstartCommando, herstartScript, asString, contextTeGroot, geldigeSessie,
 } from '../lib/openrouter.mjs'
 
 const NU = Date.parse('2026-11-10T12:00:00Z')
@@ -187,6 +187,30 @@ test('shimTekst: merkregel, pad tussen enkele aanhalingstekens, exec claude --se
   assert.ok(t.split('\n').includes(SHIM_MERK))
   assert.match(t, /S='\/Users\/x\/it'\\''s\/settings\.json'/)
   assert.match(t, /exec claude --settings "\$S" "\$@"/)
+  // Marker vóór de exec: zo herkent de mod een claude-or-sessie.
+  const r = t.split('\n')
+  assert.equal(OR_MARKER, 'FUTUREFLOW_OPENROUTER')
+  assert.ok(r.indexOf('export FUTUREFLOW_OPENROUTER=1') > 0)
+  assert.ok(r.indexOf('export FUTUREFLOW_OPENROUTER=1') < r.findIndex(x => x.startsWith('exec claude')))
+})
+
+test('orModelAlsStandaard: id met / of een gekozen model; Claude-modellen en leeg niet', () => {
+  assert.equal(orModelAlsStandaard('openai/gpt-5.1', {}), true)
+  assert.equal(orModelAlsStandaard('gpt-x', { m1: 'gpt-x[1m]' }), true)
+  assert.equal(orModelAlsStandaard('opus', { m1: 'openai/gpt-5' }), false)
+  assert.equal(orModelAlsStandaard('claude-opus-5-5', undefined), false)
+  assert.equal(orModelAlsStandaard(undefined, { m1: 'a/b' }), false)
+  assert.equal(orModelAlsStandaard('', { m1: '' }), false)
+})
+
+test('orcaArgs: terminal create in de worktree (id) of de map (path); zonder bin niets', () => {
+  const c = "cd '/a' && '/s' --resume 'x'"
+  assert.deepEqual(orcaArgs({ bin: '/o/bin/', worktree: 'repo-1::/w/p', cwd: '/a', commando: c }),
+    ['/o/bin/orca', 'terminal', 'create', '--worktree', 'id:repo-1::/w/p', '--title', 'claude-or', '--command', c, '--focus', '--json'])
+  assert.equal(orcaArgs({ bin: '/o', worktree: undefined, cwd: '/a', commando: c })[4], 'path:/a')
+  assert.equal(orcaArgs({ bin: undefined, worktree: 'r::/w', cwd: '/a', commando: c }), undefined)
+  assert.equal(orcaArgs({ bin: 'rel', worktree: 'r::/w', cwd: '/a', commando: c }), undefined)
+  assert.equal(orcaArgs({ bin: '/o', worktree: 'zonder', cwd: 'rel', commando: c }), undefined)
 })
 
 const acc = (id, extra = {}) => ({ id, sleutel: String(id), email: `a${id}@x.nl`, plan: 'Max', inRotatie: true, status: 'ok', ...extra })

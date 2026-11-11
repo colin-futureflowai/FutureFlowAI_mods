@@ -330,3 +330,15 @@ test('modus openrouter met --m1 … --m5; oude flags als alias; status meldt orM
   assert.equal((await cli(['modus', 'openrouter', '--m1', 'a/b', '--m5', 'geen model'])).status, 1)
   assert.equal(fs.existsSync(bestand), false)
 })
+
+test('model-weg: haalt alleen `model` weg, alleen bij exact dezelfde waarde; rest blijft', async () => {
+  fs.writeFileSync(bestand, JSON.stringify({ model: 'openai/gpt-5.1', env: { FOO: 'bar' } }, null, 2) + '\n')
+  assert.deepEqual(json(await cli(['openrouter', 'model-weg', '--waarde', 'openai/gpt-5'])), { gewijzigd: false })
+  assert.equal(lees().model, 'openai/gpt-5.1')
+  const r = await cli(['openrouter', 'model-weg', '--waarde', 'openai/gpt-5.1'])
+  assert.equal(r.status, 0, r.stderr)
+  assert.deepEqual(json(r), { gewijzigd: true })
+  assert.deepEqual(lees(), { env: { FOO: 'bar' } })
+  assert.deepEqual(json(await cli(['openrouter', 'model-weg', '--waarde', 'openai/gpt-5.1'])), { gewijzigd: false })
+  assert.equal((await cli(['openrouter', 'model-weg'])).status, 1)
+})

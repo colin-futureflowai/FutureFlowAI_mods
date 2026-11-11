@@ -5,6 +5,7 @@ import type { DashboardTab, MinifyTeller, SlotsSnapshot } from '../types'
 
 import { accountsBron, openAccounts } from './accounts'
 import { apiBron, leesTakenlijst, takenlijstStand, verversApi, zetTakenlijst } from './api'
+import { controleerStandaardModel } from './herstart'
 import { connectorsTab, openConnectors } from './connectors'
 import { failOpen, oud } from './ctx'
 import { minifyTab, niveauLezen } from './minify'
@@ -242,6 +243,8 @@ async function stijlCommando($: Engine, keuze: string): Promise<{ text: string }
 
 // Wat er bij het kiezen van een tab gelezen of gestart moet worden (alleen vanuit onPress en commando's).
 async function bijOpenen($: Engine, t: DashboardTab): Promise<void> {
+  // Staat er een OpenRouter-model als standaard in ~/.claude/settings.json? (/model → Enter in claude-or)
+  await controleerStandaardModel($)
   if ((t === 'zuinig' || t === 'overzicht') && !(await oud($)).slots) await startSlotsTicker($)
   if (t === 'wisselen') {
     await verversApi($)

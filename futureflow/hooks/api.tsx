@@ -4,7 +4,7 @@ import type { EngineInterface as Engine, RenderElement } from 'claude-code'
 import type { ApiStatus, ApiToestand } from '../types'
 
 import { failOpen, leesAccountsStaat } from './ctx'
-import { vraagHerstart } from './herstart'
+import { controleerStandaardModel, vraagHerstart } from './herstart'
 import { kaart, knop, knoppen, paneelVan, uitleg } from './paneel-ui'
 
 import { beslis, dagSleutel, geldigeKey, houdTot, kosten, kostenOverzicht, limietenVan, modusVan, telOp, toestandVan, usd } from '../lib/api.mjs'
@@ -35,29 +35,15 @@ const FOUTE_KEY = 'Dat is geen Anthropic API-key (die begint met sk-ant-); niets
 // Of deze sessie zelf op de API of OpenRouter draait: gestart terwijl onze helper aan stond. Per sessie (één module-instantie).
 let sessieOpApi = false
 let sessieOpOpenrouter = false
+// Loopt deze sessie via claude-or (OpenRouter)? Gezet bij session.start.
+export function opOpenrouter(): boolean {
+  return sessieOpOpenrouter
+}
 // Eén wissel tegelijk (turn.complete en session.measure kunnen kort na elkaar komen).
 let wisselt = false
 
-export function cliPath($: Engine): string {
-  return `${$.plugin.root}/cli/api.mjs`
-}
-
-// Vaste waarden voor de CLI: `env` van $.process.run komt bovenop die van de host, dus zonder deze
-// zouden SECURITY_BIN of SETTINGS_JSON uit een settings-`env`-blok de CLI bereiken (en SECURITY_BIN
-// de key op stdin krijgen). Leeg = de standaard van de CLI.
-const CLI_ENV = { SECURITY_BIN: '/usr/bin/security', SETTINGS_JSON: '', CLAUDE_JSON: '', OPENROUTER_DIR: '', OPENROUTER_URL: '', SHIM_DIR: '' }
-
-// Draait cli/api.mjs. De desktop-app heeft een kaal PATH en argv[0] wordt daarop gezocht,
-// dus `node` via /usr/bin/env met een PATH waar Homebrew vooraan staat.
-// Ook gebruikt door hooks/openrouter.tsx.
-export async function cli($: Engine, args: string[], stdin?: string) {
-  const init = { timeoutMs: 20_000, ...(stdin === undefined ? {} : { stdin }) }
-  const isWin = (await $.env.get('OS')) === 'Windows_NT'
-  if (isWin) return $.process.run(['node', cliPath($), ...args], { ...init, env: CLI_ENV })
-  const hostPath = (await $.env.get('PATH')) ?? ''
-  const PATH = `/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:${hostPath}`
-  return $.process.run(['/usr/bin/env', 'node', cliPath($), ...args], { ...init, env: { ...CLI_ENV, PATH } })
-}
+export { cli, cliPath } from './cli'
+import { cli } from './cli'
 
 // Takenlijst in de terminal (tab Instellingen): env CLAUDE_CODE_ENABLE_TODO_TOOLS in settings.json via
 // `cli/api.mjs takenlijst`. null = nog niet gelezen. Lezen gebeurt bij het openen van de tab
@@ -177,7 +163,7 @@ export async function verversApi($: Engine): Promise<ApiStatus> {
 
 // De modus uit ~/.claude/settings.json, zonder de CLI (die start een Node-proces); undefined als
 // het bestand ontbreekt of onleesbaar is. `oudeOr`: er staan nog OpenRouter-regels van futureflow < 0.9.
-async function modusUitSettings($: Engine): Promise<{ modus: Modus; vreemdeHelper: boolean; oudeOr: boolean } | undefined> {
+async function modusUitSettings($: Engine): Promise<{ modus: Modus; vreemdeHelper: boolean; oudeOr: boolean; model: unknown } | undefined> {
   const home = (await $.env.get('HOME')) ?? (await $.env.get('USERPROFILE'))
   if (!home) return undefined
   try {
@@ -185,7 +171,7 @@ async function modusUitSettings($: Engine): Promise<{ modus: Modus; vreemdeHelpe
     const data = tekst ? JSON.parse(tekst) : {}
     const { modus, vreemdeHelper } = modusVan(data)
     const oudeOr = modus === 'openrouter' || data?.env?.ANTHROPIC_BASE_URL === OR_URL
-    return { modus: oudeOr ? 'abonnement' : modus, vreemdeHelper, oudeOr }
+    return { modus: oudeOr ? 'abonnement' : modus, vreemdeHelper, oudeOr, model: data?.model }
   } catch {
     return undefined
   }
@@ -210,8 +196,12 @@ export async function startApi($: Engine): Promise<void> {
   try {
     const gelezen = await modusUitSettings($)
     sessieOpApi = gelezen?.modus === 'api'
-    // Gestart met claude-or: de env uit het eigen settings-bestand staat in deze sessie.
-    sessieOpOpenrouter = gelezen?.oudeOr === true || (await $.env.get('ANTHROPIC_BASE_URL')) === OR_URL
+    // Gestart met claude-or: de shim zet FUTUREFLOW_OPENROUTER=1 (sinds 0.13.1). Het env-blok van
+    // --settings komt niet in de procesomgeving (gemeten 11-11-2026); ANTHROPIC_BASE_URL is alleen terugval.
+    sessieOpOpenrouter =
+      gelezen?.oudeOr === true || (await $.env.get('FUTUREFLOW_OPENROUTER')) === '1' || (await $.env.get('ANTHROPIC_BASE_URL')) === OR_URL
+    // /model → Enter in claude-or zet het OpenRouter-model als standaard voor alle sessies: melden.
+    if (gelezen) await controleerStandaardModel($, gelezen.model)
     if (gelezen?.oudeOr) void ruimOudeOrOp($).catch(err => failOpen($, err))
     // Sinds 0.8 één schakelaar voor API en accounts: stond alleen accounts-auto aan, dan ook die van de API.
     const t0 = await leesToestand($)

@@ -42,3 +42,6 @@ export function herstartCommando(a: { cwd: unknown; sessie: unknown; shim: unkno
 export function asString(s: string): string
 export function herstartScript(app: 'terminal' | 'iterm', commando: string): string
 export function contextTeGroot(tokens: unknown, context: unknown): boolean
+export const OR_MARKER: string
+export function orModelAlsStandaard(model: unknown, keuze: unknown): boolean
+export function orcaArgs(a: { bin: unknown; worktree: unknown; cwd: unknown; commando: unknown }): string[] | undefined

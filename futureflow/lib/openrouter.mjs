@@ -47,6 +47,8 @@ export const teKlein = m => typeof m?.context === 'number' && m.context > 0 && m
 // alleen dan overschrijft futureflow het.
 export const START = 'claude-or'
 export const SHIM_MERK = '# futureflow: claude-or'
+// Omgevingsvariabele die de shim zet; de mod herkent een claude-or-sessie aan de waarde '1'.
+export const OR_MARKER = 'FUTUREFLOW_OPENROUTER'
 
 // Inhoud van de shim: claude met het eigen settings-bestand, alleen voor die sessie.
 export function shimTekst(settingsPad) {
@@ -60,6 +62,8 @@ export function shimTekst(settingsPad) {
     `  echo "${START}: nog geen OpenRouter-instellingen; kies modellen in /futureflow en klik Gebruik nu." >&2`,
     '  exit 1',
     'fi',
+    '# Marker: zo ziet futureflow in de sessie dat die via OpenRouter loopt (het env-blok van --settings komt niet in de procesomgeving).',
+    `export ${OR_MARKER}=1`,
     'exec claude --settings "$S" "$@"',
     '',
   ].join('\n')
@@ -297,4 +301,24 @@ export function herstartScript(app, commando) {
 // Past het gesprek niet in het venster van het model? Onbekend = geen waarschuwing.
 export function contextTeGroot(tokens, context) {
   return typeof tokens === 'number' && typeof context === 'number' && context > 0 && tokens > context
+}
+
+// Staat er een OpenRouter-model als standaard (`model`) in de algemene settings.json? Dat gebeurt met
+// /model → Enter in claude-or; daarna sturen alle sessies dat model. OpenRouter-id = bevat een '/', of is
+// gelijk aan een gekozen model (Model 1-5, ook met of zonder [1m]).
+export function orModelAlsStandaard(model, keuze) {
+  if (typeof model !== 'string' || !model) return false
+  if (model.includes('/')) return true
+  const kaal = x => String(x).replace(/\[1m\]$/, '')
+  return Object.values(keuze ?? {}).some(v => typeof v === 'string' && v && kaal(v) === kaal(model))
+}
+
+// Orca: een nieuwe terminal in dezelfde worktree met het herstart-commando. `worktree` is
+// ORCA_WORKTREE_ID (<repoId>::<pad>); zonder die id de map van de sessie. undefined zonder bin of commando.
+export function orcaArgs({ bin, worktree, cwd, commando }) {
+  if (typeof bin !== 'string' || !bin.startsWith('/') || typeof commando !== 'string' || !commando) return undefined
+  const kies = typeof worktree === 'string' && worktree.includes('::') ? `id:${worktree}`
+    : typeof cwd === 'string' && cwd.startsWith('/') ? `path:${cwd}` : undefined
+  if (!kies) return undefined
+  return [`${bin.replace(/\/+$/, '')}/orca`, 'terminal', 'create', '--worktree', kies, '--title', START, '--command', commando, '--focus', '--json']
 }

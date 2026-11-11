@@ -3,10 +3,11 @@ import type { EngineInterface as Engine, RenderElement } from 'claude-code'
 
 import type { OrHerstart } from '../types'
 
+import { cli } from './cli'
 import { failOpen } from './ctx'
 import { openDashboard } from './paneel'
 
-import { contextTeGroot, herstartCommando, herstartScript, keuzeVan, START } from '../lib/openrouter.mjs'
+import { contextTeGroot, herstartCommando, herstartScript, keuzeVan, orcaArgs, orModelAlsStandaard, START } from '../lib/openrouter.mjs'
 
 // Herstart op OpenRouter (0.11.0): de huidige sessie gaat verder in een nieuw Terminal-venster met
 // `claude-or --resume <sessie>` in dezelfde map. Alleen die sessie draait dan op OpenRouter;
@@ -14,6 +15,8 @@ import { contextTeGroot, herstartCommando, herstartScript, keuzeVan, START } fro
 // een nieuw venster (osascript), daarna probeert futureflow de oude sessie te sluiten (/exit); lukt
 // dat niet, dan staat er een regel dat je hem kunt sluiten.
 // Eén klik = één venster: `bezig` tijdens de klik, en daarna stand `geopend` voor deze sessie.
+// In Orca (0.13.1; ORCA_TERMINAL_HANDLE of ORCA_WORKTREE_ID) een nieuwe Orca-terminal in dezelfde
+// worktree via de orca CLI ($ORCA_CLI_BIN_DIR/orca); faalt die, dan het commando om te kopiëren, nooit Terminal.app.
 
 const herstartAtom = atom({ plugin: 'futureflow', key: 'openrouter.herstart' } as const, null as OrHerstart | null)
 
@@ -31,6 +34,14 @@ async function home($: Engine): Promise<string | undefined> {
 // Welke terminal de sessie draait: iTerm alleen als TERM_PROGRAM dat zegt, anders Terminal.app.
 async function terminalApp($: Engine): Promise<'terminal' | 'iterm'> {
   return (await $.env.get('TERM_PROGRAM')) === 'iTerm.app' ? 'iterm' : 'terminal'
+}
+
+// Orca: alleen als de sessie in een Orca-terminal draait. bin = $ORCA_CLI_BIN_DIR (mag ontbreken: dan kopiëren).
+async function orcaInfo($: Engine): Promise<{ bin: string | undefined; worktree: string | undefined } | null> {
+  const handle = await $.env.get('ORCA_TERMINAL_HANDLE')
+  const worktree = (await $.env.get('ORCA_WORKTREE_ID')) ?? undefined
+  if (!handle && !worktree) return null
+  return { bin: (await $.env.get('ORCA_CLI_BIN_DIR')) ?? undefined, worktree }
 }
 
 async function opDesktop($: Engine): Promise<boolean> {
@@ -94,6 +105,22 @@ export async function herstartOpOr($: Engine): Promise<void> {
       $.ui.toast('Herstart op OpenRouter kan niet: sessie-id of map onbekend.')
       return
     }
+    const orca = await orcaInfo($)
+    if (orca) {
+      const args = orcaArgs({ bin: orca.bin, worktree: orca.worktree, cwd: await $.session.cwd(), commando })
+      const hostPath = (await $.env.get('PATH')) ?? ''
+      const r = args
+        ? await $.process.run(args, { timeoutMs: 20_000, env: { PATH: `/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:${hostPath}` } }).catch(() => null)
+        : null
+      if (!r || r.exitCode !== 0) {
+        await update($, herstartAtom, () => ({ stand: 'kopieer', reden: '', tot: 0, commando }))
+        const waarom = !args ? 'orca CLI niet gevonden' : r ? r.stderr.trim().slice(0, 120) || `exitcode ${r.exitCode}` : 'orca CLI start niet'
+        $.ui.toast(`Geen nieuwe Orca-terminal geopend (${waarom}). Plak het commando boven de prompt in een terminal.`)
+        return
+      }
+      await geopendEnSluit($, commando)
+      return
+    }
     if (await opDesktop($)) {
       // De desktop-app kan geen terminalvenster openen: het commando om te kopiëren.
       await update($, herstartAtom, () => ({ stand: 'kopieer', reden: '', tot: 0, commando }))
@@ -105,13 +132,7 @@ export async function herstartOpOr($: Engine): Promise<void> {
       $.ui.toast(`Nieuw venster niet geopend (${r.stderr.trim().slice(0, 120) || `exitcode ${r.exitCode}`}). Start zelf: ${commando}`)
       return
     }
-    await update($, herstartAtom, () => ({ stand: 'geopend', reden: '', tot: 0, commando }))
-    // Netjes afsluiten: /exit als die er is; anders blijft de regel "deze kun je sluiten" staan.
-    try {
-      await $.command.run({ command: 'exit' } as any)
-    } catch {
-      $.ui.toast('Deze sessie loopt verder in een nieuw venster op OpenRouter; deze kun je sluiten.')
-    }
+    await geopendEnSluit($, commando)
   } catch (err) {
     failOpen($, err)
   } finally {
@@ -119,12 +140,100 @@ export async function herstartOpOr($: Engine): Promise<void> {
   }
 }
 
+// Na een geopend venster of Orca-terminal: stand `geopend`, en deze sessie netjes afsluiten (/exit als die
+// er is; anders blijft de regel "deze kun je sluiten" staan).
+async function geopendEnSluit($: Engine, commando: string): Promise<void> {
+  await update($, herstartAtom, () => ({ stand: 'geopend', reden: '', tot: 0, commando }))
+  try {
+    await $.command.run({ command: 'exit' } as any)
+  } catch {
+    $.ui.toast('Deze sessie loopt verder in een nieuw venster op OpenRouter; deze kun je sluiten.')
+  }
+}
+
+// ---- OpenRouter-model als standaard in ~/.claude/settings.json (0.13.1) ----
+// /model → Enter in claude-or schrijft het model als `model` naar de algemene settings; daarna sturen alle
+// sessies dat OpenRouter-model. Bij session.start en /futureflow controleren; de knop haalt alleen die
+// ene sleutel weg via `cli/api.mjs openrouter model-weg`, en alleen als de waarde nog exact gelijk is.
+const standaardAtom = atom({ plugin: 'futureflow', key: 'openrouter.standaardModel' } as const, null as string | null)
+
+// `model`: de waarde uit settings.json als de aanroeper die al las; weggelaten = zelf lezen.
+export async function controleerStandaardModel($: Engine, ...model: [unknown?]): Promise<void> {
+  try {
+    let waarde = model[0]
+    if (model.length === 0) {
+      const h = await home($)
+      if (!h) return
+      const tekst = await $.fs.read(`${h}/.claude/settings.json`).catch(() => '')
+      waarde = tekst ? JSON.parse(tekst)?.model : undefined
+    }
+    const fout = orModelAlsStandaard(waarde, keuzeVan(await $.store.get('openrouter.keuze')))
+    const nieuw = fout ? (waarde as string) : null
+    if ((await read($, standaardAtom)) !== nieuw) await update($, standaardAtom, () => nieuw)
+  } catch (err) {
+    failOpen($, err)
+  }
+}
+
+let weghalenBezig = false
+async function haalStandaardWeg($: Engine, waarde: string): Promise<void> {
+  if (weghalenBezig) return
+  weghalenBezig = true
+  try {
+    const r = await cli($, ['openrouter', 'model-weg', '--waarde', waarde])
+    if (r.exitCode !== 0) {
+      $.ui.toast(`Niet weggehaald: ${r.stderr.trim().slice(0, 160) || `exitcode ${r.exitCode}`}`)
+      return
+    }
+    $.ui.toast('OpenRouter-model weggehaald uit ~/.claude/settings.json; sessies gebruiken weer hun eigen standaard.')
+    await controleerStandaardModel($)
+  } catch (err) {
+    failOpen($, err)
+  } finally {
+    weghalenBezig = false
+  }
+}
+
+async function standaardRij($: Engine, e: any, k: Kleuren): Promise<RenderElement | null> {
+  const v = await read($, standaardAtom)
+  if (v === null) return null
+  const { Box, Text, Button } = $.ui.resolve(e)
+  return (
+    <Box key="or-standaard" flexDirection="row" columnGap={2}>
+      <Box flexGrow={1} flexShrink={1}>
+        <Text color={k.err} wrap="wrap">{`OpenRouter-model (${v}) staat als standaard in je algemene settings — alle sessies gaan daardoor fout. Weghalen?`}</Text>
+      </Box>
+      <Button key="or-standaard-weg" onPress={() => haalStandaardWeg($, v)}>Weghalen</Button>
+    </Box>
+  )
+}
+
 async function nietNu($: Engine): Promise<void> {
   await update($, herstartAtom, () => null)
 }
 
 // De regel boven de prompt (via de skin): vraag met knop, of na het openen de sluit-regel. Leest alleen.
+// Plus (0.13.1) de melding als er een OpenRouter-model als standaard in de algemene settings staat.
 export async function herstartRij($: Engine, e: any, k: Kleuren): Promise<RenderElement | null> {
+  try {
+    const std = await standaardRij($, e, k)
+    const rij = await herstartAlleen($, e, k)
+    if (std === null) return rij
+    if (rij === null) return std
+    const { Box } = $.ui.resolve(e)
+    return (
+      <Box key="or-rijen" flexDirection="column">
+        {std}
+        {rij}
+      </Box>
+    )
+  } catch (err) {
+    failOpen($, err)
+    return null
+  }
+}
+
+async function herstartAlleen($: Engine, e: any, k: Kleuren): Promise<RenderElement | null> {
   try {
     const v = await read($, herstartAtom)
     if (v === null) return null

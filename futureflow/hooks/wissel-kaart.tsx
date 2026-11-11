@@ -4,7 +4,7 @@ import type { EngineInterface as Engine, RenderElement } from 'claude-code'
 import type { AccountsStatus, ApiStatus, ApiToestand } from '../types'
 
 import { zetAccountsInstellingen } from './accounts'
-import { apiMeet, bewaarApiToestand, orKeuze, zetApiAuto } from './api'
+import { apiMeet, bewaarApiToestand, opOpenrouter, orKeuze, zetApiAuto } from './api'
 import { failOpen, leesAccountsStaat } from './ctx'
 import { kaart, knop, paneelVan, uitleg, vinkje } from './paneel-ui'
 import type { PaneelKleuren } from './paneel-ui'
@@ -165,7 +165,8 @@ async function overzichtVan($: Engine) {
   const limieten = await $.session.usage().then(u => limietenVan(u.rateLimits), () => [])
   const keuze = await orKeuze($)
   const o = wisselOverzicht({
-    modus: status && !status.fout ? status.modus : t.modus,
+    // Deze sessie via claude-or: dan OpenRouter, ongeacht wat de algemene settings zeggen.
+    modus: opOpenrouter() ? 'openrouter' : status && !status.fout ? status.modus : t.modus,
     apiAuto: t.auto,
     stappen: t.stappen,
     hoog: t.hoog,

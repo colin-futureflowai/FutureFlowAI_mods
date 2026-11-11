@@ -11,6 +11,8 @@
 //                               zet OpenRouter klaar voor `claude-or`: eigen settings-bestand
 //                               <OPENROUTER_DIR>/settings.json en de shim <SHIM_DIR>/claude-or
 //                               → JSON { modus, gewijzigd, settings, shim, start, opPad }
+//   api openrouter model-weg --waarde <id>  haalt alleen de sleutel `model` uit settings.json, en alleen
+//                               als die nog exact <id> is (OpenRouter-model via /model → Enter in claude-or) → JSON { gewijzigd }
 //   api openrouter opruimen     oude OpenRouter-regels (van futureflow < 0.9) uit settings.json → JSON { gewijzigd }
 //   api takenlijst aan|uit|status  env.CLAUDE_CODE_ENABLE_TODO_TOOLS = "true" → JSON { aan } (aan/uit ook { gewijzigd })
 //   api openrouter zet-key      OpenRouter-key via stdin → sleutelhanger → JSON { ok, staart }
@@ -338,6 +340,7 @@ function vlagen(rest) {
   for (let i = 0; i < rest.length; i++) {
     const a = rest[i]
     if (a === '--ververs') uit.ververs = true
+    else if (a === '--waarde' && i + 1 < rest.length) uit.waarde = rest[++i]
     else if (['--model', '--snel', '--opus', '--sonnet', '--fable', '--m1', '--m2', '--m3', '--m4', '--m5'].includes(a) && i + 1 < rest.length) uit[a.slice(2)] = rest[++i]
     else throw new Fout(`onbekend argument ${a.slice(0, 40)}`, 1)
   }
@@ -489,6 +492,21 @@ function takenlijst(actie) {
   return zetTakenlijst(actie === 'aan')
 }
 
+// Alleen de sleutel `model` weghalen, atomisch, en alleen als de waarde nog exact gelijk is.
+function modelWeg(opties) {
+  const w = opties.waarde
+  if (typeof w !== 'string' || !w) throw new Fout('geef de waarde (--waarde <model>)', 1)
+  const doel = doelPad()
+  for (let poging = 1; poging <= POGINGEN; poging++) {
+    const gelezen = lees(doel)
+    if (!gelezen || !gelezen.data || gelezen.data.model !== w) return { gewijzigd: false }
+    const { model: _weg, ...rest } = gelezen.data
+    if (!schrijfSettings(doel, gelezen, rest)) continue
+    return { gewijzigd: true }
+  }
+  throw new Fout(`${BESTAND} veranderde steeds tijdens het schrijven; niets gewijzigd, probeer het opnieuw`, 2)
+}
+
 // Status zonder te falen op één onderdeel: een fout komt in `fout`.
 function status() {
   const uit = { heeftKey: false, staart: '', modus: 'abonnement', vreemdeHelper: false, vreemdeBasis: false, orHeeftKey: false, orStaart: '' }
@@ -538,11 +556,12 @@ export async function main(args) {
     else if (cmd === 'openrouter' && sub === 'wis-key' && vlag.length === 0) console.log(JSON.stringify(wisKey(true)))
     else if (cmd === 'openrouter' && sub === 'modellen') console.log(JSON.stringify(await modellen(vlagen(vlag))))
     else if (cmd === 'openrouter' && sub === 'test') console.log(JSON.stringify(await test(vlagen(vlag))))
+    else if (cmd === 'openrouter' && sub === 'model-weg') console.log(JSON.stringify(modelWeg(vlagen(vlag))))
     else if (cmd === 'openrouter' && sub === 'opruimen' && vlag.length === 0) console.log(JSON.stringify(ruimOp()))
     else {
       console.error(
         'Gebruik: api zet-key (key via stdin) | api wis-key | api status | api modus api|abonnement | api modus openrouter --m1 <id> [--m2|--m3|--m4|--m5 <id>]' +
-          ' | api takenlijst aan|uit|status | api openrouter zet-key|wis-key|opruimen | api openrouter modellen [--ververs] | api openrouter test --model <id>',
+          ' | api takenlijst aan|uit|status | api openrouter zet-key|wis-key|opruimen | api openrouter model-weg --waarde <id> | api openrouter modellen [--ververs] | api openrouter test --model <id>',
       )
       return 1
     }

@@ -235,6 +235,8 @@ declare module 'claude-code' {
       'slots.snapshot': SlotsSnapshot | null
       'dashboard.tab': DashboardTab | null
       'openrouter.herstart': OrHerstart | null
+      /** OpenRouter-model dat als `model` in ~/.claude/settings.json staat (/model → Enter in claude-or); null = niets aan de hand. */
+      'openrouter.standaardModel': string | null
       /** Voor welke rij (Model 1-5) de modellenlijst open staat (0.13.0). */
       'openrouter.kiesVoor': 'm1' | 'm2' | 'm3' | 'm4' | 'm5' | null
       /** Per tab of Meer ▸ open staat; null = alles ingeklapt. */

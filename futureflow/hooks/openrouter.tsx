@@ -253,6 +253,7 @@ export async function orBron($: Engine, e: any, k: Kleuren, meer = true): Promis
           <Text color={k.mut}>{klaar ? `  · klaar: start met ${START}` : `  · alleen via ${START}`}</Text>
         </Text>
         {uitleg(ui, `Start een OpenRouter-sessie met ${START}; andere sessies en de desktop-app blijven op je abonnement.`, 'or-start-uitleg')}
+        {uitleg(ui, `In ${START}: kies een model in /model met s (alleen deze sessie), niet Enter.`, 'or-model-tip')}
         <Text wrap="truncate-end">
           <Text color={k.mut}>{'  Key: '}</Text>
           {status.orHeeftKey ? <Text>{`sk-or-…${status.orStaart ?? ''}`}</Text> : <Text color={k.mut}>geen key</Text>}

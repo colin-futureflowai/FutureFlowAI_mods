@@ -4,7 +4,7 @@ const NU = Date.parse('2026-11-10T12:00:00Z')
 const ID = 'f2b8903e-a21c-4741-b219-c03db7d5e4cb'
 const SHIM = '/home/t/.local/bin/claude-or'
 
-type Opties = { surfaces?: string[]; shim?: boolean; keuze?: boolean; tokens?: number; ctx?: number; osaFout?: boolean; exitWeg?: boolean; term?: string }
+type Opties = { surfaces?: string[]; shim?: boolean; keuze?: boolean; tokens?: number; ctx?: number; osaFout?: boolean; exitWeg?: boolean; term?: string; orca?: Record<string, string>; orcaFout?: boolean; settings?: string }
 
 // Nep-omgeving: alle mocks vóór de eerste $-aanroep.
 function fake(on: any, o: Opties = {}) {
@@ -21,7 +21,7 @@ function fake(on: any, o: Opties = {}) {
   on('tool.register', () => ({ value: undefined }))
   on('store.get', ($: any, e: { key: string }) => ({ value: store.get(e.key) }))
   on('store.set', ($: any, e: { key: string; value: unknown }) => { store.set(e.key, e.value); return { value: undefined } })
-  on('env.get', ($: any, e: { name: string }) => ({ value: ({ HOME: '/home/t', PATH: '/usr/bin', ...(o.term ? { TERM_PROGRAM: o.term } : {}) } as Record<string, string>)[e.name] }))
+  on('env.get', ($: any, e: { name: string }) => ({ value: ({ HOME: '/home/t', PATH: '/usr/bin', ...(o.term ? { TERM_PROGRAM: o.term } : {}), ...(o.orca ?? {}) } as Record<string, string>)[e.name] }))
   on('session.id', () => ({ value: ID }))
   on('session.cwd', () => ({ value: "/Users/c/mijn map's" }))
   on('session.surfaces', () => ({ value: o.surfaces ?? ['terminal'] }))
@@ -31,7 +31,7 @@ function fake(on: any, o: Opties = {}) {
   on('ui.log', () => ({ value: undefined }))
   on('ui.open', ($: any, e: { id: string }) => { geopend.push(e); return { value: { isPlaced: true } } })
   on('fs.exists', ($: any, e: { path: string }) => ({ value: e.path === SHIM && o.shim !== false }))
-  on('fs.read', () => ({ value: '' }))
+  on('fs.read', ($: any, e: { path: string }) => ({ value: e.path === '/home/t/.claude/settings.json' ? (o.settings ?? '') : '' }))
   on('fs.list', () => ({ value: [] }))
   on('session.start', ($: any, e: any) => e)
   on('session.measure', () => ({ changed: [] }) as never)
@@ -42,6 +42,7 @@ function fake(on: any, o: Opties = {}) {
   on('fs.write', () => ({ value: undefined }))
   on('process.run', ($: any, e: { argv: string[] }) => {
     runs.push(e.argv)
+    if (e.argv[0]?.endsWith('/orca') && o.orcaFout) return { value: { exitCode: 2, stdout: '', stderr: 'orca draait niet', isStdoutTruncated: false, isStderrTruncated: false } }
     if (e.argv[0] === '/usr/bin/osascript' && o.osaFout) return { value: { exitCode: 1, stdout: '', stderr: 'geen toegang', isStdoutTruncated: false, isStderrTruncated: false } }
     return { value: { exitCode: 0, stdout: '{}\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
@@ -155,4 +156,62 @@ test('gesprek groter dan het venster van het model: waarschuwing bij de knop; Ni
   await band.press({ key: 'or-herstart-nee' } as any)
   expect(await band.find({ type: 'Button', key: 'or-herstart-ja' } as any)).toBeUndefined()
   await band.unmount()
+})
+
+test('Orca: nieuwe Orca-terminal in dezelfde worktree, geen Terminal.app', async ($, on) => {
+  const f = fake(on, { orca: { ORCA_TERMINAL_HANDLE: 'term-1', ORCA_WORKTREE_ID: 'repo-1::/w/gimc', ORCA_CLI_BIN_DIR: '/o/bin' } })
+  await gebruikNu($, f)
+  const band = await $.ui.mount(BAND())
+  await band.press({ key: 'or-herstart-ja' } as any)
+  expect(f.osa().length).toBe(0)
+  const orca = f.runs.filter(r => r[0] === '/o/bin/orca')
+  expect(orca.length).toBe(1)
+  expect(orca[0]!.slice(1, 5)).toEqual(['terminal', 'create', '--worktree', 'id:repo-1::/w/gimc'])
+  expect(orca[0]![8]).toContain('--resume')
+  expect(f.exits.length).toBe(1)
+  await band.unmount()
+})
+
+test('Orca CLI faalt: regel met het commando om te kopiëren, geen Terminal.app en geen /exit', async ($, on) => {
+  const f = fake(on, { orca: { ORCA_TERMINAL_HANDLE: 'term-1', ORCA_CLI_BIN_DIR: '/o/bin' }, orcaFout: true })
+  await gebruikNu($, f)
+  const band = await $.ui.mount(BAND())
+  await band.press({ key: 'or-herstart-ja' } as any)
+  expect(f.osa().length).toBe(0)
+  expect(f.exits.length).toBe(0)
+  expect(f.toasts.some(t => t.includes('orca draait niet'))).toBe(true)
+  expect(await band.find({ type: 'Text', text: /plak dit in een terminal/ })).toBeDefined()
+  await band.unmount()
+})
+
+test('OpenRouter-model als standaard in settings.json: melding met knop; knop draait model-weg met de waarde', async ($, on) => {
+  const f = fake(on, { settings: JSON.stringify({ model: 'openai/gpt-5.1' }) })
+  await $.session.start(START)
+  await f.clock.settle()
+  const band = await $.ui.mount(BAND())
+  expect(await band.find({ type: 'Text', text: /staat als standaard in je algemene settings/ })).toBeDefined()
+  await band.press({ key: 'or-standaard-weg' } as any)
+  const weg = f.runs.find(r => r.includes('model-weg'))
+  expect(weg?.slice(-3)).toEqual(['model-weg', '--waarde', 'openai/gpt-5.1'])
+  await band.unmount()
+})
+
+test('Claude-model als standaard: geen melding', async ($, on) => {
+  const f = fake(on, { settings: JSON.stringify({ model: 'opus' }) })
+  await $.session.start(START)
+  await f.clock.settle()
+  const band = await $.ui.mount(BAND())
+  expect(await band.find({ type: 'Text', text: /staat als standaard/ })).toBeUndefined()
+  await band.unmount()
+})
+
+test('claude-or-sessie (FUTUREFLOW_OPENROUTER=1): tab Overzicht zegt OpenRouter, niet Abonnement', async ($, on) => {
+  const f = fake(on, { orca: { FUTUREFLOW_OPENROUTER: '1' } })
+  await $.session.start(START)
+  await f.clock.settle()
+  await run($, 'futureflow', 'overzicht')
+  const ui = await $.ui.mount(PANE)
+  expect(await ui.find({ type: 'Text', text: /^OpenRouter/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^Abonnement/ })).toBeUndefined()
+  await ui.unmount()
 })
