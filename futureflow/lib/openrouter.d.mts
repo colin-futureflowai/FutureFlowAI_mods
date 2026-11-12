@@ -19,9 +19,10 @@ export function teKlein(m: { context?: number } | null | undefined): boolean
 export const CACHE_ZWAK: string[]
 export const CACHE_ZWAK_TEKST: string
 export function cacheZwak(m: { id?: string } | null | undefined): boolean
-export type CacheOordeel = 'goed' | 'laat' | 'zwak'
+export type CacheOordeel = 'goed' | 'wisselend' | 'zwak'
 export type CacheRonde = { in: number; read: number; write: number; aandeel: number }
-export type CacheMeting = { oordeel: CacheOordeel; aandeel: number; gemeten: number }
+export type CacheMeting = { oordeel: CacheOordeel; aandeel: number; raak: number; van: number; gemeten: number }
+export function cacheTelling(rondes: readonly CacheRonde[] | null | undefined): { raak: number; van: number; aandeel: number }
 export const CACHE_RONDES: number
 export const CACHE_GRENS: number
 export const CACHE_OORDEEL_TEKST: Record<CacheOordeel, string>
@@ -30,7 +31,7 @@ export function cacheProef(model: string, zaad: string): Array<Record<string, un
 export function cacheRonde(usage: unknown): CacheRonde
 export function cacheOordeel(rondes: readonly CacheRonde[] | null | undefined): CacheOordeel | 'onbekend'
 export function cacheMetingen(ruw: unknown): Record<string, CacheMeting>
-export function cacheStand(m: { id?: string } | null | undefined, metingen: Record<string, CacheMeting> | null | undefined): { oordeel: CacheOordeel; tekst: string; aandeel?: number; gemeten?: number } | null
+export function cacheStand(m: { id?: string } | null | undefined, metingen: Record<string, CacheMeting> | null | undefined): { oordeel: CacheOordeel; tekst: string; aandeel?: number; raak?: number; van?: number; gemeten?: number } | null
 export function shimTekst(settingsPad: string): string
 
 export function geldigeOrKey(s: unknown): boolean

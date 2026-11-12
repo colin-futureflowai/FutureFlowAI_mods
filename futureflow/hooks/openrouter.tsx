@@ -11,7 +11,7 @@ import { herstartOpOr } from './herstart'
 import { kaart, knop, knoppen, leeg, paneelVan, uitleg } from './paneel-ui'
 
 import { kostenOverzicht, usd } from '../lib/api.mjs'
-import { cacheMetingen, cacheStand, contextTekst, geldigeOrKey, geldigModel, isClaude, modelIdVoor, modellenVan, prijsTekst, SLOT_UITLEG, SLOTS, sorteer, START, teKlein, TOON } from '../lib/openrouter.mjs'
+import { CACHE_ZWAK_TEKST, cacheMetingen, cacheStand, contextTekst, geldigeOrKey, geldigModel, isClaude, modelIdVoor, modellenVan, prijsTekst, SLOT_UITLEG, SLOTS, sorteer, START, teKlein, TOON } from '../lib/openrouter.mjs'
 
 // Tab OpenRouter: Claude Code op een ander model via OpenRouter, alleen in sessies die met `claude-or`
 // starten (eigen settings-bestand; ~/.claude/settings.json blijft van het abonnement, sinds 0.9.0).
@@ -32,7 +32,7 @@ const kiesAtom = atom({ plugin: 'futureflow', key: 'openrouter.kiesVoor' } as co
 const testAtom = atom({ plugin: 'futureflow', key: 'openrouter.test' } as const, null as string | null)
 // Meet cache: voortgang of de laatste fout; de uitslagen zelf staan in store `openrouter.cache`.
 const cacheAtom = atom({ plugin: 'futureflow', key: 'openrouter.cacheStand' } as const, null as string | null)
-const CACHE_UITLEG = 'Meet cache stuurt per gekozen model vier kleine aanvragen (ongeveer 50k tokens, enkele centen tot een dubbeltje) en laat zien of het model in een agent-lus cachet.'
+const CACHE_UITLEG = 'Meet cache stuurt per gekozen model zes kleine aanvragen (ongeveer 50k tokens, enkele centen tot een dubbeltje) en telt in hoeveel rondes de cache raakte. Een nieuw gekozen model wordt één keer vanzelf gemeten. Aanbieders missen soms een ronde, dus een uitslag kan per meting iets verschillen.'
 
 type Kleuren = { accent: string; mut: string; fg: string; ok: string; warn: string; err: string }
 
@@ -128,6 +128,7 @@ async function kies($: Engine, slot: Slot, m: OrModel): Promise<void> {
     const cache = cacheStand(m, cacheMetingen(await $.store.get('openrouter.cache')))
     if (cache?.oordeel === 'zwak') $.ui.toast(`Let op: ${m.id} ${cache.tekst}.`)
     await $.store.set('openrouter.keuze', { ...(await orKeuze($)), [slot]: id })
+    void meetBijKiezen($, m.id).catch(err => failOpen($, err))
     const prijzen = ((await $.store.get('openrouter.prijzen')) ?? {}) as Record<string, { in?: number; uit?: number }>
     const prijs = { ...(m.in !== undefined ? { in: m.in } : {}), ...(m.uit !== undefined ? { uit: m.uit } : {}), ...(m.context !== undefined ? { ctx: m.context } : {}) }
     await $.store.set('openrouter.prijzen', { ...prijzen, [m.id]: prijs, [id]: prijs })
@@ -189,50 +190,67 @@ async function testVerbinding($: Engine): Promise<void> {
   }
 }
 
-// Eén meting tegelijk.
+// Eén meting tegelijk; wat erbij komt wacht in de rij.
 let meet = false
+const rij: string[] = []
 
-// Meet cache: per gekozen model `openrouter cachetest` (vier kleine aanvragen als agent-lus), na elkaar.
-// Loopt los van de klik (tot ~1 min per model); elke uitslag gaat naar store `openrouter.cache` (id zonder
-// [1m]) en de kaart tekent opnieuw. Nooit automatisch: het kost tokens.
+// Meet de cache van de modellen in `ids` (zonder [1m]): per model `openrouter cachetest` (zes kleine
+// aanvragen als agent-lus), na elkaar. Loopt los van de klik (tot ~1 min per model); elke uitslag gaat
+// naar store `openrouter.cache` en de kaart tekent opnieuw. Loopt er al een meting, dan sluiten de
+// modellen achteraan in de rij.
+async function meetModellen($: Engine, ids: string[]): Promise<void> {
+  for (const id of ids) if (!rij.includes(id)) rij.push(id)
+  if (meet || !rij.length) return
+  meet = true
+  await update($, cacheAtom, () => `Cache meten: ${rij[0]}…`)
+  void (async () => {
+    const fouten: string[] = []
+    try {
+      while (rij.length) {
+        const id = rij[0]
+        await update($, cacheAtom, () => `Cache meten: ${id}${rij.length > 1 ? ` (nog ${rij.length - 1} daarna)` : ''}…`)
+        const r = await cli($, ['openrouter', 'cachetest', '--model', id], undefined, 240_000)
+        rij.shift()
+        const d = r.exitCode === 0 ? laatsteJson(r.stdout) : undefined
+        if (d?.ok === true && ['goed', 'wisselend', 'zwak'].includes(d.oordeel)) {
+          const oud = cacheMetingen(await $.store.get('openrouter.cache'))
+          await $.store.set('openrouter.cache', { ...oud, [id]: { oordeel: d.oordeel, aandeel: Number(d.aandeel) || 0, raak: Number(d.raak) || 0, van: Number(d.van) || 0, gemeten: await $.clock.now() } })
+          if (d.oordeel === 'zwak') $.ui.toast(`Let op: ${id} ${CACHE_ZWAK_TEKST}.`)
+          await hertekenen($)
+        } else {
+          fouten.push(`${id}: ${r.exitCode !== 0 ? foutVan(r) : String(d?.fout ?? 'geen uitslag').slice(0, 120)}`)
+        }
+      }
+    } finally {
+      meet = false
+      rij.length = 0
+      await update($, cacheAtom, () => (fouten.length ? `Cache niet gemeten: ${fouten.join('; ')}` : null))
+    }
+  })().catch(err => failOpen($, err))
+}
+
+// Knop Meet cache: alle gekozen modellen opnieuw.
 async function meetCache($: Engine): Promise<void> {
   try {
-    if (meet) {
-      $.ui.toast('De cache-meting loopt al.')
-      return
-    }
     const k = await orKeuze($)
     const ids = [...new Set(SLOTS.map(s => kaal(k[s])).filter(Boolean))]
     if (!ids.length) {
-      $.ui.toast('Kies eerst een model; de meting stuurt vier kleine aanvragen per gekozen model.')
+      $.ui.toast('Kies eerst een model; de meting stuurt zes kleine aanvragen per gekozen model.')
       return
     }
-    meet = true
-    await update($, cacheAtom, () => `Cache meten: ${ids[0]} (1/${ids.length})…`)
-    void (async () => {
-      const fouten: string[] = []
-      try {
-        for (const [i, id] of ids.entries()) {
-          if (i > 0) await update($, cacheAtom, () => `Cache meten: ${id} (${i + 1}/${ids.length})…`)
-          const r = await cli($, ['openrouter', 'cachetest', '--model', id], undefined, 240_000)
-          const d = r.exitCode === 0 ? laatsteJson(r.stdout) : undefined
-          if (d?.ok === true && ['goed', 'laat', 'zwak'].includes(d.oordeel)) {
-            const oud = cacheMetingen(await $.store.get('openrouter.cache'))
-            await $.store.set('openrouter.cache', { ...oud, [id]: { oordeel: d.oordeel, aandeel: Number(d.aandeel) || 0, gemeten: await $.clock.now() } })
-            await hertekenen($)
-          } else {
-            fouten.push(`${id}: ${r.exitCode !== 0 ? foutVan(r) : String(d?.fout ?? 'geen uitslag').slice(0, 120)}`)
-          }
-        }
-      } finally {
-        meet = false
-        await update($, cacheAtom, () => (fouten.length ? `Cache niet gemeten: ${fouten.join('; ')}` : null))
-      }
-    })().catch(err => failOpen($, err))
+    await meetModellen($, ids)
   } catch (err) {
-    meet = false
     failOpen($, err)
   }
+}
+
+// Bij het kiezen van een model: meteen meten als er een key is en dit model nog geen meting heeft.
+// Eén keer per model, want het kost tokens; opnieuw meten kan met de knop.
+async function meetBijKiezen($: Engine, id: string): Promise<void> {
+  const status = await read($, statusAtom)
+  if (!status?.orHeeftKey) return
+  if (cacheMetingen(await $.store.get('openrouter.cache'))[id]) return
+  await meetModellen($, [id])
 }
 
 async function zoek($: Engine, tekst: string): Promise<void> {
@@ -332,8 +350,8 @@ export async function orBron($: Engine, e: any, k: Kleuren, meer = true): Promis
           <Text key={`or-klein-${m.id}`} color={k.err} wrap="truncate-end">{m.id} heeft {contextTekst(m.context)} context: te klein voor Claude Code.</Text>
         ))}
         {[...new Set(ids)].map(id => ({ id, s: cacheStand({ id }, metingen) })).map(({ id, s }) => (s ? (
-          <Text key={`or-cache-${id}`} color={s.oordeel === 'goed' ? k.ok : s.oordeel === 'laat' || s.aandeel === undefined ? k.warn : k.err} wrap="wrap">
-            {`${id} ${s.tekst}${s.aandeel === undefined ? '' : ` (gemeten: ${s.aandeel}% uit cache)`}.`}
+          <Text key={`or-cache-${id}`} color={s.oordeel === 'goed' ? k.ok : s.oordeel === 'wisselend' || s.aandeel === undefined ? k.warn : k.err} wrap="wrap">
+            {`${id} ${s.tekst}${s.aandeel === undefined ? '' : ` (gemeten: ${s.raak} van ${s.van} rondes raak, ${s.aandeel}% uit cache)`}.`}
           </Text>
         ) : ''))}
         {cacheRegel ? <Text color={cacheRegel.startsWith('Cache meten') ? k.mut : k.err} wrap="wrap">{cacheRegel}</Text> : ''}

@@ -251,8 +251,8 @@ test('Meet cache: één cachetest per gekozen model, uitslag in de kaart en bewa
     orKey: true,
     store: { 'openrouter.keuze': { m1: 'openai/gpt-5[1m]', m2: 'qwen/q-max', m4: 'openai/gpt-5-mini', m5: 'openai/gpt-5' } },
     cachetest: {
-      'openai/gpt-5': { ok: true, model: 'openai/gpt-5', oordeel: 'goed', aandeel: 78, rondes: [], aanbieders: ['OpenAI'], gemeten: 1 },
-      'qwen/q-max': { ok: true, model: 'qwen/q-max', oordeel: 'zwak', aandeel: 21, rondes: [], aanbieders: ['Alibaba'], gemeten: 1 },
+      'openai/gpt-5': { ok: true, model: 'openai/gpt-5', oordeel: 'goed', raak: 5, van: 5, aandeel: 78, rondes: [], aanbieders: ['OpenAI'], gemeten: 1 },
+      'qwen/q-max': { ok: true, model: 'qwen/q-max', oordeel: 'zwak', raak: 0, van: 5, aandeel: 21, rondes: [], aanbieders: ['Alibaba'], gemeten: 1 },
     },
   })
   await run($, 'futureflow', 'openrouter')
@@ -266,12 +266,48 @@ test('Meet cache: één cachetest per gekozen model, uitslag in de kaart en bewa
   await f.clock.settle()
   // Elk gekozen model één keer, zonder [1m]; m1 en m5 zijn hetzelfde model.
   expect(f.aanroepen.filter(a => a.args[1] === 'cachetest').map(a => a.args[3])).toEqual(['openai/gpt-5', 'qwen/q-max', 'openai/gpt-5-mini'])
-  expect(await ui.find({ type: 'Text', text: 'openai/gpt-5 cachet goed in een agent-lus (gemeten: 78% uit cache).' })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: 'qwen/q-max cachet niet in een agent-lus: duur in Claude Code (gemeten: 21% uit cache).' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'openai/gpt-5 cachet goed in een agent-lus (gemeten: 5 van 5 rondes raak, 78% uit cache).' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'qwen/q-max cachet niet in een agent-lus: duur in Claude Code (gemeten: 0 van 5 rondes raak, 21% uit cache).' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /Cache niet gemeten: openai\/gpt-5-mini: Key limit exceeded/ })).toBeDefined()
-  const bewaard = f.store.get('openrouter.cache') as Record<string, { oordeel: string; aandeel: number; gemeten: number }>
+  const bewaard = f.store.get('openrouter.cache') as Record<string, unknown>
   expect(Object.keys(bewaard)).toEqual(['openai/gpt-5', 'qwen/q-max'])
-  expect(bewaard['qwen/q-max']).toEqual({ oordeel: 'zwak', aandeel: 21, gemeten: NU })
+  expect(bewaard['qwen/q-max']).toEqual({ oordeel: 'zwak', aandeel: 21, raak: 0, van: 5, gemeten: NU })
+  await ui.unmount()
+})
+
+test('een model kiezen meet zijn cache één keer vanzelf; een gemeten model niet opnieuw; zonder key niets', async ($, on) => {
+  const f = fake(on, {
+    orKey: true,
+    cachetest: { 'openai/gpt-5-mini': { ok: true, model: 'openai/gpt-5-mini', oordeel: 'wisselend', raak: 3, van: 5, aandeel: 49, rondes: [], aanbieders: [], gemeten: 1 } },
+  })
+  await run($, 'futureflow', 'openrouter')
+  await f.clock.settle()
+  const ui = await $.ui.mount(PANE('terminal'))
+  const kies = async (rij: number, zoek: string) => {
+    await ui.press({ key: `or-model-${rij}` } as any)
+    await (ui as any).input({ key: 'or-zoek', text: zoek } as any)
+    await ui.press({ key: 'or-kies-0' } as any)
+    await f.clock.settle()
+  }
+  await kies(1, 'gpt-5-mini')
+  expect(f.aanroepen.filter(a => a.args[1] === 'cachetest').map(a => a.args[3])).toEqual(['openai/gpt-5-mini'])
+  expect(await ui.find({ type: 'Text', text: 'openai/gpt-5-mini cachet wisselend: niet elke ronde raakt de cache (gemeten: 3 van 5 rondes raak, 49% uit cache).' })).toBeDefined()
+  // Hetzelfde model in een andere rij: al gemeten, dus geen tweede meting.
+  await kies(2, 'gpt-5-mini')
+  expect(f.aanroepen.filter(a => a.args[1] === 'cachetest').length).toBe(1)
+  await ui.unmount()
+})
+
+test('zonder key meet kiezen niets', async ($, on) => {
+  const f = fake(on, { orKey: false })
+  await run($, 'futureflow', 'openrouter')
+  await f.clock.settle()
+  const ui = await $.ui.mount(PANE('terminal'))
+  await ui.press({ key: 'or-model-1' } as any)
+  await (ui as any).input({ key: 'or-zoek', text: 'gpt-5-mini' } as any)
+  await ui.press({ key: 'or-kies-0' } as any)
+  await f.clock.settle()
+  expect(f.aanroepen.filter(a => a.args[1] === 'cachetest')).toEqual([])
   await ui.unmount()
 })
 

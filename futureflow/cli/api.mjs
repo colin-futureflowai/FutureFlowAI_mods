@@ -19,8 +19,8 @@
 //   api openrouter wis-key                                              → JSON { gewist }
 //   api openrouter modellen [--ververs]  lijst met tools-ondersteuning, cache 6 u → JSON { modellen, opgehaald, uitCache, fout? }
 //   api openrouter test --model <id>     één POST /v1/messages met max_tokens 1 → JSON { ok, status?, fout? }
-//   api openrouter cachetest --model <id>  vier aanvragen als agent-lus (~50k tokens) → JSON { ok, model, oordeel,
-//                               aandeel, rondes, aanbieders, gemeten } of { ok: false, status?, fout }
+//   api openrouter cachetest --model <id>  zes aanvragen als agent-lus (~50k tokens) → JSON { ok, model, oordeel,
+//                               raak, van, aandeel, rondes, aanbieders, gemeten } of { ok: false, status?, fout }
 //
 // OpenRouter komt sinds 0.9.0 nooit meer in ~/.claude/settings.json: Claude Code leest dat bestand live
 // in alle lopende sessies, ook de desktop-app. Alleen `claude-or` (claude --settings <eigen bestand>)
@@ -45,7 +45,7 @@ import { fileURLToPath } from 'node:url'
 
 import { ACCOUNT, geldigeKey, HELPER, MODI, modusVan, SERVICE } from '../lib/api.mjs'
 import {
-  CACHE_MS, cacheOordeel, cacheProef, cacheRonde, eigenBasis, geldigeOrKey, geldigModel, haalWeg, modellenVan, OR_ACCOUNT, OR_SERVICE, OR_URL, orInstellingen,
+  CACHE_MS, cacheOordeel, cacheProef, cacheRonde, cacheTelling, eigenBasis, geldigeOrKey, geldigModel, haalWeg, modellenVan, OR_ACCOUNT, OR_SERVICE, OR_URL, orInstellingen,
   SHIM_MERK, shimTekst, SLOTS, START,
 } from '../lib/openrouter.mjs'
 
@@ -430,9 +430,9 @@ async function test(opties) {
   }
 }
 
-// Cache-proef: vier aanvragen in de vorm van een agent-lus (lib `cacheProef`), met één sessie-id zodat
+// Cache-proef: zes aanvragen in de vorm van een agent-lus (lib `cacheProef`), met één sessie-id zodat
 // OpenRouter bij dezelfde aanbieder blijft, en een pauze ertussen omdat een cache even nodig heeft.
-// Kost ~40-55k tokens input. Alleen tokens en het oordeel terug, nooit de key.
+// Kost ~45-60k tokens input. Alleen tokens en het oordeel terug, nooit de key.
 const CACHE_PAUZE_MS = process.env.CACHETEST_PAUZE_MS === undefined ? 4000 : Math.max(0, Number(process.env.CACHETEST_PAUZE_MS) || 0)
 
 async function cachetest(opties) {
@@ -466,7 +466,7 @@ async function cachetest(opties) {
   } catch (err) {
     return { ok: false, model, fout: `geen verbinding (${schoon(err?.cause?.code ?? err?.message ?? err)})` }
   }
-  return { ok: true, model, oordeel: cacheOordeel(rondes), aandeel: rondes.at(-1).aandeel, rondes, aanbieders, gemeten: Date.now() }
+  return { ok: true, model, oordeel: cacheOordeel(rondes), ...cacheTelling(rondes), rondes, aanbieders, gemeten: Date.now() }
 }
 
 const takenlijstAan = data => !!data?.env && typeof data.env === 'object' && data.env[TODO_VAR] === 'true'

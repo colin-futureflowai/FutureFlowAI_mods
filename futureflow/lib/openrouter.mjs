@@ -51,16 +51,17 @@ export const cacheZwak = m => typeof m?.id === 'string' && CACHE_ZWAK.some(p => 
 export const CACHE_ZWAK_TEKST = 'cachet niet in een agent-lus: duur in Claude Code'
 
 // ---- cache-proef (knop Meet cache, `openrouter cachetest`) ----
-// Vier aanvragen in de vorm van een agent-lus van Claude Code: vaste systeemprompt met markering, per
+// Zes aanvragen in de vorm van een agent-lus van Claude Code: vaste systeemprompt met markering, per
 // ronde een tool-aanroep en een tool_result erbij, de markering op het laatste tool_result. Daarna telt
-// hoeveel van ronde 2 en de laatste ronde uit de cache kwam. Elk blok is ~3-4k tokens; samen ~40-55k tokens.
-// Vier rondes en grote blokken omdat sommige aanbieders (gemini, grok, mistral) pas na een paar rondes
-// raken: met drie rondes van ~2k tokens kreeg gemini ten onrechte 'zwak' (gemeten 12-11-2026).
-export const CACHE_RONDES = 4
+// in hoeveel van de rondes 2-6 de cache raakte. Elk blok is ~2k tokens; samen ~45-60k tokens.
+// Zes rondes omdat een losse ronde bij veel aanbieders willekeurig mist (gemeten 12-11-2026: kimi, gemini
+// en grok gaven bij herhaling per ronde 0 % of 67-80 %; alleen OpenAI was elke keer gelijk). Eén ronde
+// mag het oordeel dus niet bepalen.
+export const CACHE_RONDES = 6
 const CACHE_WOORDEN = 'appel boom cijfer deur emmer fiets gras huis ijs jas kaas lamp maan neus oor paard raam stoel tafel uil vis water zon'.split(' ')
 
 // Vultekst die bij hetzelfde zaad gelijk is (prefix blijft gelijk) en bij een ander zaad nergens al in een cache staat.
-export function cacheBlok(zaad, woorden = 900) {
+export function cacheBlok(zaad, woorden = 500) {
   let x = 2166136261
   for (const c of String(zaad)) x = Math.imul(x ^ c.charCodeAt(0), 16777619) >>> 0
   const uit = []
@@ -101,19 +102,30 @@ export function cacheRonde(usage) {
   return { in: vol, read, write, aandeel: totaal ? Math.round((100 * read) / totaal) : 0 }
 }
 
-// Oordeel over de lus. Bij volledige cache is ronde 2 ~67 % en ronde 4 ~80 % uit cache; een model dat
-// alleen de systeemprompt cachet (qwen) zakt van ~33 % naar ~20 %.
+// Een ronde is raak als minstens de helft uit de cache kwam. Bij volledige cache is ronde 2 ~67 % en
+// ronde 6 ~86 %; een model dat alleen de systeemprompt cachet (qwen) zakt van ~33 % naar ~14 % en is nooit raak.
 export const CACHE_GRENS = 50
+
+// Telling over de rondes na de eerste (die kan nooit raken): hoeveel raak, en het aandeel van alle
+// tokens in die rondes dat uit de cache kwam (%).
+export function cacheTelling(rondes) {
+  const na = Array.isArray(rondes) ? rondes.slice(1) : []
+  const read = na.reduce((s, r) => s + r.read, 0)
+  const totaal = na.reduce((s, r) => s + r.in + r.read + r.write, 0)
+  return { raak: na.filter(r => r.aandeel >= CACHE_GRENS).length, van: na.length, aandeel: totaal ? Math.round((100 * read) / totaal) : 0 }
+}
+
+// Oordeel: geen enkele ronde raak = zwak; hoogstens één misser = goed; anders wisselend.
 export function cacheOordeel(rondes) {
   if (!Array.isArray(rondes) || rondes.length < CACHE_RONDES) return 'onbekend'
-  const twee = rondes[1]
-  if (rondes.at(-1).aandeel < CACHE_GRENS) return 'zwak'
-  return twee.aandeel < CACHE_GRENS ? 'laat' : 'goed'
+  const { raak, van } = cacheTelling(rondes)
+  if (raak === 0) return 'zwak'
+  return raak >= van - 1 ? 'goed' : 'wisselend'
 }
 
 export const CACHE_OORDEEL_TEKST = {
   goed: 'cachet goed in een agent-lus',
-  laat: 'cache komt pas na een paar rondes op gang',
+  wisselend: 'cachet wisselend: niet elke ronde raakt de cache',
   zwak: CACHE_ZWAK_TEKST,
 }
 
@@ -123,8 +135,10 @@ export function cacheMetingen(ruw) {
   if (!ruw || typeof ruw !== 'object' || Array.isArray(ruw)) return uit
   for (const [id, m] of Object.entries(ruw)) {
     if (!geldigModel(id) || !m || typeof m !== 'object') continue
-    if (!['goed', 'laat', 'zwak'].includes(m.oordeel) || typeof m.aandeel !== 'number' || typeof m.gemeten !== 'number') continue
-    uit[id] = { oordeel: m.oordeel, aandeel: m.aandeel, gemeten: m.gemeten }
+    // Metingen van 0.14.0 (oordeel 'laat', zonder telling) vallen weg: opnieuw meten.
+    if (!['goed', 'wisselend', 'zwak'].includes(m.oordeel) || typeof m.aandeel !== 'number' || typeof m.gemeten !== 'number') continue
+    if (typeof m.raak !== 'number' || typeof m.van !== 'number') continue
+    uit[id] = { oordeel: m.oordeel, aandeel: m.aandeel, raak: m.raak, van: m.van, gemeten: m.gemeten }
   }
   return uit
 }
@@ -132,7 +146,7 @@ export function cacheMetingen(ruw) {
 // Wat de kaart over de cache van een model zegt: een eigen meting gaat voor de vaste lijst.
 export function cacheStand(m, metingen) {
   const meting = typeof m?.id === 'string' ? metingen?.[m.id] : undefined
-  if (meting) return { oordeel: meting.oordeel, aandeel: meting.aandeel, gemeten: meting.gemeten, tekst: CACHE_OORDEEL_TEKST[meting.oordeel] }
+  if (meting) return { ...meting, tekst: CACHE_OORDEEL_TEKST[meting.oordeel] }
   return cacheZwak(m) ? { oordeel: 'zwak', tekst: CACHE_ZWAK_TEKST } : null
 }
 

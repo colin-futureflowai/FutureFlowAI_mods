@@ -309,7 +309,7 @@ test('test: één POST /v1/messages met Bearer uit de sleutelhanger; uitvoer zon
   assert.ok(!f.stdout.includes(ORKEY) && !f.stderr.includes(ORKEY))
 })
 
-test('cachetest: vier aanvragen met één sessie-id; oordeel uit de usage; uitvoer zonder key', async () => {
+test('cachetest: zes aanvragen met één sessie-id; oordeel uit de usage; uitvoer zonder key', async () => {
   const draai = () => new Promise(resolve => {
     const p = spawn(process.execPath, [CLI, 'openrouter', 'cachetest', '--model', 'qwen/x[1m]'], {
       env: { ...process.env, SETTINGS_JSON: bestand, SECURITY_BIN: nep, OPENROUTER_DIR: ordir, OPENROUTER_URL: url, SHIM_DIR: path.dirname(shim), CACHETEST_PAUZE_MS: '0' },
@@ -331,14 +331,16 @@ test('cachetest: vier aanvragen met één sessie-id; oordeel uit de usage; uitvo
   assert.equal(d.model, 'qwen/x')
   assert.equal(d.oordeel, 'zwak')
   assert.equal(d.aandeel, 25)
-  assert.equal(d.rondes.length, 4)
+  assert.equal(d.raak, 0)
+  assert.equal(d.van, 5)
+  assert.equal(d.rondes.length, 6)
   assert.deepEqual(d.aanbieders, ['Alibaba'])
   assert.equal(typeof d.gemeten, 'number')
-  assert.equal(verzoeken.length, 4)
+  assert.equal(verzoeken.length, 6)
   assert.equal(new Set(verzoeken.map(v => v.headers['x-session-id'])).size, 1)
   assert.match(verzoeken[0].headers['x-session-id'], /^[0-9a-f-]{36}$/)
   assert.ok(verzoeken.every(v => v.headers.authorization === `Bearer ${ORKEY}`))
-  assert.deepEqual(verzoeken.map(v => JSON.parse(v.body).messages.length), [3, 5, 7, 9])
+  assert.deepEqual(verzoeken.map(v => JSON.parse(v.body).messages.length), [3, 5, 7, 9, 11, 13])
   assert.equal(JSON.parse(verzoeken[2].body).model, 'qwen/x')
   // Goed cachend model.
   verzoeken.length = 0
