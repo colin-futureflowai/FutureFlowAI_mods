@@ -12,8 +12,9 @@ const CLI_ENV = { SECURITY_BIN: '/usr/bin/security', SETTINGS_JSON: '', CLAUDE_J
 // Draait cli/api.mjs. De desktop-app heeft een kaal PATH en argv[0] wordt daarop gezocht,
 // dus `node` via /usr/bin/env met een PATH waar Homebrew vooraan staat.
 // Ook gebruikt door hooks/openrouter.tsx en hooks/herstart.tsx (via deze module, zonder import-cyclus).
-export async function cli($: Engine, args: string[], stdin?: string) {
-  const init = { timeoutMs: 20_000, ...(stdin === undefined ? {} : { stdin }) }
+// `timeoutMs`: alleen de cache-proef duurt langer dan 20 s.
+export async function cli($: Engine, args: string[], stdin?: string, timeoutMs = 20_000) {
+  const init = { timeoutMs, ...(stdin === undefined ? {} : { stdin }) }
   const isWin = (await $.env.get('OS')) === 'Windows_NT'
   if (isWin) return $.process.run(['node', cliPath($), ...args], { ...init, env: CLI_ENV })
   const hostPath = (await $.env.get('PATH')) ?? ''

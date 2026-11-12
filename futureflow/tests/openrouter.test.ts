@@ -12,7 +12,7 @@ const MODELLEN = [
 ]
 
 type Modus = 'abonnement' | 'api' | 'openrouter'
-type Opties = { veel?: boolean; modus?: Modus; orKey?: boolean; store?: Record<string, unknown>; rateLimits?: unknown[]; test?: unknown; env?: Record<string, string> }
+type Opties = { cachetest?: Record<string, unknown>; veel?: boolean; modus?: Modus; orKey?: boolean; store?: Record<string, unknown>; rateLimits?: unknown[]; test?: unknown; env?: Record<string, string> }
 
 // Nep-omgeving met een nep-cli/api.mjs; alle mocks vóór de eerste $-aanroep.
 function fake(on: any, o: Opties = {}) {
@@ -76,6 +76,7 @@ function fake(on: any, o: Opties = {}) {
     }
     if (args[0] === 'openrouter' && args[1] === 'modellen') return ok({ modellen: o.veel ? [...MODELLEN, ...Array.from({ length: 42 }, (_, i) => ({ id: `x/m-${i}`, naam: `M ${i}`, context: 128000, in: 1, uit: 2 }))] : MODELLEN, opgehaald: NU, uitCache: args[2] !== '--ververs' })
     if (args[0] === 'openrouter' && args[1] === 'test') return ok(o.test ?? { ok: true, status: 200 })
+    if (args[0] === 'openrouter' && args[1] === 'cachetest') return ok(o.cachetest?.[args[3]] ?? { ok: false, status: 403, fout: 'Key limit exceeded' })
     if (args[0] === 'openrouter' && args[1] === 'opruimen') {
       const gewijzigd = cli.modus === 'openrouter'
       if (gewijzigd) cli.modus = 'abonnement'
@@ -242,6 +243,35 @@ test('Test verbinding: één aanroep met het snelle model, uitkomst in de tab', 
   const t = f.aanroepen.filter(a => a.args[1] === 'test')
   expect(t.map(a => a.args)).toEqual([['openrouter', 'test', '--model', 'openai/gpt-5-mini']])
   expect(await ui.find({ type: 'Text', text: /Verbinding werkt niet \(HTTP 401\): User not found/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('Meet cache: één cachetest per gekozen model, uitslag in de kaart en bewaard; vaste waarschuwing voor qwen', async ($, on) => {
+  const f = fake(on, {
+    orKey: true,
+    store: { 'openrouter.keuze': { m1: 'openai/gpt-5[1m]', m2: 'qwen/q-max', m4: 'openai/gpt-5-mini', m5: 'openai/gpt-5' } },
+    cachetest: {
+      'openai/gpt-5': { ok: true, model: 'openai/gpt-5', oordeel: 'goed', aandeel: 78, rondes: [], aanbieders: ['OpenAI'], gemeten: 1 },
+      'qwen/q-max': { ok: true, model: 'qwen/q-max', oordeel: 'zwak', aandeel: 21, rondes: [], aanbieders: ['Alibaba'], gemeten: 1 },
+    },
+  })
+  await run($, 'futureflow', 'openrouter')
+  await f.clock.settle()
+  const ui = await $.ui.mount(PANE('terminal'))
+  // Vóór een meting: alleen de vaste waarschuwing, zonder percentage; nog geen aanroep.
+  expect(await ui.find({ type: 'Text', text: 'qwen/q-max cachet niet in een agent-lus: duur in Claude Code.' })).toBeDefined()
+  await ui.press({ key: 'meer-wisselen' } as any)
+  expect(f.aanroepen.filter(a => a.args[1] === 'cachetest')).toEqual([])
+  await ui.press({ key: 'or-cache' } as any)
+  await f.clock.settle()
+  // Elk gekozen model één keer, zonder [1m]; m1 en m5 zijn hetzelfde model.
+  expect(f.aanroepen.filter(a => a.args[1] === 'cachetest').map(a => a.args[3])).toEqual(['openai/gpt-5', 'qwen/q-max', 'openai/gpt-5-mini'])
+  expect(await ui.find({ type: 'Text', text: 'openai/gpt-5 cachet goed in een agent-lus (gemeten: 78% uit cache).' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'qwen/q-max cachet niet in een agent-lus: duur in Claude Code (gemeten: 21% uit cache).' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Cache niet gemeten: openai\/gpt-5-mini: Key limit exceeded/ })).toBeDefined()
+  const bewaard = f.store.get('openrouter.cache') as Record<string, { oordeel: string; aandeel: number; gemeten: number }>
+  expect(Object.keys(bewaard)).toEqual(['openai/gpt-5', 'qwen/q-max'])
+  expect(bewaard['qwen/q-max']).toEqual({ oordeel: 'zwak', aandeel: 21, gemeten: NU })
   await ui.unmount()
 })
 

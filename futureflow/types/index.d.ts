@@ -239,6 +239,8 @@ declare module 'claude-code' {
       'openrouter.standaardModel': string | null
       /** Voor welke rij (Model 1-5) de modellenlijst open staat (0.13.0). */
       'openrouter.kiesVoor': 'm1' | 'm2' | 'm3' | 'm4' | 'm5' | null
+      /** Regel bij Meet cache: voortgang tijdens het meten of de laatste fout; null = niets. */
+      'openrouter.cacheStand': string | null
       /** Per tab of Meer ▸ open staat; null = alles ingeklapt. */
       'dashboard.meer': Record<string, boolean> | null
       'minify.niveau': MinifyNiveau | null

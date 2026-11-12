@@ -11,7 +11,7 @@ import { herstartOpOr } from './herstart'
 import { kaart, knop, knoppen, leeg, paneelVan, uitleg } from './paneel-ui'
 
 import { kostenOverzicht, usd } from '../lib/api.mjs'
-import { contextTekst, geldigeOrKey, geldigModel, isClaude, modelIdVoor, modellenVan, prijsTekst, SLOT_UITLEG, SLOTS, sorteer, START, teKlein, TOON } from '../lib/openrouter.mjs'
+import { cacheMetingen, cacheStand, contextTekst, geldigeOrKey, geldigModel, isClaude, modelIdVoor, modellenVan, prijsTekst, SLOT_UITLEG, SLOTS, sorteer, START, teKlein, TOON } from '../lib/openrouter.mjs'
 
 // Tab OpenRouter: Claude Code op een ander model via OpenRouter, alleen in sessies die met `claude-or`
 // starten (eigen settings-bestand; ~/.claude/settings.json blijft van het abonnement, sinds 0.9.0).
@@ -30,6 +30,9 @@ const versieAtom = atom({ plugin: 'futureflow', key: 'openrouter.versie' } as co
 // Voor welke rij (Model 1-5) de modellenlijst open staat; null = dicht.
 const kiesAtom = atom({ plugin: 'futureflow', key: 'openrouter.kiesVoor' } as const, null as Slot | null)
 const testAtom = atom({ plugin: 'futureflow', key: 'openrouter.test' } as const, null as string | null)
+// Meet cache: voortgang of de laatste fout; de uitslagen zelf staan in store `openrouter.cache`.
+const cacheAtom = atom({ plugin: 'futureflow', key: 'openrouter.cacheStand' } as const, null as string | null)
+const CACHE_UITLEG = 'Meet cache stuurt per gekozen model vier kleine aanvragen (ongeveer 50k tokens, enkele centen tot een dubbeltje) en laat zien of het model in een agent-lus cachet.'
 
 type Kleuren = { accent: string; mut: string; fg: string; ok: string; warn: string; err: string }
 
@@ -122,6 +125,8 @@ async function kies($: Engine, slot: Slot, m: OrModel): Promise<void> {
     const id = modelIdVoor(m)
     if (!id || !geldigModel(id)) return
     if (teKlein(m)) $.ui.toast(`Let op: ${m.id} heeft ${contextTekst(m.context)} context; dat is te klein voor Claude Code.`)
+    const cache = cacheStand(m, cacheMetingen(await $.store.get('openrouter.cache')))
+    if (cache?.oordeel === 'zwak') $.ui.toast(`Let op: ${m.id} ${cache.tekst}.`)
     await $.store.set('openrouter.keuze', { ...(await orKeuze($)), [slot]: id })
     const prijzen = ((await $.store.get('openrouter.prijzen')) ?? {}) as Record<string, { in?: number; uit?: number }>
     const prijs = { ...(m.in !== undefined ? { in: m.in } : {}), ...(m.uit !== undefined ? { uit: m.uit } : {}), ...(m.context !== undefined ? { ctx: m.context } : {}) }
@@ -184,6 +189,52 @@ async function testVerbinding($: Engine): Promise<void> {
   }
 }
 
+// Eén meting tegelijk.
+let meet = false
+
+// Meet cache: per gekozen model `openrouter cachetest` (vier kleine aanvragen als agent-lus), na elkaar.
+// Loopt los van de klik (tot ~1 min per model); elke uitslag gaat naar store `openrouter.cache` (id zonder
+// [1m]) en de kaart tekent opnieuw. Nooit automatisch: het kost tokens.
+async function meetCache($: Engine): Promise<void> {
+  try {
+    if (meet) {
+      $.ui.toast('De cache-meting loopt al.')
+      return
+    }
+    const k = await orKeuze($)
+    const ids = [...new Set(SLOTS.map(s => kaal(k[s])).filter(Boolean))]
+    if (!ids.length) {
+      $.ui.toast('Kies eerst een model; de meting stuurt vier kleine aanvragen per gekozen model.')
+      return
+    }
+    meet = true
+    await update($, cacheAtom, () => `Cache meten: ${ids[0]} (1/${ids.length})…`)
+    void (async () => {
+      const fouten: string[] = []
+      try {
+        for (const [i, id] of ids.entries()) {
+          if (i > 0) await update($, cacheAtom, () => `Cache meten: ${id} (${i + 1}/${ids.length})…`)
+          const r = await cli($, ['openrouter', 'cachetest', '--model', id], undefined, 240_000)
+          const d = r.exitCode === 0 ? laatsteJson(r.stdout) : undefined
+          if (d?.ok === true && ['goed', 'laat', 'zwak'].includes(d.oordeel)) {
+            const oud = cacheMetingen(await $.store.get('openrouter.cache'))
+            await $.store.set('openrouter.cache', { ...oud, [id]: { oordeel: d.oordeel, aandeel: Number(d.aandeel) || 0, gemeten: await $.clock.now() } })
+            await hertekenen($)
+          } else {
+            fouten.push(`${id}: ${r.exitCode !== 0 ? foutVan(r) : String(d?.fout ?? 'geen uitslag').slice(0, 120)}`)
+          }
+        }
+      } finally {
+        meet = false
+        await update($, cacheAtom, () => (fouten.length ? `Cache niet gemeten: ${fouten.join('; ')}` : null))
+      }
+    })().catch(err => failOpen($, err))
+  } catch (err) {
+    meet = false
+    failOpen($, err)
+  }
+}
+
 async function zoek($: Engine, tekst: string): Promise<void> {
   await update($, zoekAtom, () => tekst.trim().slice(0, 60))
   await update($, paginaAtom, () => 0)
@@ -197,7 +248,7 @@ async function blader($: Engine, stap: number, laatste: number): Promise<void> {
 
 const kaal = (id: string | undefined) => (id ?? '').replace(/\[1m\]$/, '')
 
-function regelVan(ui: ReturnType<typeof paneelVan>, $: Engine, m: OrModel, i: number, keuze: OrKeuze, slot: Slot) {
+function regelVan(ui: ReturnType<typeof paneelVan>, $: Engine, m: OrModel, i: number, keuze: OrKeuze, slot: Slot, metingen: ReturnType<typeof cacheMetingen>) {
   const { Box, Text } = ui.el
   const hier = kaal(keuze[slot]) === m.id
   const elders = SLOTS.filter(s => s !== slot && kaal(keuze[s]) === m.id).map(s => s.slice(1))
@@ -206,6 +257,7 @@ function regelVan(ui: ReturnType<typeof paneelVan>, $: Engine, m: OrModel, i: nu
       <Text bold={hier} color={hier ? ui.k.accent : ui.k.fg} wrap="truncate-end">{m.id}</Text>
       <Text color={ui.k.mut} wrap="wrap">{`${contextTekst(m.context)} · ${prijsTekst(m.in)} in / ${prijsTekst(m.uit)} uit per Mtok${elders.length ? ` · nu model ${elders.join(', ')}` : ''}`}</Text>
       {teKlein(m) ? <Text color={ui.k.err} wrap="wrap">te klein voor Claude Code</Text> : ''}
+      {cacheStand(m, metingen)?.oordeel === 'zwak' ? <Text color={ui.k.warn} wrap="wrap">{cacheStand(m, metingen)?.tekst}</Text> : ''}
       {knop(ui, `or-kies-${i}`, hier ? '● Gekozen' : 'Kies', () => kies($, slot, m), { primary: hier })}
     </Box>
   )
@@ -223,6 +275,8 @@ export async function orBron($: Engine, e: any, k: Kleuren, meer = true): Promis
     const status = (await read($, statusAtom)) ?? (await leesStatus($))
     const lijst = await read($, modellenAtom)
     const test = await read($, testAtom)
+    const cacheRegel = await read($, cacheAtom)
+    const metingen = cacheMetingen(await $.store.get('openrouter.cache'))
     const keuze = await orKeuze($)
     const geld = kostenOverzicht((await $.store.get('openrouter.kosten')) as Record<string, number> | undefined, await $.clock.now())
     const klaar = status.orKlaar === true
@@ -277,6 +331,12 @@ export async function orBron($: Engine, e: any, k: Kleuren, meer = true): Promis
         {gekozen.filter(m => teKlein(m)).map(m => (
           <Text key={`or-klein-${m.id}`} color={k.err} wrap="truncate-end">{m.id} heeft {contextTekst(m.context)} context: te klein voor Claude Code.</Text>
         ))}
+        {[...new Set(ids)].map(id => ({ id, s: cacheStand({ id }, metingen) })).map(({ id, s }) => (s ? (
+          <Text key={`or-cache-${id}`} color={s.oordeel === 'goed' ? k.ok : s.oordeel === 'laat' || s.aandeel === undefined ? k.warn : k.err} wrap="wrap">
+            {`${id} ${s.tekst}${s.aandeel === undefined ? '' : ` (gemeten: ${s.aandeel}% uit cache)`}.`}
+          </Text>
+        ) : ''))}
+        {cacheRegel ? <Text color={cacheRegel.startsWith('Cache meten') ? k.mut : k.err} wrap="wrap">{cacheRegel}</Text> : ''}
         {status.oudeOr ? <Text color={k.warn} wrap="wrap">In ~/.claude/settings.json staan nog oude OpenRouter-regels; futureflow haalt ze bij de volgende sessiestart weg.</Text> : ''}
         {test ? <Text color={test.startsWith('Verbinding werkt (') ? k.ok : test.startsWith('Bezig') ? k.mut : k.err} wrap="wrap">{test}</Text> : ''}
         {!status.orHeeftKey || meer ? (
@@ -288,9 +348,11 @@ export async function orBron($: Engine, e: any, k: Kleuren, meer = true): Promis
             {klaar && !anders ? '' : knop(ui, 'or-naar', 'Gebruik nu', () => handmatig($, 'openrouter'))}
             {klaar && !anders ? knop(ui, 'or-herstart', 'Herstart op OpenRouter', () => herstartOpOr($)) : ''}
             {meer && status.orHeeftKey ? knop(ui, 'or-test', 'Test verbinding', () => testVerbinding($)) : ''}
+            {meer && status.orHeeftKey ? knop(ui, 'or-cache', 'Meet cache', () => meetCache($)) : ''}
             {meer && status.orHeeftKey ? knop(ui, 'or-wis', 'Key wissen', () => wisKey($)) : ''}
           </Box>
         )}
+        {meer && status.orHeeftKey ? uitleg(ui, CACHE_UITLEG, 'or-cache-uitleg') : ''}
       </Box>,
     ]
 
@@ -304,9 +366,9 @@ export async function orBron($: Engine, e: any, k: Kleuren, meer = true): Promis
         lijst?.fout ? <Text color={k.err} wrap="wrap">{lijst.fout}</Text> : '',
         lijst !== null && !gevonden.length && !lijst.fout ? leeg(ui, 'Geen model gevonden.') : '',
         claude.length ? <Text key="or-groep-claude" bold color={k.mut}>Claude via OpenRouter</Text> : '',
-        ...claude.map(m => regelVan(ui, $, m, index(m), keuze, slot)),
+        ...claude.map(m => regelVan(ui, $, m, index(m), keuze, slot, metingen)),
         andere.length ? <Text key="or-groep-andere" bold color={k.mut}>Andere modellen</Text> : '',
-        ...andere.map(m => regelVan(ui, $, m, index(m), keuze, slot)),
+        ...andere.map(m => regelVan(ui, $, m, index(m), keuze, slot, metingen)),
         paginas > 1 ? uitleg(ui, `Pagina ${pagina + 1} van ${paginas} · ${gevonden.length} modellen`, 'or-meer') : '',
         paginas > 1 ? knoppen(ui, [
           pagina > 0 ? knop(ui, 'or-vorige', '◂ Vorige', () => blader($, -1, paginas - 1), { hotkey: 'p' }) : null,

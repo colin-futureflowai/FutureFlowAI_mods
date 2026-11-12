@@ -43,6 +43,99 @@ export function modelIdVoor(m) {
 // Te klein contextvenster voor Claude Code (onbekend telt niet als te klein).
 export const teKlein = m => typeof m?.context === 'number' && m.context > 0 && m.context < CONTEXT_MIN
 
+// Modellen die het gesprek in een agent-lus niet cachen: elke aanroep betaalt de hele context opnieuw.
+// Gemeten 12-11-2026 via /api/v1/messages: qwen (Alibaba) cachet alleen op een cache_control-markering en
+// negeert die op een tool_result, waar Claude Code hem in een lus zet (21-26 % uit cache, andere 75-100 %).
+export const CACHE_ZWAK = ['qwen/']
+export const cacheZwak = m => typeof m?.id === 'string' && CACHE_ZWAK.some(p => m.id.startsWith(p))
+export const CACHE_ZWAK_TEKST = 'cachet niet in een agent-lus: duur in Claude Code'
+
+// ---- cache-proef (knop Meet cache, `openrouter cachetest`) ----
+// Vier aanvragen in de vorm van een agent-lus van Claude Code: vaste systeemprompt met markering, per
+// ronde een tool-aanroep en een tool_result erbij, de markering op het laatste tool_result. Daarna telt
+// hoeveel van ronde 2 en de laatste ronde uit de cache kwam. Elk blok is ~3-4k tokens; samen ~40-55k tokens.
+// Vier rondes en grote blokken omdat sommige aanbieders (gemini, grok, mistral) pas na een paar rondes
+// raken: met drie rondes van ~2k tokens kreeg gemini ten onrechte 'zwak' (gemeten 12-11-2026).
+export const CACHE_RONDES = 4
+const CACHE_WOORDEN = 'appel boom cijfer deur emmer fiets gras huis ijs jas kaas lamp maan neus oor paard raam stoel tafel uil vis water zon'.split(' ')
+
+// Vultekst die bij hetzelfde zaad gelijk is (prefix blijft gelijk) en bij een ander zaad nergens al in een cache staat.
+export function cacheBlok(zaad, woorden = 900) {
+  let x = 2166136261
+  for (const c of String(zaad)) x = Math.imul(x ^ c.charCodeAt(0), 16777619) >>> 0
+  const uit = []
+  for (let i = 0; i < woorden; i++) {
+    x = (Math.imul(x, 1664525) + 1013904223) >>> 0
+    uit.push(`${CACHE_WOORDEN[x % CACHE_WOORDEN.length]}${(x >>> 8) % 1000}`)
+  }
+  return uit.join(' ')
+}
+
+// De aanvragen van de proef, zonder Node-API's. `zaad` uniek per meting.
+export function cacheProef(model, zaad) {
+  const cc = { type: 'ephemeral' }
+  const system = [{ type: 'text', text: `Antwoord alleen met ok. ${cacheBlok(`${zaad}:s`)}`, cache_control: cc }]
+  const tools = [{ name: 'Read', description: 'Lees een bestand', input_schema: { type: 'object', properties: { file_path: { type: 'string' } }, required: ['file_path'] } }]
+  const vraag = { role: 'user', content: [{ type: 'text', text: 'Lees de bestanden een voor een.' }] }
+  const stap = (i, laatste) => [
+    { role: 'assistant', content: [{ type: 'tool_use', id: `toolu_${i}`, name: 'Read', input: { file_path: `/a${i}.txt` } }] },
+    { role: 'user', content: [{ type: 'tool_result', tool_use_id: `toolu_${i}`, content: cacheBlok(`${zaad}:t${i}`), ...(laatste ? { cache_control: cc } : {}) }] },
+  ]
+  return Array.from({ length: CACHE_RONDES }, (_, r) => ({
+    model: String(model).replace(/\[1m\]$/, ''),
+    max_tokens: 16,
+    system,
+    tools,
+    messages: [vraag, ...Array.from({ length: r + 1 }, (_, i) => stap(i + 1, i === r)).flat()],
+  }))
+}
+
+const getal = v => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : 0)
+
+// Eén ronde uit de usage van het antwoord: tokens vol, uit cache en naar cache, en het aandeel uit cache (%).
+export function cacheRonde(usage) {
+  const vol = getal(usage?.input_tokens)
+  const read = getal(usage?.cache_read_input_tokens)
+  const write = getal(usage?.cache_creation_input_tokens)
+  const totaal = vol + read + write
+  return { in: vol, read, write, aandeel: totaal ? Math.round((100 * read) / totaal) : 0 }
+}
+
+// Oordeel over de lus. Bij volledige cache is ronde 2 ~67 % en ronde 4 ~80 % uit cache; een model dat
+// alleen de systeemprompt cachet (qwen) zakt van ~33 % naar ~20 %.
+export const CACHE_GRENS = 50
+export function cacheOordeel(rondes) {
+  if (!Array.isArray(rondes) || rondes.length < CACHE_RONDES) return 'onbekend'
+  const twee = rondes[1]
+  if (rondes.at(-1).aandeel < CACHE_GRENS) return 'zwak'
+  return twee.aandeel < CACHE_GRENS ? 'laat' : 'goed'
+}
+
+export const CACHE_OORDEEL_TEKST = {
+  goed: 'cachet goed in een agent-lus',
+  laat: 'cache komt pas na een paar rondes op gang',
+  zwak: CACHE_ZWAK_TEKST,
+}
+
+// Bewaarde metingen (store `openrouter.cache`): alleen geldige regels, op het id zonder [1m].
+export function cacheMetingen(ruw) {
+  const uit = {}
+  if (!ruw || typeof ruw !== 'object' || Array.isArray(ruw)) return uit
+  for (const [id, m] of Object.entries(ruw)) {
+    if (!geldigModel(id) || !m || typeof m !== 'object') continue
+    if (!['goed', 'laat', 'zwak'].includes(m.oordeel) || typeof m.aandeel !== 'number' || typeof m.gemeten !== 'number') continue
+    uit[id] = { oordeel: m.oordeel, aandeel: m.aandeel, gemeten: m.gemeten }
+  }
+  return uit
+}
+
+// Wat de kaart over de cache van een model zegt: een eigen meting gaat voor de vaste lijst.
+export function cacheStand(m, metingen) {
+  const meting = typeof m?.id === 'string' ? metingen?.[m.id] : undefined
+  if (meting) return { oordeel: meting.oordeel, aandeel: meting.aandeel, gemeten: meting.gemeten, tekst: CACHE_OORDEEL_TEKST[meting.oordeel] }
+  return cacheZwak(m) ? { oordeel: 'zwak', tekst: CACHE_ZWAK_TEKST } : null
+}
+
 // Het start-commando en de shim in ~/.local/bin. De merkregel zegt dat het bestand van futureflow is:
 // alleen dan overschrijft futureflow het.
 export const START = 'claude-or'
@@ -64,6 +157,15 @@ export function shimTekst(settingsPad) {
     'fi',
     '# Marker: zo ziet futureflow in de sessie dat die via OpenRouter loopt (het env-blok van --settings komt niet in de procesomgeving).',
     `export ${OR_MARKER}=1`,
+    '# Eén sessie-id per start: OpenRouter blijft dan bij dezelfde aanbieder, zodat de prompt-cache raakt.',
+    'SID=$(/usr/bin/uuidgen 2>/dev/null || echo "ff-$$-$(date +%s)")',
+    'if [ -n "$ANTHROPIC_CUSTOM_HEADERS" ]; then',
+    '  ANTHROPIC_CUSTOM_HEADERS="$ANTHROPIC_CUSTOM_HEADERS',
+    'x-session-id: $SID"',
+    'else',
+    '  ANTHROPIC_CUSTOM_HEADERS="x-session-id: $SID"',
+    'fi',
+    'export ANTHROPIC_CUSTOM_HEADERS',
     'exec claude --settings "$S" "$@"',
     '',
   ].join('\n')
@@ -119,8 +221,9 @@ export function orInstellingen(k) {
     ANTHROPIC_DEFAULT_FABLE_MODEL: of1(k.m3),
     ANTHROPIC_DEFAULT_HAIKU_MODEL: of1(k.m4),
     CLAUDE_CODE_SUBAGENT_MODEL: of1(k.m4),
-    CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS: '1',
     // Met een eigen base-URL laadt Claude Code anders alle tool-schema's vooraf (~660k tokens gemeten).
+    // Geen CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS: die zet tool search weer uit (gemeten 12-11-2026: 159 tools
+    // en 249 KB per verzoek tegen 13 tools en 102 KB zonder).
     ENABLE_TOOL_SEARCH: 'true',
   }
   if (geldigModel(k.m5)) {

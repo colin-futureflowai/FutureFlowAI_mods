@@ -1,12 +1,16 @@
 // node --test futureflow/tests/openrouter-lib.test.mjs
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import { spawnSync } from 'node:child_process'
 
 import { beslis, eersteStap, HELPER, modusVan, OR_HELPER, toestandVan, WACHTTIJD } from '../lib/api.mjs'
 import { ketting } from '../lib/accounts.mjs'
 import {
   contextTekst, eigenBasis, geldigeOrKey, geldigModel, haalWeg, modelIdVoor, modellenVan, orInstellingen, orKosten, pasToe, perMtok, prijsTekst,
-  SHIM_MERK, OR_MARKER, orModelAlsStandaard, orcaArgs, orcaClaudeStart, shimTekst, sorteer, teKlein, keuzeVan, herstartCommando, herstartScript, asString, contextTeGroot, geldigeSessie,
+  SHIM_MERK, OR_MARKER, orModelAlsStandaard, orcaArgs, orcaClaudeStart, shimTekst, sorteer, teKlein, cacheZwak, cacheBlok, cacheProef, cacheRonde, cacheOordeel, cacheMetingen, cacheStand, keuzeVan, herstartCommando, herstartScript, asString, contextTeGroot, geldigeSessie,
 } from '../lib/openrouter.mjs'
 
 const NU = Date.parse('2026-11-10T12:00:00Z')
@@ -192,6 +196,32 @@ test('shimTekst: merkregel, pad tussen enkele aanhalingstekens, exec claude --se
   assert.equal(OR_MARKER, 'FUTUREFLOW_OPENROUTER')
   assert.ok(r.indexOf('export FUTUREFLOW_OPENROUTER=1') > 0)
   assert.ok(r.indexOf('export FUTUREFLOW_OPENROUTER=1') < r.findIndex(x => x.startsWith('exec claude')))
+  // Sessie-id voor OpenRouter (vaste aanbieder, cache raakt), ook vóór de exec.
+  assert.ok(r.indexOf('export ANTHROPIC_CUSTOM_HEADERS') > 0)
+  assert.ok(r.indexOf('export ANTHROPIC_CUSTOM_HEADERS') < r.findIndex(x => x.startsWith('exec claude')))
+})
+
+test('shimTekst: zet x-session-id en laat bestaande eigen headers staan', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ff-shim-'))
+  const nep = path.join(dir, 'claude')
+  fs.writeFileSync(nep, '#!/bin/sh\nprintf "%s" "$ANTHROPIC_CUSTOM_HEADERS"\n', { mode: 0o755 })
+  const inst = path.join(dir, 'settings.json')
+  fs.writeFileSync(inst, '{}')
+  const shim = path.join(dir, 'claude-or')
+  fs.writeFileSync(shim, shimTekst(inst), { mode: 0o755 })
+  const draai = env => spawnSync('/bin/sh', [shim], { env: { PATH: `${dir}:/usr/bin:/bin`, ...env }, encoding: 'utf8' }).stdout
+  const een = draai({})
+  assert.match(een, /^x-session-id: [0-9A-Za-z-]{8,}$/)
+  assert.notEqual(draai({}), een)
+  assert.match(draai({ ANTHROPIC_CUSTOM_HEADERS: 'x-eigen: 1' }), /^x-eigen: 1\nx-session-id: [0-9A-Za-z-]{8,}$/)
+  fs.rmSync(dir, { recursive: true, force: true })
+})
+
+test('cacheZwak: qwen-modellen, andere niet', () => {
+  assert.equal(cacheZwak({ id: 'qwen/qwen3.8-max-0902' }), true)
+  assert.equal(cacheZwak({ id: 'moonshotai/kimi-k3.1-pro' }), false)
+  assert.equal(cacheZwak({}), false)
+  assert.equal(cacheZwak(null), false)
 })
 
 test('orModelAlsStandaard: id met / of een gekozen model; Claude-modellen en leeg niet', () => {
@@ -265,6 +295,8 @@ test('orInstellingen: Model 1-5; lege 2-4 = Model 1, lege 5 = geen extra regel; 
   assert.equal(e.ANTHROPIC_DEFAULT_HAIKU_MODEL, 'a/vier')
   assert.equal(e.CLAUDE_CODE_SUBAGENT_MODEL, 'a/vier')
   assert.equal(e.ENABLE_TOOL_SEARCH, 'true')
+  // De beta-vlag zet tool search uit en hoort er dus niet in.
+  assert.equal(e.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS, undefined)
   assert.equal(e.ANTHROPIC_CUSTOM_MODEL_OPTION, undefined)
   const v = orInstellingen({ m1: 'a/een', m5: 'x/vijf' }).env
   assert.equal(v.ANTHROPIC_DEFAULT_HAIKU_MODEL, 'a/een')
@@ -292,4 +324,51 @@ test('orcaClaudeStart: claude-workers via Orca herkennen; --terminal, codex en a
 
 test('orcaArgs: geen orca uit de projectmap', () => {
   assert.equal(orcaArgs({ bin: '/proj/bin', worktree: 'r::/w', cwd: '/proj', commando: 'x' }), undefined)
+})
+
+test('cacheProef: vier rondes met groeiende lus, vaste prefix, markering op systeem en laatste tool_result', () => {
+  const p = cacheProef('qwen/x[1m]', 'zaad-1')
+  assert.equal(p.length, 4)
+  assert.deepEqual(p.map(b => b.messages.length), [3, 5, 7, 9])
+  for (const b of p) {
+    assert.equal(b.model, 'qwen/x')
+    assert.equal(b.max_tokens, 16)
+    assert.deepEqual(b.system[0].cache_control, { type: 'ephemeral' })
+    assert.equal(b.tools[0].name, 'Read')
+    const gemarkeerd = b.messages.flatMap(m => m.content).filter(c => c.cache_control)
+    assert.equal(gemarkeerd.length, 1)
+    assert.equal(gemarkeerd[0], b.messages.at(-1).content[0])
+    assert.equal(gemarkeerd[0].type, 'tool_result')
+  }
+  // Prefix gelijk: ronde 2 begint met de berichten van ronde 1 (op de markering na).
+  const zonder = m => JSON.stringify(m, (k, v) => (k === 'cache_control' ? undefined : v))
+  assert.equal(zonder(p[1].messages.slice(0, 3)), zonder(p[0].messages))
+  assert.equal(p[0].system[0].text, p[2].system[0].text)
+  // Ander zaad: andere tekst, dus geen treffer uit een eerdere meting.
+  assert.notEqual(cacheProef('qwen/x', 'zaad-2')[0].system[0].text, p[0].system[0].text)
+  assert.equal(cacheBlok('a'), cacheBlok('a'))
+  assert.equal(cacheBlok('a', 5).split(' ').length, 5)
+})
+
+test('cacheRonde en cacheOordeel: goed, laat, zwak (gemeten waarden van 12-11-2026)', () => {
+  assert.deepEqual(cacheRonde({ input_tokens: 3187, cache_read_input_tokens: 9408 }), { in: 3187, read: 9408, write: 0, aandeel: 75 })
+  assert.deepEqual(cacheRonde({ input_tokens: 0, cache_read_input_tokens: null }), { in: 0, read: 0, write: 0, aandeel: 0 })
+  assert.deepEqual(cacheRonde(undefined), { in: 0, read: 0, write: 0, aandeel: 0 })
+  const r = (...a) => a.map(aandeel => ({ in: 1, read: 1, write: 0, aandeel }))
+  assert.equal(cacheOordeel(r(0, 67, 75, 80)), 'goed') // kimi
+  assert.equal(cacheOordeel(r(0, 0, 39, 70)), 'laat') // gemini, grok
+  assert.equal(cacheOordeel(r(0, 35, 27, 21)), 'zwak') // qwen
+  assert.equal(cacheOordeel(r(0, 75, 80)), 'onbekend')
+  assert.equal(cacheOordeel(null), 'onbekend')
+})
+
+test('cacheMetingen en cacheStand: een eigen meting gaat voor de vaste lijst; onzin valt weg', () => {
+  const m = cacheMetingen({ 'qwen/a': { oordeel: 'goed', aandeel: 78, gemeten: 5, extra: 1 }, 'x/b': { oordeel: 'raar', aandeel: 1, gemeten: 1 }, geen: 1, 'x/c': null })
+  assert.deepEqual(m, { 'qwen/a': { oordeel: 'goed', aandeel: 78, gemeten: 5 } })
+  assert.deepEqual(cacheMetingen('x'), {})
+  assert.equal(cacheStand({ id: 'qwen/a' }, m).oordeel, 'goed')
+  assert.equal(cacheStand({ id: 'qwen/b' }, m).oordeel, 'zwak')
+  assert.equal(cacheStand({ id: 'qwen/b' }, m).aandeel, undefined)
+  assert.equal(cacheStand({ id: 'openai/gpt-5' }, m), null)
+  assert.equal(cacheStand({ id: 'openai/gpt-5' }, { 'openai/gpt-5': { oordeel: 'zwak', aandeel: 20, gemeten: 1 } }).tekst, 'cachet niet in een agent-lus: duur in Claude Code')
 })

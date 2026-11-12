@@ -151,7 +151,6 @@ test('klaarzetten: eigen settings-bestand en shim; ~/.claude/settings.json blijf
       ANTHROPIC_DEFAULT_FABLE_MODEL: 'openai/gpt-5',
       ANTHROPIC_DEFAULT_HAIKU_MODEL: 'openai/gpt-5-mini',
       CLAUDE_CODE_SUBAGENT_MODEL: 'openai/gpt-5-mini',
-      CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS: '1',
       ENABLE_TOOL_SEARCH: 'true',
     },
   })
@@ -308,6 +307,50 @@ test('test: één POST /v1/messages met Bearer uit de sleutelhanger; uitvoer zon
   const f = await cli(['openrouter', 'test', '--model', 'openai/gpt-5-mini'])
   assert.deepEqual(json(f), { ok: false, status: 401, fout: 'User not found for …' })
   assert.ok(!f.stdout.includes(ORKEY) && !f.stderr.includes(ORKEY))
+})
+
+test('cachetest: vier aanvragen met één sessie-id; oordeel uit de usage; uitvoer zonder key', async () => {
+  const draai = () => new Promise(resolve => {
+    const p = spawn(process.execPath, [CLI, 'openrouter', 'cachetest', '--model', 'qwen/x[1m]'], {
+      env: { ...process.env, SETTINGS_JSON: bestand, SECURITY_BIN: nep, OPENROUTER_DIR: ordir, OPENROUTER_URL: url, SHIM_DIR: path.dirname(shim), CACHETEST_PAUZE_MS: '0' },
+    })
+    let stdout = ''
+    p.stdout.on('data', c => { stdout += c })
+    p.on('close', status => resolve({ status, stdout, stderr: '' }))
+    p.stdin.end('')
+  })
+  assert.equal((await draai()).status, 4)
+  assert.equal((await cli(['openrouter', 'cachetest'])).status, 1)
+  await cli(['openrouter', 'zet-key'], ORKEY)
+  // qwen-achtig: alleen de systeemprompt komt uit de cache.
+  antwoord.messages = [200, { provider: 'Alibaba', usage: { input_tokens: 15000, cache_read_input_tokens: 5000 } }]
+  const r = await draai()
+  assert.equal(r.status, 0)
+  const d = json(r)
+  assert.equal(d.ok, true)
+  assert.equal(d.model, 'qwen/x')
+  assert.equal(d.oordeel, 'zwak')
+  assert.equal(d.aandeel, 25)
+  assert.equal(d.rondes.length, 4)
+  assert.deepEqual(d.aanbieders, ['Alibaba'])
+  assert.equal(typeof d.gemeten, 'number')
+  assert.equal(verzoeken.length, 4)
+  assert.equal(new Set(verzoeken.map(v => v.headers['x-session-id'])).size, 1)
+  assert.match(verzoeken[0].headers['x-session-id'], /^[0-9a-f-]{36}$/)
+  assert.ok(verzoeken.every(v => v.headers.authorization === `Bearer ${ORKEY}`))
+  assert.deepEqual(verzoeken.map(v => JSON.parse(v.body).messages.length), [3, 5, 7, 9])
+  assert.equal(JSON.parse(verzoeken[2].body).model, 'qwen/x')
+  // Goed cachend model.
+  verzoeken.length = 0
+  antwoord.messages = [200, { usage: { input_tokens: 3000, cache_read_input_tokens: 9000 } }]
+  assert.equal(json(await draai()).oordeel, 'goed')
+  // Fout van de server met de key erin: stopt na één aanvraag, key gaat er niet uit.
+  verzoeken.length = 0
+  antwoord.messages = [403, { error: { message: `Key limit exceeded for ${ORKEY}` } }]
+  const f = await draai()
+  assert.deepEqual(json(f), { ok: false, model: 'qwen/x', status: 403, fout: 'Key limit exceeded for …' })
+  assert.equal(verzoeken.length, 1)
+  assert.ok(!f.stdout.includes(ORKEY))
 })
 
 test('modus openrouter met --m1 … --m5; oude flags als alias; status meldt orM1-orM5; zonder --m1 of ongeldig = exit 1', async () => {
