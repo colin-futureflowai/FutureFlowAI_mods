@@ -7,7 +7,7 @@ import { cli } from './cli'
 import { failOpen } from './ctx'
 import { openDashboard } from './paneel'
 
-import { contextTeGroot, herstartCommando, herstartScript, keuzeVan, orcaArgs, orModelAlsStandaard, START } from '../lib/openrouter.mjs'
+import { cacheMetingen, contextTeGroot, herstartCommando, herstartScript, keuzeVan, orcaArgs, orModelAlsStandaard, poortTekst, START } from '../lib/openrouter.mjs'
 
 // Herstart op OpenRouter (0.11.0): de huidige sessie gaat verder in een nieuw Terminal-venster met
 // `claude-or --resume <sessie>` in dezelfde map. Alleen die sessie draait dan op OpenRouter;
@@ -59,6 +59,18 @@ async function klaar($: Engine): Promise<{ shim: string; model: string } | { red
   const k = keuzeVan(await $.store.get('openrouter.keuze'))
   if (!k.m1) return { reden: 'kies eerst Model 1' }
   if (!shim || !(await $.fs.exists(shim).catch(() => false))) return { reden: `${START} staat nog niet klaar` }
+  // Startcheck (0.15.0): niet herstarten als claude-or zou weigeren, anders sluit deze sessie terwijl de
+  // nieuwe niet start. De CLI werkt meteen shim en poortbestand bij met de metingen uit de store.
+  const r = await cli($, ['openrouter', 'poort'], JSON.stringify(cacheMetingen(await $.store.get('openrouter.cache'))))
+  let p: { ok?: boolean | null; redenen?: Array<{ id: string; reden: 'zwak' | 'ongemeten' }> } | undefined
+  try {
+    p = JSON.parse(r.stdout.trim().split('\n').pop() ?? '')
+  } catch {
+    p = undefined
+  }
+  if (r.exitCode !== 0 || p?.ok !== true) {
+    return { reden: p?.ok === false && p.redenen?.length ? `${poortTekst(p.redenen)} (kies een ander model of klik Meet cache)` : `de startcheck van ${START} lukte niet` }
+  }
   return { shim, model: k.m1 }
 }
 

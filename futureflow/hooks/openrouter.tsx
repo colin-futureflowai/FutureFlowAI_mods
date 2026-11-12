@@ -11,7 +11,7 @@ import { herstartOpOr } from './herstart'
 import { kaart, knop, knoppen, leeg, paneelVan, uitleg } from './paneel-ui'
 
 import { kostenOverzicht, usd } from '../lib/api.mjs'
-import { CACHE_ZWAK_TEKST, cacheMetingen, cacheStand, contextTekst, geldigeOrKey, geldigModel, isClaude, modelIdVoor, modellenVan, prijsTekst, SLOT_UITLEG, SLOTS, sorteer, START, teKlein, TOON } from '../lib/openrouter.mjs'
+import { CACHE_ZWAK_TEKST, cacheMetingen, cacheStand, contextTekst, geldigeOrKey, geldigModel, isClaude, modelIdVoor, modellenVan, POORT_REDEN, poortOordeel, prijsTekst, SLOT_UITLEG, SLOTS, sorteer, START, teKlein, TOON } from '../lib/openrouter.mjs'
 
 // Tab OpenRouter: Claude Code op een ander model via OpenRouter, alleen in sessies die met `claude-or`
 // starten (eigen settings-bestand; ~/.claude/settings.json blijft van het abonnement, sinds 0.9.0).
@@ -126,8 +126,9 @@ async function kies($: Engine, slot: Slot, m: OrModel): Promise<void> {
     if (!id || !geldigModel(id)) return
     if (teKlein(m)) $.ui.toast(`Let op: ${m.id} heeft ${contextTekst(m.context)} context; dat is te klein voor Claude Code.`)
     const cache = cacheStand(m, cacheMetingen(await $.store.get('openrouter.cache')))
-    if (cache?.oordeel === 'zwak') $.ui.toast(`Let op: ${m.id} ${cache.tekst}.`)
+    if (cache?.oordeel === 'zwak') $.ui.toast(`Let op: ${m.id} ${cache.tekst}. ${START} start niet met dit model.`)
     await $.store.set('openrouter.keuze', { ...(await orKeuze($)), [slot]: id })
+    // Nog geen meting: eerst meten; claude-or krijgt het model pas na een goede uitslag (zie meetModellen).
     void meetBijKiezen($, m.id).catch(err => failOpen($, err))
     const prijzen = ((await $.store.get('openrouter.prijzen')) ?? {}) as Record<string, { in?: number; uit?: number }>
     const prijs = { ...(m.in !== undefined ? { in: m.in } : {}), ...(m.uit !== undefined ? { uit: m.uit } : {}), ...(m.context !== undefined ? { ctx: m.context } : {}) }
@@ -156,9 +157,17 @@ async function maakLeeg($: Engine, slot: Slot): Promise<void> {
   }
 }
 
+// Startcheck (0.15.0): mag claude-or starten met de gekozen modellen? Elk model moet gemeten zijn en cachen.
+async function poortVan($: Engine) {
+  const k = await orKeuze($)
+  return poortOordeel(SLOTS.map(s => k[s]), cacheMetingen(await $.store.get('openrouter.cache')))
+}
+
+// Staat claude-or al klaar, dan de nieuwe keuze meteen in het eigen bestand; niet zolang de startcheck
+// een model weigert (de CLI zou weigeren; de kaart zegt waarom).
 async function zetOpnieuw($: Engine): Promise<void> {
   const status = (await read($, statusAtom)) ?? (await leesStatus($))
-  if (status.orKlaar && (await orKeuze($)).m1) await wissel($, 'openrouter', 'nieuw model')
+  if (status.orKlaar && (await orKeuze($)).m1 && (await poortVan($)).ok) await wissel($, 'openrouter', 'nieuw model')
 }
 
 async function openKies($: Engine, slot: Slot | null): Promise<void> {
@@ -215,7 +224,9 @@ async function meetModellen($: Engine, ids: string[]): Promise<void> {
         if (d?.ok === true && ['goed', 'wisselend', 'zwak'].includes(d.oordeel)) {
           const oud = cacheMetingen(await $.store.get('openrouter.cache'))
           await $.store.set('openrouter.cache', { ...oud, [id]: { oordeel: d.oordeel, aandeel: Number(d.aandeel) || 0, raak: Number(d.raak) || 0, van: Number(d.van) || 0, gemeten: await $.clock.now() } })
-          if (d.oordeel === 'zwak') $.ui.toast(`Let op: ${id} ${CACHE_ZWAK_TEKST}.`)
+          if (d.oordeel === 'zwak') $.ui.toast(`Let op: ${id} ${CACHE_ZWAK_TEKST}. ${START} start niet met dit model.`)
+          // Nu gemeten: een klaarstaande claude-or krijgt de keuze alsnog (als de startcheck het toelaat).
+          else await zetOpnieuw($)
           await hertekenen($)
         } else {
           fouten.push(`${id}: ${r.exitCode !== 0 ? foutVan(r) : String(d?.fout ?? 'geen uitslag').slice(0, 120)}`)
@@ -354,6 +365,19 @@ export async function orBron($: Engine, e: any, k: Kleuren, meer = true): Promis
             {`${id} ${s.tekst}${s.aandeel === undefined ? '' : ` (gemeten: ${s.raak} van ${s.van} rondes raak, ${s.aandeel}% uit cache)`}.`}
           </Text>
         ) : ''))}
+        {(() => {
+          // Startcheck: waarom claude-or niet start met deze keuze.
+          const p = poortOordeel(ids, metingen)
+          if (p.ok) return ''
+          const bezig = (cacheRegel ?? '').startsWith('Cache meten')
+          return (
+            <Text key="or-poort" color={k.err} wrap="wrap">
+              {`${START} start niet met deze keuze: ${p.redenen.map(r => `${r.id} ${POORT_REDEN[r.reden]}`).join('; ')}. ${
+                p.redenen.some(r => r.reden === 'zwak') ? 'Kies een ander model.' : bezig ? 'De meting loopt.' : status.orHeeftKey ? 'Klik Meet cache (onder Meer).' : 'Bewaar eerst een key; daarna meet futureflow het model.'
+              }`}
+            </Text>
+          )
+        })()}
         {cacheRegel ? <Text color={cacheRegel.startsWith('Cache meten') ? k.mut : k.err} wrap="wrap">{cacheRegel}</Text> : ''}
         {status.oudeOr ? <Text color={k.warn} wrap="wrap">In ~/.claude/settings.json staan nog oude OpenRouter-regels; futureflow haalt ze bij de volgende sessiestart weg.</Text> : ''}
         {test ? <Text color={test.startsWith('Verbinding werkt (') ? k.ok : test.startsWith('Bezig') ? k.mut : k.err} wrap="wrap">{test}</Text> : ''}

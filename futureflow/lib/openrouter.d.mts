@@ -32,7 +32,15 @@ export function cacheRonde(usage: unknown): CacheRonde
 export function cacheOordeel(rondes: readonly CacheRonde[] | null | undefined): CacheOordeel | 'onbekend'
 export function cacheMetingen(ruw: unknown): Record<string, CacheMeting>
 export function cacheStand(m: { id?: string } | null | undefined, metingen: Record<string, CacheMeting> | null | undefined): { oordeel: CacheOordeel; tekst: string; aandeel?: number; raak?: number; van?: number; gemeten?: number } | null
-export function shimTekst(settingsPad: string): string
+export function shimTekst(settingsPad: string, poortPad?: string): string
+export type PoortReden = { id: string; reden: 'zwak' | 'ongemeten' }
+export type PoortOordeel = { ok: boolean; redenen: PoortReden[] }
+export function instellingModellen(d: unknown): string[]
+export function poortOordeel(ids: Array<string | undefined>, metingen: Record<string, CacheMeting> | null | undefined): PoortOordeel
+export const POORT_REDEN: Record<'zwak' | 'ongemeten', string>
+export function poortTekst(redenen: PoortReden[]): string
+export const POORT_OK: string
+export function poortBestand(oordeel: PoortOordeel): string
 
 export function geldigeOrKey(s: unknown): boolean
 export function geldigModel(s: unknown): boolean

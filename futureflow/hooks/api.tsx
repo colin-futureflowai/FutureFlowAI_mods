@@ -10,7 +10,7 @@ import { kaart, knop, knoppen, paneelVan, uitleg } from './paneel-ui'
 import { beslis, dagSleutel, geldigeKey, houdTot, kosten, kostenOverzicht, limietenVan, modusVan, telOp, toestandVan, usd } from '../lib/api.mjs'
 import type { Beschikbaar, Door, Modus } from '../lib/api.mjs'
 import { instellingenVan, kettingAan } from '../lib/accounts.mjs'
-import { geldigModel, keuzeVan, orKosten, OR_URL, SLOTS, START } from '../lib/openrouter.mjs'
+import { cacheMetingen, geldigModel, keuzeVan, orKosten, OR_URL, SLOTS, START } from '../lib/openrouter.mjs'
 import type { OrKeuze as LibOrKeuze } from '../lib/openrouter.mjs'
 
 // Tab API: de API-key in de macOS-sleutelhanger en wisselen tussen abonnement en API, met de hand
@@ -203,6 +203,8 @@ export async function startApi($: Engine): Promise<void> {
     // /model → Enter in claude-or zet het OpenRouter-model als standaard voor alle sessies: melden.
     if (gelezen) await controleerStandaardModel($, gelezen.model)
     if (gelezen?.oudeOr) void ruimOudeOrOp($).catch(err => failOpen($, err))
+    // Startcheck (0.15.0): metingen naar de CLI, die de shim en het poortbestand van claude-or bijwerkt.
+    void syncPoort($).catch(err => failOpen($, err))
     // Sinds 0.8 één schakelaar voor API en accounts: stond alleen accounts-auto aan, dan ook die van de API.
     const t0 = await leesToestand($)
     if (!t0.auto) {
@@ -218,6 +220,14 @@ export async function startApi($: Engine): Promise<void> {
   } catch (err) {
     failOpen($, err)
   }
+}
+
+// Startcheck (0.15.0): claude-or start alleen met modellen die gemeten zijn en cachen. De CLI beslist
+// (`modus openrouter` weigert met exit 7, de shim leest het poortbestand); de mod geeft hier de metingen
+// uit de store door, zodat ook een claude-or van vóór 0.15 de check krijgt. Alleen als er een Model 1 is.
+export async function syncPoort($: Engine): Promise<void> {
+  if (!(await orKeuze($)).m1) return
+  await cli($, ['openrouter', 'poort'], JSON.stringify(cacheMetingen(await $.store.get('openrouter.cache'))))
 }
 
 // De gekozen OpenRouter-modellen (store `openrouter.keuze`): Model 1 t/m 5 (0.13.0). Een oude keuze
@@ -318,7 +328,9 @@ async function zetOrKlaar($: Engine, reden: string, opties: { door?: Door; auto?
   const r = await cli($, ['modus', 'openrouter', ...SLOTS.flatMap(s => (k[s] ? [`--${s}`, k[s]!] : []))])
   await verversApi($)
   if (r.exitCode !== 0) {
-    const uitleg = r.exitCode === 4 ? 'er staat nog geen OpenRouter-key in de sleutelhanger.' : `${foutVan(r)}.`
+    const uitleg = r.exitCode === 4 ? 'er staat nog geen OpenRouter-key in de sleutelhanger.'
+      : r.exitCode === 7 ? `${foutVan(r)}. Kies een ander model of klik Meet cache.`
+      : `${foutVan(r)}.`
     $.ui.toast(`${START} niet klaargezet: ${uitleg}`)
     return false
   }

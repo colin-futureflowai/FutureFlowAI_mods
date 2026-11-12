@@ -4,7 +4,7 @@ const NU = Date.parse('2026-11-10T12:00:00Z')
 const ID = 'f2b8903e-a21c-4741-b219-c03db7d5e4cb'
 const SHIM = '/home/t/.local/bin/claude-or'
 
-type Opties = { surfaces?: string[]; shim?: boolean; keuze?: boolean; tokens?: number; ctx?: number; osaFout?: boolean; exitWeg?: boolean; term?: string; orca?: Record<string, string>; orcaFout?: boolean; settings?: string }
+type Opties = { surfaces?: string[]; shim?: boolean; keuze?: boolean; tokens?: number; ctx?: number; osaFout?: boolean; exitWeg?: boolean; term?: string; orca?: Record<string, string>; orcaFout?: boolean; settings?: string; poort?: unknown }
 
 // Nep-omgeving: alle mocks vóór de eerste $-aanroep.
 function fake(on: any, o: Opties = {}) {
@@ -43,6 +43,10 @@ function fake(on: any, o: Opties = {}) {
   on('tool.call', ($: any, e: any) => ({ result: `uitgevoerd: ${e.tool}` }))
   on('process.run', ($: any, e: { argv: string[] }) => {
     runs.push(e.argv)
+    // Startcheck van claude-or (cli/api.mjs openrouter poort): standaard open.
+    if (e.argv.includes('poort') && e.argv.some(a => a.endsWith('api.mjs'))) {
+      return { value: { exitCode: 0, stdout: JSON.stringify(o.poort ?? { ok: true, redenen: [], shim: true }) + '\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    }
     if (e.argv[0]?.endsWith('/orca') && o.orcaFout) return { value: { exitCode: 2, stdout: '', stderr: 'orca draait niet', isStdoutTruncated: false, isStderrTruncated: false } }
     if (e.argv[0] === '/usr/bin/osascript' && o.osaFout) return { value: { exitCode: 1, stdout: '', stderr: 'geen toegang', isStdoutTruncated: false, isStderrTruncated: false } }
     return { value: { exitCode: 0, stdout: '{}\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
@@ -234,4 +238,18 @@ test('gewone sessie: geen OpenRouter-weigering voor orca agent launch --agent cl
   const r = (await $.tool.call({ tool: 'Bash', command: 'orca agent launch --agent claude --json' } as any)) as any
   // (slots kan een agent-start om geheugen weigeren; de OpenRouter-weigering mag er niet bij zijn)
   expect(String(r.deny ?? '')).not.toContain('OpenRouter')
+})
+
+test('startcheck: weigert claude-or een model, dan geen nieuw venster en geen /exit; de toast noemt het model', async ($, on) => {
+  const f = fake(on, { poort: { ok: false, redenen: [{ id: 'openai/gpt-5-mini', reden: 'zwak' }], shim: true } })
+  await gebruikNu($, f)
+  const band = await $.ui.mount(BAND())
+  await band.press({ key: 'or-herstart-ja' } as any)
+  await f.clock.settle()
+  expect(f.osa()).toEqual([])
+  expect(f.exits).toEqual([])
+  expect(f.toasts.some(t => t.includes('Herstart op OpenRouter kan nog niet: openai/gpt-5-mini cachet niet in een agent-lus'))).toBe(true)
+  // De metingen uit de store gaan via stdin mee, nooit in argv.
+  expect(f.runs.filter(r => r.includes('poort')).every(r => r.slice(-2).join(' ') === 'openrouter poort')).toBe(true)
+  await band.unmount()
 })

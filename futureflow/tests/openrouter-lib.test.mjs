@@ -10,7 +10,7 @@ import { beslis, eersteStap, HELPER, modusVan, OR_HELPER, toestandVan, WACHTTIJD
 import { ketting } from '../lib/accounts.mjs'
 import {
   contextTekst, eigenBasis, geldigeOrKey, geldigModel, haalWeg, modelIdVoor, modellenVan, orInstellingen, orKosten, pasToe, perMtok, prijsTekst,
-  SHIM_MERK, OR_MARKER, orModelAlsStandaard, orcaArgs, orcaClaudeStart, shimTekst, sorteer, teKlein, cacheZwak, cacheBlok, cacheProef, cacheRonde, cacheOordeel, cacheTelling, cacheMetingen, cacheStand, keuzeVan, herstartCommando, herstartScript, asString, contextTeGroot, geldigeSessie,
+  SHIM_MERK, OR_MARKER, orModelAlsStandaard, orcaArgs, orcaClaudeStart, shimTekst, instellingModellen, poortBestand, poortOordeel, poortTekst, sorteer, teKlein, cacheZwak, cacheBlok, cacheProef, cacheRonde, cacheOordeel, cacheTelling, cacheMetingen, cacheStand, keuzeVan, herstartCommando, herstartScript, asString, contextTeGroot, geldigeSessie,
 } from '../lib/openrouter.mjs'
 
 const NU = Date.parse('2026-11-10T12:00:00Z')
@@ -207,6 +207,7 @@ test('shimTekst: zet x-session-id en laat bestaande eigen headers staan', () => 
   fs.writeFileSync(nep, '#!/bin/sh\nprintf "%s" "$ANTHROPIC_CUSTOM_HEADERS"\n', { mode: 0o755 })
   const inst = path.join(dir, 'settings.json')
   fs.writeFileSync(inst, '{}')
+  fs.writeFileSync(path.join(dir, 'poort'), 'ok\n')
   const shim = path.join(dir, 'claude-or')
   fs.writeFileSync(shim, shimTekst(inst), { mode: 0o755 })
   const draai = env => spawnSync('/bin/sh', [shim], { env: { PATH: `${dir}:/usr/bin:/bin`, ...env }, encoding: 'utf8' }).stdout
@@ -215,6 +216,28 @@ test('shimTekst: zet x-session-id en laat bestaande eigen headers staan', () => 
   assert.notEqual(draai({}), een)
   assert.match(draai({ ANTHROPIC_CUSTOM_HEADERS: 'x-eigen: 1' }), /^x-eigen: 1\nx-session-id: [0-9A-Za-z-]{8,}$/)
   fs.rmSync(dir, { recursive: true, force: true })
+})
+
+test('startcheck: elk model moet gemeten zijn en cachen; poortbestand en shim', () => {
+  const m = (oordeel) => ({ oordeel, aandeel: 50, raak: 3, van: 5, gemeten: 1 })
+  const metingen = { 'a/goed': m('goed'), 'a/wissel': m('wisselend'), 'a/zwak': m('zwak'), 'qwen/gemeten': m('goed') }
+  assert.deepEqual(poortOordeel(['a/goed[1m]', 'a/wissel', 'a/goed', undefined, 'qwen/gemeten'], metingen), { ok: true, redenen: [] })
+  assert.deepEqual(poortOordeel(['a/goed', 'a/zwak[1m]', 'b/nieuw', 'qwen/x', 'b/nieuw'], metingen), {
+    ok: false,
+    redenen: [{ id: 'a/zwak', reden: 'zwak' }, { id: 'b/nieuw', reden: 'ongemeten' }, { id: 'qwen/x', reden: 'zwak' }],
+  })
+  assert.deepEqual(poortOordeel(['a/b'], undefined).redenen, [{ id: 'a/b', reden: 'ongemeten' }])
+  assert.equal(poortTekst([{ id: 'a/zwak', reden: 'zwak' }, { id: 'b/nieuw', reden: 'ongemeten' }]), 'a/zwak cachet niet in een agent-lus; b/nieuw is nog niet gemeten')
+  assert.equal(poortBestand({ ok: true, redenen: [] }), 'ok\n')
+  assert.equal(poortBestand({ ok: false, redenen: [{ id: 'b/nieuw', reden: 'ongemeten' }] }), 'geweigerd\nb/nieuw is nog niet gemeten\n')
+  // Alle modellen die een sessie kan gebruiken, elk één keer en zonder [1m].
+  assert.deepEqual(instellingModellen(orInstellingen({ m1: 'a/een[1m]', m4: 'a/vier', m5: 'a/vijf' })), ['a/een', 'a/vier', 'a/vijf'])
+  assert.deepEqual(instellingModellen(undefined), [])
+  // De shim leest het poortbestand naast het settings-bestand, vóór de exec.
+  const r = shimTekst("/Users/x/it's/settings.json").split('\n')
+  assert.ok(r.includes("P='/Users/x/it'\\''s/poort'"))
+  assert.ok(r.findIndex(x => x.startsWith('if [ "$POORT" != "ok" ]')) < r.findIndex(x => x.startsWith('exec claude')))
+  assert.ok(shimTekst('/a/settings.json', '/b/p').includes("P='/b/p'"))
 })
 
 test('cacheZwak: qwen-modellen, andere niet', () => {

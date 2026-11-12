@@ -20,7 +20,14 @@
 //   api openrouter modellen [--ververs]  lijst met tools-ondersteuning, cache 6 u → JSON { modellen, opgehaald, uitCache, fout? }
 //   api openrouter test --model <id>     één POST /v1/messages met max_tokens 1 → JSON { ok, status?, fout? }
 //   api openrouter cachetest --model <id>  zes aanvragen als agent-lus (~50k tokens) → JSON { ok, model, oordeel,
-//                               raak, van, aandeel, rondes, aanbieders, gemeten } of { ok: false, status?, fout }
+//                               raak, van, aandeel, rondes, aanbieders, gemeten } of { ok: false, status?, fout };
+//                               een geslaagde meting gaat naar <OPENROUTER_DIR>/cache.json en werkt de poort bij
+//   api openrouter poort        metingen van de mod (JSON via stdin, mag leeg) erbij, shim en poortbestand bijwerken
+//                               → JSON { ok, redenen, shim }
+//
+// Startcheck (0.15.0): `claude-or` start alleen als elk model in het eigen settings-bestand een meting heeft
+// en niet `zwak` is. `modus openrouter` weigert anders (exit 7, niets geschreven); de shim leest
+// <OPENROUTER_DIR>/poort (eerste regel `ok`) en start niet zonder.
 //
 // OpenRouter komt sinds 0.9.0 nooit meer in ~/.claude/settings.json: Claude Code leest dat bestand live
 // in alle lopende sessies, ook de desktop-app. Alleen `claude-or` (claude --settings <eigen bestand>)
@@ -33,7 +40,8 @@
 // `security -i`) en nooit op stdout of stderr; alleen de laatste 4 tekens.
 // Exitcodes: 1 gebruik of ongeldige key, 2 settings onleesbaar of geen geldige JSON (niets geschreven),
 // 3 er staat een andere apiKeyHelper of andere waarde (blijft staan), 4 geen key in de sleutelhanger,
-// 5 sleutelhanger-fout, 6 modellijst niet op te halen (en geen cache).
+// 5 sleutelhanger-fout, 6 modellijst niet op te halen (en geen cache), 7 een gekozen model cachet niet of is
+// nog niet gemeten (niets klaargezet).
 // SETTINGS_JSON, SECURITY_BIN, OPENROUTER_DIR, OPENROUTER_URL en SHIM_DIR overschrijven paden,
 // programma en adres (tests).
 
@@ -45,8 +53,8 @@ import { fileURLToPath } from 'node:url'
 
 import { ACCOUNT, geldigeKey, HELPER, MODI, modusVan, SERVICE } from '../lib/api.mjs'
 import {
-  CACHE_MS, cacheOordeel, cacheProef, cacheRonde, cacheTelling, eigenBasis, geldigeOrKey, geldigModel, haalWeg, modellenVan, OR_ACCOUNT, OR_SERVICE, OR_URL, orInstellingen,
-  SHIM_MERK, shimTekst, SLOTS, START,
+  CACHE_MS, cacheMetingen, cacheOordeel, cacheProef, cacheRonde, cacheTelling, eigenBasis, geldigeOrKey, geldigModel, haalWeg, instellingModellen, modellenVan, OR_ACCOUNT, OR_SERVICE,
+  OR_URL, orInstellingen, poortBestand, poortOordeel, poortTekst, SHIM_MERK, shimTekst, SLOTS, START,
 } from '../lib/openrouter.mjs'
 
 const BESTAND = process.env.SETTINGS_JSON || path.join(os.homedir(), '.claude', 'settings.json')
@@ -59,6 +67,9 @@ const OR_BASIS = (process.env.OPENROUTER_URL || OR_URL).replace(/\/+$/, '')
 const MARKER = path.join(OR_DIR, 'marker.json')
 const CACHE = path.join(OR_DIR, 'modellen.json')
 const OR_SETTINGS = path.join(OR_DIR, 'settings.json')
+// Startcheck: de cache-metingen per model en het poortbestand dat de shim leest.
+const METINGEN = path.join(OR_DIR, 'cache.json')
+const POORT = path.join(OR_DIR, 'poort')
 const SHIM_DIR = process.env.SHIM_DIR || path.join(os.homedir(), '.local', 'bin')
 const SHIM = path.join(SHIM_DIR, START)
 
@@ -197,7 +208,7 @@ function zetShim() {
   if (oud !== undefined && !oud.split('\n').includes(SHIM_MERK)) {
     throw new Fout(`${SHIM} bestaat al en is niet van futureflow; futureflow laat die staan`, 3)
   }
-  const tekst = shimTekst(OR_SETTINGS)
+  const tekst = shimTekst(OR_SETTINGS, POORT)
   if (oud === tekst) return false
   fs.mkdirSync(SHIM_DIR, { recursive: true })
   const tmp = `${SHIM}.${process.pid}-${Date.now()}.tmp`
@@ -210,6 +221,71 @@ function zetShim() {
     throw new Fout(`${SHIM} niet geschreven (${err.code ?? err.message})`, 2)
   }
   return true
+}
+
+// ---- startcheck: claude-or start alleen met modellen die gemeten zijn en cachen ----
+
+const leesMetingen = () => cacheMetingen(leesJson(METINGEN))
+
+// Voegt metingen toe aan het eigen bestand; per model wint de nieuwste.
+function bewaarMetingen(nieuw) {
+  const oud = leesMetingen()
+  const samen = { ...oud }
+  for (const [id, m] of Object.entries(cacheMetingen(nieuw))) if (!samen[id] || m.gemeten >= samen[id].gemeten) samen[id] = m
+  if (!gelijk(oud, samen)) schrijfJson(METINGEN, samen)
+  return samen
+}
+
+// Schrijft het poortbestand voor de modellen die nu in het settings-bestand van claude-or staan.
+// Zonder settings-bestand is er niets te starten en dus geen poort.
+function werkPoortBij() {
+  const d = leesJson(OR_SETTINGS)
+  if (d === undefined) return { ok: null, redenen: [] }
+  const oordeel = poortOordeel(instellingModellen(d), leesMetingen())
+  const tekst = poortBestand(oordeel)
+  let oud
+  try {
+    oud = fs.readFileSync(POORT, 'utf8')
+  } catch {
+    oud = undefined
+  }
+  if (oud !== tekst) {
+    const tmp = `${POORT}.${process.pid}-${Date.now()}.tmp`
+    try {
+      fs.writeFileSync(tmp, tekst, { mode: 0o600, flag: 'wx' })
+      fs.renameSync(tmp, POORT)
+    } catch (err) {
+      fs.rmSync(tmp, { force: true })
+      throw new Fout(`${POORT} niet geschreven (${err.code ?? err.message})`, 2)
+    }
+  }
+  return oordeel
+}
+
+// `openrouter poort`: neemt metingen van de mod over (JSON op stdin, mag leeg), zet de shim met de
+// startcheck erin (alleen als er al een claude-or van futureflow klaarstaat) en schrijft het poortbestand.
+function poort() {
+  const invoer = process.stdin.isTTY ? '' : leesStdin().trim()
+  if (invoer) {
+    let d
+    try {
+      d = JSON.parse(invoer)
+    } catch {
+      throw new Fout('metingen op stdin zijn geen geldige JSON; niets gewijzigd', 1)
+    }
+    bewaarMetingen(d)
+  }
+  let shim = false
+  if (leesJson(OR_SETTINGS) !== undefined) {
+    try {
+      zetShim()
+      shim = true
+    } catch (err) {
+      // Een claude-or van iemand anders blijft staan; die start dan ook niet via futureflow.
+      if (!(err instanceof Fout) || err.code !== 3) throw err
+    }
+  }
+  return { ...werkPoortBij(), shim }
 }
 
 const opPad = () => (process.env.PATH ?? '').split(path.delimiter).some(d => d && path.resolve(d) === path.resolve(SHIM_DIR))
@@ -228,12 +304,16 @@ function zetOpenrouter(opties) {
   for (const s of SLOTS) if (k[s] !== undefined && !geldigModel(k[s])) throw new Fout(`ongeldig model voor --${s}`, 1)
   if (leesKey(OR_SERVICE, OR_ACCOUNT) === undefined) throw new Fout('geen OpenRouter-key in de sleutelhanger; bewaar eerst een key', 4)
   const gewenst = orInstellingen(k)
+  // Startcheck: niets klaarzetten met een model dat niet cachet of nog niet gemeten is.
+  const oordeel = poortOordeel(instellingModellen(gewenst), leesMetingen())
+  if (!oordeel.ok) throw new Fout(`${poortTekst(oordeel.redenen)}; niets klaargezet`, 7)
   let gewijzigd = false
   if (!gelijk(leesJson(OR_SETTINGS), gewenst)) {
     schrijfJson(OR_SETTINGS, gewenst)
     gewijzigd = true
   }
   if (zetShim()) gewijzigd = true
+  werkPoortBij()
   return { modus: 'openrouter', gewijzigd, settings: OR_SETTINGS, shim: SHIM, start: START, opPad: opPad() }
 }
 
@@ -466,7 +546,11 @@ async function cachetest(opties) {
   } catch (err) {
     return { ok: false, model, fout: `geen verbinding (${schoon(err?.cause?.code ?? err?.message ?? err)})` }
   }
-  return { ok: true, model, oordeel: cacheOordeel(rondes), ...cacheTelling(rondes), rondes, aanbieders, gemeten: Date.now() }
+  const uit = { ok: true, model, oordeel: cacheOordeel(rondes), ...cacheTelling(rondes), rondes, aanbieders, gemeten: Date.now() }
+  // De uitslag telt meteen voor de startcheck: bewaren en het poortbestand bijwerken.
+  bewaarMetingen({ [model]: uit })
+  werkPoortBij()
+  return uit
 }
 
 const takenlijstAan = data => !!data?.env && typeof data.env === 'object' && data.env[TODO_VAR] === 'true'
@@ -598,12 +682,13 @@ export async function main(args) {
     else if (cmd === 'openrouter' && sub === 'modellen') console.log(JSON.stringify(await modellen(vlagen(vlag))))
     else if (cmd === 'openrouter' && sub === 'test') console.log(JSON.stringify(await test(vlagen(vlag))))
     else if (cmd === 'openrouter' && sub === 'cachetest') console.log(JSON.stringify(await cachetest(vlagen(vlag))))
+    else if (cmd === 'openrouter' && sub === 'poort' && vlag.length === 0) console.log(JSON.stringify(poort()))
     else if (cmd === 'openrouter' && sub === 'model-weg') console.log(JSON.stringify(modelWeg(vlagen(vlag))))
     else if (cmd === 'openrouter' && sub === 'opruimen' && vlag.length === 0) console.log(JSON.stringify(ruimOp()))
     else {
       console.error(
         'Gebruik: api zet-key (key via stdin) | api wis-key | api status | api modus api|abonnement | api modus openrouter --m1 <id> [--m2|--m3|--m4|--m5 <id>]' +
-          ' | api takenlijst aan|uit|status | api openrouter zet-key|wis-key|opruimen | api openrouter model-weg --waarde <id> | api openrouter modellen [--ververs] | api openrouter test --model <id> | api openrouter cachetest --model <id>',
+          ' | api takenlijst aan|uit|status | api openrouter zet-key|wis-key|opruimen | api openrouter model-weg --waarde <id> | api openrouter modellen [--ververs] | api openrouter test --model <id> | api openrouter cachetest --model <id> | api openrouter poort (metingen via stdin)',
       )
       return 1
     }

@@ -12,7 +12,7 @@ const MODELLEN = [
 ]
 
 type Modus = 'abonnement' | 'api' | 'openrouter'
-type Opties = { cachetest?: Record<string, unknown>; veel?: boolean; modus?: Modus; orKey?: boolean; store?: Record<string, unknown>; rateLimits?: unknown[]; test?: unknown; env?: Record<string, string> }
+type Opties = { cachetest?: Record<string, unknown>; veel?: boolean; modus?: Modus; orKey?: boolean; store?: Record<string, unknown>; rateLimits?: unknown[]; test?: unknown; env?: Record<string, string>; weiger?: string }
 
 // Nep-omgeving met een nep-cli/api.mjs; alle mocks vóór de eerste $-aanroep.
 function fake(on: any, o: Opties = {}) {
@@ -77,6 +77,8 @@ function fake(on: any, o: Opties = {}) {
     if (args[0] === 'openrouter' && args[1] === 'modellen') return ok({ modellen: o.veel ? [...MODELLEN, ...Array.from({ length: 42 }, (_, i) => ({ id: `x/m-${i}`, naam: `M ${i}`, context: 128000, in: 1, uit: 2 }))] : MODELLEN, opgehaald: NU, uitCache: args[2] !== '--ververs' })
     if (args[0] === 'openrouter' && args[1] === 'test') return ok(o.test ?? { ok: true, status: 200 })
     if (args[0] === 'openrouter' && args[1] === 'cachetest') return ok(o.cachetest?.[args[3]] ?? { ok: false, status: 403, fout: 'Key limit exceeded' })
+    // Startcheck: de mod geeft de metingen uit de store door; de CLI werkt shim en poortbestand bij.
+    if (args[0] === 'openrouter' && args[1] === 'poort') return ok({ ok: true, redenen: [], shim: true })
     if (args[0] === 'openrouter' && args[1] === 'opruimen') {
       const gewijzigd = cli.modus === 'openrouter'
       if (gewijzigd) cli.modus = 'abonnement'
@@ -85,6 +87,7 @@ function fake(on: any, o: Opties = {}) {
     if (args[0] === 'modus') {
       if (args[1] === 'openrouter' && !cli.orKey) return fout(4, 'geen OpenRouter-key in de sleutelhanger; bewaar eerst een key')
       if (args[1] === 'api') return fout(4, 'geen key in de sleutelhanger; bewaar eerst een key')
+      if (args[1] === 'openrouter' && o.weiger) return fout(7, o.weiger)
       if (args[1] === 'openrouter') {
         // claude-or klaarzetten: settings.json (de modus) blijft.
         const model = args[args.indexOf('--m1') + 1]
@@ -195,7 +198,11 @@ test('Kies bij Model 4 opent de lijst; zoeken filtert; kiezen zet model 4 en slu
 })
 
 test('Gebruik nu: zonder modellen een uitleg; met modellen claude-or klaar, settings.json en de modus blijven', async ($, on) => {
-  const f = fake(on, { orKey: true })
+  const f = fake(on, {
+    orKey: true,
+    cachetest: { 'anthropic/claude-sonnet-4.5': { ok: true, model: 'anthropic/claude-sonnet-4.5', oordeel: 'goed', raak: 5, van: 5, aandeel: 80, rondes: [], aanbieders: [], gemeten: 1 } },
+    store: { 'openrouter.cache': { 'openai/gpt-5': { oordeel: 'goed', aandeel: 80, raak: 5, van: 5, gemeten: 1 }, 'openai/gpt-5-mini': { oordeel: 'goed', aandeel: 80, raak: 5, van: 5, gemeten: 1 } } },
+  })
   await $.session.start(START)
   await run($, 'futureflow', 'openrouter')
   const ui = await $.ui.mount(PANE('terminal'))
@@ -214,8 +221,51 @@ test('Gebruik nu: zonder modellen een uitleg; met modellen claude-or klaar, sett
   await f.clock.settle()
   await ui.press({ key: 'or-model-1' } as any)
   await ui.press({ key: 'or-kies-0' } as any)
+  // Het nieuwe model heeft nog geen meting: eerst meten, daarna pas in het eigen bestand.
+  await f.clock.settle()
+  expect(f.aanroepen.filter(a => a.args[1] === 'cachetest').map(a => a.args[3])).toEqual(['anthropic/claude-sonnet-4.5'])
   expect(f.modusAanroepen()[1]).toBe('openrouter --m1 anthropic/claude-sonnet-4.5[1m] --m4 openai/gpt-5-mini')
   await ui.unmount()
+})
+
+test('startcheck: ongemeten of zwak model komt niet in claude-or; de kaart zegt waarom; Gebruik nu toont de weigering', async ($, on) => {
+  const goed = { oordeel: 'goed', aandeel: 80, raak: 5, van: 5, gemeten: 1 }
+  const f = fake(on, {
+    orKey: true,
+    weiger: 'openai/gpt-5-mini is nog niet gemeten; niets klaargezet',
+    store: { 'openrouter.keuze': { m1: 'openai/gpt-5', m4: 'openai/gpt-5-mini' }, 'openrouter.cache': { 'openai/gpt-5': goed } },
+  })
+  // Bij de sessiestart gaan de metingen uit de store naar de CLI (via stdin), één keer.
+  await $.session.start(START)
+  await f.clock.settle()
+  const poort = f.aanroepen.filter(a => a.args[1] === 'poort')
+  expect(poort.map(a => a.args.join(' '))).toEqual(['openrouter poort'])
+  expect(JSON.parse(poort[0].stdin ?? '')).toEqual({ 'openai/gpt-5': goed })
+  await run($, 'futureflow', 'openrouter')
+  const ui = await $.ui.mount(PANE('terminal'))
+  expect(await ui.find({ type: 'Text', text: 'claude-or start niet met deze keuze: openai/gpt-5-mini is nog niet gemeten. Klik Meet cache (onder Meer).' })).toBeDefined()
+  await ui.press({ key: 'or-naar' } as any)
+  expect(f.toasts.at(-1)).toBe('claude-or niet klaargezet: openai/gpt-5-mini is nog niet gemeten; niets klaargezet. Kies een ander model of klik Meet cache.')
+  // Zwak (vaste lijst): andere tekst, en na kiezen geen poging om klaar te zetten.
+  f.store.set('openrouter.keuze', { m1: 'openai/gpt-5', m4: 'qwen/q-max' })
+  f.cli.model = 'openai/gpt-5'
+  await ui.press({ key: 'tab-wisselen' } as any)
+  await f.clock.settle()
+  expect(await ui.find({ type: 'Text', text: 'claude-or start niet met deze keuze: qwen/q-max cachet niet in een agent-lus. Kies een ander model.' })).toBeDefined()
+  const voor = f.modusAanroepen().length
+  await ui.press({ key: 'or-model-2' } as any)
+  await (ui as any).input({ key: 'or-zoek', text: 'gpt-5-mini' } as any)
+  await ui.press({ key: 'or-kies-0' } as any)
+  await f.clock.settle()
+  expect(f.modusAanroepen().length).toBe(voor)
+  await ui.unmount()
+})
+
+test('zonder gekozen Model 1 start de sessie zonder poort-aanroep', async ($, on) => {
+  const f = fake(on, { orKey: true })
+  await $.session.start(START)
+  await f.clock.settle()
+  expect(f.aanroepen.filter(a => a.args[1] === 'poort')).toEqual([])
 })
 
 test('model met te weinig context: waarschuwing in de lijst en bij kiezen', async ($, on) => {

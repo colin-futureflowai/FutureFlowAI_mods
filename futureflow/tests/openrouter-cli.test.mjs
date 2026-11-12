@@ -72,7 +72,17 @@ beforeEach(async () => {
   })
   await new Promise(r => server.listen(0, '127.0.0.1', r))
   url = `http://127.0.0.1:${server.address().port}`
+  // Startcheck: de modellen uit deze tests hebben een goede cache-meting, behalve waar een test dat anders zet.
+  gemeten(Object.fromEntries(GEMETEN.map(id => [id, 'goed'])))
 })
+
+const GEMETEN = ['a/b', 'a/h', 'a/s', 'a/so', 'anthropic/claude-opus-4.5', 'anthropic/claude-sonnet-4.5', 'openai/gpt-5', 'openai/gpt-5-mini', 'x/fable', 'x/vijf']
+const meting = (oordeel, gemeten = 1000) => ({ oordeel, aandeel: oordeel === 'zwak' ? 20 : 80, raak: oordeel === 'zwak' ? 0 : 5, van: 5, gemeten })
+// Schrijft het metingenbestand van de CLI: { id: 'goed' | 'wisselend' | 'zwak' }.
+function gemeten(per) {
+  fs.mkdirSync(ordir, { recursive: true })
+  fs.writeFileSync(path.join(ordir, 'cache.json'), JSON.stringify(Object.fromEntries(Object.entries(per).map(([id, o]) => [id, meting(o)]))))
+}
 
 afterEach(() => new Promise(r => server.close(r)))
 
@@ -186,6 +196,76 @@ test('shim start claude met --settings en het eigen bestand; zonder bestand een 
   const r2 = spawnSync(shim, [], { env, encoding: 'utf8' })
   assert.equal(r2.status, 1)
   assert.match(r2.stderr, /Gebruik nu/)
+})
+
+test('startcheck: een ongemeten of zwak model wordt niet klaargezet (exit 7, niets geschreven)', async () => {
+  await cli(['openrouter', 'zet-key'], ORKEY)
+  // Ongemeten: geen meting en niet in de vaste lijst.
+  const r = await cli(['modus', 'openrouter', '--m1', 'openai/gpt-5', '--m4', 'nieuw/model'])
+  assert.equal(r.status, 7)
+  assert.match(r.stderr, /nieuw\/model is nog niet gemeten/)
+  assert.doesNotMatch(r.stderr, /openai\/gpt-5 /)
+  // Zwak uit de vaste lijst (qwen), en zwak gemeten; [1m] telt als hetzelfde model.
+  const q = await cli(['modus', 'openrouter', '--m1', 'qwen/x[1m]'])
+  assert.equal(q.status, 7)
+  assert.match(q.stderr, /qwen\/x cachet niet in een agent-lus/)
+  gemeten({ 'openai/gpt-5': 'zwak' })
+  assert.equal((await cli(['modus', 'openrouter', '--m1', 'openai/gpt-5[1m]'])).status, 7)
+  assert.equal(fs.existsSync(path.join(ordir, 'settings.json')), false)
+  assert.equal(fs.existsSync(path.join(ordir, 'poort')), false)
+  assert.equal(fs.existsSync(shim), false)
+  // Wisselend mag wel; een eigen goede meting gaat voor de vaste lijst.
+  gemeten({ 'openai/gpt-5': 'wisselend', 'qwen/x': 'goed' })
+  assert.equal((await cli(['modus', 'openrouter', '--m1', 'openai/gpt-5', '--m5', 'qwen/x'])).status, 0)
+  assert.equal(fs.readFileSync(path.join(ordir, 'poort'), 'utf8'), 'ok\n')
+})
+
+test('startcheck: de shim start alleen met poort ok; een latere zwakke meting houdt de start tegen', async () => {
+  await cli(['openrouter', 'zet-key'], ORKEY)
+  await cli(['modus', 'openrouter', ...MODEL])
+  const nepBin = fs.mkdtempSync(path.join(os.tmpdir(), 'or-claude-'))
+  fs.writeFileSync(path.join(nepBin, 'claude'), '#!/bin/sh\necho gestart\n', { mode: 0o755 })
+  const start = () => spawnSync(shim, [], { env: { ...process.env, PATH: `${nepBin}:/usr/bin:/bin` }, encoding: 'utf8' })
+  assert.equal(start().stdout, 'gestart\n')
+  // De mod geeft een nieuwere, zwakke meting door: poort dicht, shim weigert en noemt het model.
+  const p = await cli(['openrouter', 'poort'], JSON.stringify({ 'openai/gpt-5-mini': meting('zwak', 2000), 'openai/gpt-5': meting('zwak', 1) }))
+  assert.equal(p.status, 0, p.stderr)
+  assert.deepEqual(json(p), { ok: false, redenen: [{ id: 'openai/gpt-5-mini', reden: 'zwak' }], shim: true })
+  const r = start()
+  assert.equal(r.status, 1)
+  assert.equal(r.stdout, '')
+  assert.match(r.stderr, /niet gestart/)
+  assert.match(r.stderr, /openai\/gpt-5-mini cachet niet in een agent-lus/)
+  // Opnieuw gemeten en goed: weer open.
+  assert.equal(json(await cli(['openrouter', 'poort'], JSON.stringify({ 'openai/gpt-5-mini': meting('goed', 3000) }))).ok, true)
+  assert.equal(start().stdout, 'gestart\n')
+  // Geen of een kapot poortbestand = niet starten.
+  fs.writeFileSync(path.join(ordir, 'poort'), 'misschien\n')
+  assert.equal(start().status, 1)
+  fs.rmSync(path.join(ordir, 'poort'))
+  assert.equal(start().status, 1)
+  // Zonder stdin rekent poort opnieuw met wat er staat; kapotte invoer = exit 1.
+  assert.equal(json(await cli(['openrouter', 'poort'])).ok, true)
+  assert.equal(start().stdout, 'gestart\n')
+  assert.equal((await cli(['openrouter', 'poort'], '{kapot')).status, 1)
+})
+
+test('startcheck: poort zonder settings-bestand bewaart alleen de metingen; een oude shim krijgt de check', async () => {
+  const p = json(await cli(['openrouter', 'poort'], JSON.stringify({ 'nieuw/model': meting('goed', 5), onzin: { oordeel: 'laat' } })))
+  assert.deepEqual(p, { ok: null, redenen: [], shim: false })
+  assert.equal(JSON.parse(fs.readFileSync(path.join(ordir, 'cache.json'), 'utf8'))['nieuw/model'].oordeel, 'goed')
+  assert.equal(fs.existsSync(shim), false)
+  // Een settings-bestand en shim van vóór 0.15 (zonder check): poort herschrijft de shim en schrijft de poort.
+  fs.writeFileSync(path.join(ordir, 'settings.json'), JSON.stringify({ apiKeyHelper: OR_HELPER, env: { ANTHROPIC_BASE_URL: 'https://openrouter.ai/api', ANTHROPIC_MODEL: 'oud/model', ANTHROPIC_DEFAULT_HAIKU_MODEL: 'nieuw/model[1m]' } }))
+  fs.mkdirSync(path.dirname(shim), { recursive: true })
+  fs.writeFileSync(shim, '#!/bin/sh\n# futureflow: claude-or\nexec claude "$@"\n', { mode: 0o755 })
+  assert.deepEqual(json(await cli(['openrouter', 'poort'])), { ok: false, redenen: [{ id: 'oud/model', reden: 'ongemeten' }], shim: true })
+  assert.match(fs.readFileSync(shim, 'utf8'), /poort/)
+  assert.equal(fs.readFileSync(path.join(ordir, 'poort'), 'utf8'), 'geweigerd\noud/model is nog niet gemeten\n')
+  // Een claude-or van iemand anders blijft staan.
+  fs.writeFileSync(shim, '#!/bin/sh\necho eigen\n', { mode: 0o755 })
+  assert.equal(json(await cli(['openrouter', 'poort'])).shim, false)
+  assert.equal(fs.readFileSync(shim, 'utf8'), '#!/bin/sh\necho eigen\n')
 })
 
 test('een claude-or die niet van futureflow is: exit 3 en blijft staan', async () => {
@@ -342,10 +422,15 @@ test('cachetest: zes aanvragen met één sessie-id; oordeel uit de usage; uitvoe
   assert.ok(verzoeken.every(v => v.headers.authorization === `Bearer ${ORKEY}`))
   assert.deepEqual(verzoeken.map(v => JSON.parse(v.body).messages.length), [3, 5, 7, 9, 11, 13])
   assert.equal(JSON.parse(verzoeken[2].body).model, 'qwen/x')
+  // De uitslag telt meteen voor de startcheck: bewaard op het id zonder [1m].
+  const bewaard = () => JSON.parse(fs.readFileSync(path.join(ordir, 'cache.json'), 'utf8'))['qwen/x']
+  assert.deepEqual(bewaard(), { oordeel: 'zwak', aandeel: 25, raak: 0, van: 5, gemeten: d.gemeten })
   // Goed cachend model.
   verzoeken.length = 0
   antwoord.messages = [200, { usage: { input_tokens: 3000, cache_read_input_tokens: 9000 } }]
   assert.equal(json(await draai()).oordeel, 'goed')
+  assert.equal(bewaard().oordeel, 'goed')
+  assert.equal((await cli(['modus', 'openrouter', '--m1', 'qwen/x[1m]'])).status, 0)
   // Fout van de server met de key erin: stopt na één aanvraag, key gaat er niet uit.
   verzoeken.length = 0
   antwoord.messages = [403, { error: { message: `Key limit exceeded for ${ORKEY}` } }]
@@ -353,6 +438,8 @@ test('cachetest: zes aanvragen met één sessie-id; oordeel uit de usage; uitvoe
   assert.deepEqual(json(f), { ok: false, model: 'qwen/x', status: 403, fout: 'Key limit exceeded for …' })
   assert.equal(verzoeken.length, 1)
   assert.ok(!f.stdout.includes(ORKEY))
+  // Een mislukte meting verandert de bewaarde uitslag niet.
+  assert.equal(bewaard().oordeel, 'goed')
 })
 
 test('modus openrouter met --m1 … --m5; oude flags als alias; status meldt orM1-orM5; zonder --m1 of ongeldig = exit 1', async () => {

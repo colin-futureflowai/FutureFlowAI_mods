@@ -150,6 +150,46 @@ export function cacheStand(m, metingen) {
   return cacheZwak(m) ? { oordeel: 'zwak', tekst: CACHE_ZWAK_TEKST } : null
 }
 
+// ---- Startcheck (0.15.0): claude-or start alleen met modellen die gemeten zijn en cachen ----
+
+const zonder1m = x => String(x ?? '').replace(/\[1m\]$/, '')
+
+// Alle modellen die een claude-or-sessie kan gebruiken, uit het eigen settings-bestand (zonder [1m], elk één keer).
+const POORT_SLEUTELS = ['ANTHROPIC_MODEL', 'ANTHROPIC_DEFAULT_OPUS_MODEL', 'ANTHROPIC_DEFAULT_SONNET_MODEL', 'ANTHROPIC_DEFAULT_FABLE_MODEL', 'ANTHROPIC_DEFAULT_HAIKU_MODEL', 'CLAUDE_CODE_SUBAGENT_MODEL', 'ANTHROPIC_CUSTOM_MODEL_OPTION']
+export function instellingModellen(d) {
+  const env = d && typeof d === 'object' && d.env && typeof d.env === 'object' ? d.env : {}
+  return [...new Set(POORT_SLEUTELS.map(k => env[k]).filter(v => geldigModel(v)).map(zonder1m))]
+}
+
+// Mag claude-or starten met deze modellen? Elk model heeft een meting nodig (goed of wisselend);
+// `zwak` (gemeten, of zonder meting in de vaste lijst) en `ongemeten` houden de start tegen.
+export function poortOordeel(ids, metingen) {
+  const redenen = []
+  for (const id of [...new Set((Array.isArray(ids) ? ids : []).filter(v => typeof v === 'string' && v).map(zonder1m))]) {
+    const s = cacheStand({ id }, metingen)
+    if (!s) redenen.push({ id, reden: 'ongemeten' })
+    else if (s.oordeel === 'zwak') redenen.push({ id, reden: 'zwak' })
+  }
+  return { ok: redenen.length === 0, redenen }
+}
+
+export const POORT_REDEN = {
+  zwak: 'cachet niet in een agent-lus',
+  ongemeten: 'is nog niet gemeten',
+}
+
+// Eén regel per geweigerd model.
+export function poortTekst(redenen) {
+  return (Array.isArray(redenen) ? redenen : []).map(r => `${r.id} ${POORT_REDEN[r.reden] ?? r.reden}`).join('; ')
+}
+
+// Inhoud van het poortbestand naast het settings-bestand: eerste regel `ok`, of `geweigerd` met de reden
+// eronder. De shim start alleen bij `ok`; geen of een kapot bestand = niet starten.
+export const POORT_OK = 'ok'
+export function poortBestand(oordeel) {
+  return oordeel?.ok === true ? `${POORT_OK}\n` : `geweigerd\n${poortTekst(oordeel?.redenen)}\n`
+}
+
 // Het start-commando en de shim in ~/.local/bin. De merkregel zegt dat het bestand van futureflow is:
 // alleen dan overschrijft futureflow het.
 export const START = 'claude-or'
@@ -158,8 +198,9 @@ export const SHIM_MERK = '# futureflow: claude-or'
 export const OR_MARKER = 'FUTUREFLOW_OPENROUTER'
 
 // Inhoud van de shim: claude met het eigen settings-bestand, alleen voor die sessie.
-export function shimTekst(settingsPad) {
-  const pad = String(settingsPad).replace(/'/g, `'\\''`)
+export function shimTekst(settingsPad, poortPad = String(settingsPad).replace(/[^/]*$/, 'poort')) {
+  const q = s => String(s).replace(/'/g, `'\\''`)
+  const pad = q(settingsPad)
   return [
     '#!/bin/sh',
     SHIM_MERK,
@@ -167,6 +208,16 @@ export function shimTekst(settingsPad) {
     `S='${pad}'`,
     'if [ ! -f "$S" ]; then',
     `  echo "${START}: nog geen OpenRouter-instellingen; kies modellen in /futureflow en klik Gebruik nu." >&2`,
+    '  exit 1',
+    'fi',
+    '# Startcheck: alleen starten als futureflow elk gekozen model heeft gemeten en het cachet (eerste regel "ok").',
+    `P='${q(poortPad)}'`,
+    'POORT=',
+    '[ -f "$P" ] && IFS= read -r POORT < "$P"',
+    `if [ "$POORT" != "${POORT_OK}" ]; then`,
+    `  echo "${START}: niet gestart. Een gekozen model cachet niet of is nog niet gemeten; zonder cache is het duur in Claude Code." >&2`,
+    '  [ -f "$P" ] && /usr/bin/tail -n +2 "$P" >&2',
+    '  echo "Open /futureflow, tab 2 Wisselen: kies een ander model of klik Meet cache, en daarna Gebruik nu." >&2',
     '  exit 1',
     'fi',
     '# Marker: zo ziet futureflow in de sessie dat die via OpenRouter loopt (het env-blok van --settings komt niet in de procesomgeving).',
