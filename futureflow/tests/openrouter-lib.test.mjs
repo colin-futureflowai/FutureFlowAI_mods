@@ -4,7 +4,10 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { spawnSync } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
+import http from 'node:http'
+import net from 'node:net'
+import { fileURLToPath } from 'node:url'
 
 import { beslis, eersteStap, HELPER, modusVan, OR_HELPER, toestandVan, WACHTTIJD } from '../lib/api.mjs'
 import { ketting } from '../lib/accounts.mjs'
@@ -62,7 +65,7 @@ test('pasToe en haalWeg: heen en terug geeft hetzelfde object terug', () => {
     for (const [k, v] of Object.entries(gewenst.env)) assert.equal(r.data.env[k], v)
     const terug = haalWeg(r.data, r.marker)
     assert.equal(JSON.stringify(terug), JSON.stringify(begin))
-    assert.equal(eigenBasis(r.marker), 'https://openrouter.ai/api')
+    assert.equal(eigenBasis(r.marker), 'http://127.0.0.1:20817')
   }
 })
 
@@ -201,7 +204,7 @@ test('shimTekst: merkregel, pad tussen enkele aanhalingstekens, exec claude --se
   assert.ok(r.indexOf('export ANTHROPIC_CUSTOM_HEADERS') < r.findIndex(x => x.startsWith('exec claude')))
 })
 
-test('shimTekst: zet x-session-id en laat bestaande eigen headers staan', () => {
+test('shimTekst: zet x-session-id en laat bestaande eigen headers staan', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ff-shim-'))
   const nep = path.join(dir, 'claude')
   fs.writeFileSync(nep, '#!/bin/sh\nprintf "%s" "$ANTHROPIC_CUSTOM_HEADERS"\n', { mode: 0o755 })
@@ -209,13 +212,152 @@ test('shimTekst: zet x-session-id en laat bestaande eigen headers staan', () => 
   fs.writeFileSync(inst, '{}')
   fs.writeFileSync(path.join(dir, 'poort'), 'ok\n')
   const shim = path.join(dir, 'claude-or')
-  fs.writeFileSync(shim, shimTekst(inst), { mode: 0o755 })
-  const draai = env => spawnSync('/bin/sh', [shim], { env: { PATH: `${dir}:/usr/bin:/bin`, ...env }, encoding: 'utf8' }).stdout
-  const een = draai({})
-  assert.match(een, /^x-session-id: [0-9A-Za-z-]{8,}$/)
-  assert.notEqual(draai({}), een)
-  assert.match(draai({ ANTHROPIC_CUSTOM_HEADERS: 'x-eigen: 1' }), /^x-eigen: 1\nx-session-id: [0-9A-Za-z-]{8,}$/)
-  fs.rmSync(dir, { recursive: true, force: true })
+  // Een proxy die al draait (nep, op een vrije poort): de shim start dan niets.
+  const px = await nepProxy()
+  try {
+    fs.writeFileSync(shim, shimTekst(inst, undefined, { script: path.join(dir, 'geen.mjs'), poort: px.poort }), { mode: 0o755 })
+    // Asynchroon: de nep-proxy draait in dit proces.
+    const draai = async env => (await spawnAsync('/bin/sh', [shim], { PATH: `${dir}:/usr/bin:/bin`, ...env })).stdout
+    const een = await draai({})
+    assert.match(een, /^x-session-id: [0-9A-Za-z-]{8,}$/)
+    assert.notEqual(await draai({}), een)
+    assert.match(await draai({ ANTHROPIC_CUSTOM_HEADERS: 'x-eigen: 1' }), /^x-eigen: 1\nx-session-id: [0-9A-Za-z-]{8,}$/)
+  } finally {
+    await px.sluit()
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+// ---- proxy in de shim (0.16.0) ----
+
+const PROXY = fileURLToPath(new URL('../bridge/or-proxy.mjs', import.meta.url))
+
+function vrijePoort() {
+  return new Promise((resolve, reject) => {
+    const s = net.createServer()
+    s.on('error', reject)
+    s.listen(0, '127.0.0.1', () => {
+      const { port } = s.address()
+      s.close(() => resolve(port))
+    })
+  })
+}
+
+// Een http-server op een vrije poort die op /_ff/stand `antwoord` geeft.
+async function nepProxy(antwoord = JSON.stringify({ versie: 'x', sinds: 1, poort: 0, sessies: {} })) {
+  const server = http.createServer((req, res) => res.end(antwoord))
+  await new Promise(r => server.listen(0, '127.0.0.1', r))
+  return { poort: server.address().port, sluit: () => new Promise(r => { server.closeAllConnections(); server.close(r) }) }
+}
+
+const stand = async poort => {
+  try {
+    const r = await fetch(`http://127.0.0.1:${poort}/_ff/stand`, { signal: AbortSignal.timeout(1000) })
+    return r.ok ? await r.json() : undefined
+  } catch {
+    return undefined
+  }
+}
+
+// Map met settings, poort ok en een nep-claude die argumenten en FUTUREFLOW_OPENROUTER wegschrijft.
+function shimMap(proxy) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ff-shim-'))
+  const inst = path.join(dir, 'settings.json')
+  fs.writeFileSync(inst, '{}')
+  fs.writeFileSync(path.join(dir, 'poort'), 'ok\n')
+  const uit = path.join(dir, 'claude.uit')
+  fs.writeFileSync(path.join(dir, 'claude'), `#!/bin/sh\nprintf '%s\\n' "$FUTUREFLOW_OPENROUTER" "$@" > '${uit}'\n`, { mode: 0o755 })
+  const shim = path.join(dir, 'claude-or')
+  fs.writeFileSync(shim, shimTekst(inst, undefined, proxy), { mode: 0o755 })
+  const draai = () => spawnAsync('/bin/sh', [shim, '-p', 'hoi'], { PATH: `${dir}:${path.dirname(process.execPath)}:/usr/bin:/bin` })
+  const gestart = () => (fs.existsSync(uit) ? fs.readFileSync(uit, 'utf8').trim().split('\n') : undefined)
+  return { dir, inst, draai, gestart }
+}
+
+// Asynchroon: de nep-servers draaien in dit proces.
+function spawnAsync(cmd, args, env) {
+  return new Promise(resolve => {
+    const p = spawn(cmd, args, { env, stdio: ['ignore', 'pipe', 'pipe'] })
+    let stdout = ''
+    let stderr = ''
+    p.stdout.on('data', c => { stdout += c })
+    p.stderr.on('data', c => { stderr += c })
+    p.on('close', status => resolve({ status, stdout, stderr }))
+  })
+}
+
+test('shimTekst: proxy-script, levenscheck en exit 1 als de proxy niet start; standaardpad naast settings', () => {
+  const t = shimTekst('/a/settings.json', undefined, { script: '/x/or-proxy.mjs', poort: 4321 })
+  assert.ok(t.includes("PX='/x/or-proxy.mjs'"))
+  assert.ok(t.includes('PP=4321'))
+  assert.ok(t.includes('/_ff/stand'))
+  assert.match(t, /de proxy van futureflow start niet \(poort \$PP\)[^\n]*\n\s*exit 1/)
+  const r = t.split('\n')
+  assert.ok(r.findIndex(x => x.startsWith('if ! leeft')) > r.findIndex(x => x.startsWith('if [ "$POORT" != "ok" ]')))
+  assert.ok(r.findIndex(x => x.startsWith('if ! leeft')) < r.findIndex(x => x.startsWith('exec claude')))
+  const s = shimTekst('/a/settings.json')
+  assert.ok(s.includes("PX='/a/proxy/bridge/or-proxy.mjs'"))
+  assert.ok(s.includes('PP=20817'))
+})
+
+test('shim (a): proxy-script ontbreekt en geen proxy: exit 1, claude niet gestart', async () => {
+  const poort = await vrijePoort()
+  const m = shimMap({ script: '/bestaat/niet/or-proxy.mjs', poort })
+  const r = await m.draai()
+  assert.equal(r.status, 1)
+  assert.equal(m.gestart(), undefined)
+  assert.match(r.stderr, /proxy van futureflow start niet .*Gebruik nu/)
+  fs.rmSync(m.dir, { recursive: true, force: true })
+})
+
+test('shim (b): start de echte proxy op een vrije poort, daarna claude', async () => {
+  const poort = await vrijePoort()
+  const m = shimMap({ script: PROXY, poort })
+  try {
+    const r = await m.draai()
+    assert.equal(r.status, 0, r.stderr)
+    assert.deepEqual(m.gestart(), ['1', '--settings', m.inst, '-p', 'hoi'])
+    const s = await stand(poort)
+    assert.equal(s?.poort, poort)
+  } finally {
+    await fetch(`http://127.0.0.1:${poort}/_ff/stop`, { method: 'POST' }).catch(() => {})
+    for (let i = 0; i < 40 && (await stand(poort)); i++) await new Promise(r => setTimeout(r, 50))
+    fs.rmSync(m.dir, { recursive: true, force: true })
+  }
+  assert.equal(await stand(poort), undefined)
+})
+
+test('shim (c): proxy draait al: geen nieuwe start, claude start', async () => {
+  const px = await nepProxy()
+  // Script bestaat niet: zou de shim willen starten, dan faalde hij.
+  const m = shimMap({ script: '/bestaat/niet/or-proxy.mjs', poort: px.poort })
+  try {
+    const r = await m.draai()
+    assert.equal(r.status, 0, r.stderr)
+    assert.equal(m.gestart()[0], '1')
+  } finally {
+    await px.sluit()
+    fs.rmSync(m.dir, { recursive: true, force: true })
+  }
+})
+
+test('shim (d): poort bezet door iets anders: exit 1, claude niet gestart', async () => {
+  const px = await nepProxy('hallo')
+  const m = shimMap({ script: PROXY, poort: px.poort })
+  try {
+    const r = await m.draai()
+    assert.equal(r.status, 1)
+    assert.equal(m.gestart(), undefined)
+    assert.match(r.stderr, new RegExp(`poort ${px.poort}`))
+  } finally {
+    await px.sluit()
+    fs.rmSync(m.dir, { recursive: true, force: true })
+  }
+})
+
+test('orInstellingen: base-URL naar de proxy', () => {
+  assert.equal(orInstellingen({ m1: 'a/b' }).env.ANTHROPIC_BASE_URL, 'http://127.0.0.1:20817')
+  assert.equal(orInstellingen({ m1: 'a/b' }, 4000).env.ANTHROPIC_BASE_URL, 'http://127.0.0.1:4000')
 })
 
 test('startcheck: elk model moet gemeten zijn en cachen; poortbestand en shim', () => {

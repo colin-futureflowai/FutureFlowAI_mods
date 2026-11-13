@@ -32,7 +32,7 @@ export function cacheRonde(usage: unknown): CacheRonde
 export function cacheOordeel(rondes: readonly CacheRonde[] | null | undefined): CacheOordeel | 'onbekend'
 export function cacheMetingen(ruw: unknown): Record<string, CacheMeting>
 export function cacheStand(m: { id?: string } | null | undefined, metingen: Record<string, CacheMeting> | null | undefined): { oordeel: CacheOordeel; tekst: string; aandeel?: number; raak?: number; van?: number; gemeten?: number } | null
-export function shimTekst(settingsPad: string, poortPad?: string): string
+export function shimTekst(settingsPad: string, poortPad?: string, proxy?: { script?: string; poort?: number }): string
 export type PoortReden = { id: string; reden: 'zwak' | 'ongemeten' }
 export type PoortOordeel = { ok: boolean; redenen: PoortReden[] }
 export function instellingModellen(d: unknown): string[]
@@ -49,7 +49,7 @@ export type OrKeuze = Partial<Record<Slot, string>>
 export const SLOTS: readonly Slot[]
 export const SLOT_UITLEG: Readonly<Record<Slot, string>>
 export function keuzeVan(ruw: unknown): OrKeuze
-export function orInstellingen(k: OrKeuze & { m1: string }): OrInstellingen
+export function orInstellingen(k: OrKeuze & { m1: string }, poort?: number): OrInstellingen
 export function pasToe(data: unknown, gewenst: OrInstellingen): { data: Record<string, any>; marker: OrMarker; vreemd?: undefined } | { vreemd: string; data?: undefined; marker?: undefined }
 export function haalWeg(data: unknown, marker: unknown): Record<string, any>
 export function eigenBasis(marker: unknown): string | undefined

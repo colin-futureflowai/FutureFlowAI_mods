@@ -81,6 +81,8 @@ export type ApiStatus = {
   orM3?: string
   orM4?: string
   orM5?: string
+  /** Modellen uit het settings-bestand die cache.json `zwak` noemt (o.a. gestopt door de proxy, 0.17.0). */
+  orGestopt?: string[]
   /** claude-or staat klaar: eigen settings-bestand met modellen (sinds 0.9.0). */
   orKlaar?: boolean
   /** ~/.local/bin/claude-or bestaat en is van futureflow. */
@@ -89,6 +91,10 @@ export type ApiStatus = {
   orOpPad?: boolean
   /** Oude OpenRouter-regels (futureflow < 0.9) in ~/.claude/settings.json. */
   oudeOr?: boolean
+  /** claude-or loopt via de lokale proxy van futureflow (0.16.0). */
+  orProxy?: boolean
+  /** Adres van het logboek van de proxy (http://127.0.0.1:<poort>/), alleen met orProxy. */
+  orLogboek?: string
   fout?: string
 }
 

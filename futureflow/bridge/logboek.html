@@ -1,0 +1,623 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OpenRouter-proxy</title>
+<style>
+  :root {
+    --bg: #f7f7f5; --vlak: #ffffff; --tekst: #1d1d1f; --dim: #6b6b70; --lijn: #e3e3e0;
+    --accent: #2f5bd3; --accent-tekst: #ffffff; --goed: #1f7a4a; --goed-bg: #e8f5ee; --mis: #b42318; --mis-bg: #fdecea;
+    --let: #8a5a00; --let-bg: #fff4dc; --kop-bg: #f0f0ec;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #141416; --vlak: #1c1c1f; --tekst: #ececee; --dim: #9a9aa2; --lijn: #2c2c31;
+      --accent: #7f9cf5; --accent-tekst: #10131c; --goed: #4ccf8a; --goed-bg: #16291f; --mis: #ff7b6e; --mis-bg: #3a1f1d;
+      --let: #f1c26b; --let-bg: #33290f; --kop-bg: #232327;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--tekst); font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+  main { max-width: 1200px; margin: 0 auto; padding: 20px 16px 40px; }
+  header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; margin-bottom: 12px; }
+  h1 { font-size: 18px; margin: 0; font-weight: 600; }
+  h2 { font-size: 14px; margin: 24px 0 8px; font-weight: 600; }
+  .dim { color: var(--dim); }
+  .fout-balk, .rood { color: var(--mis); }
+  .groen { color: var(--goed); }
+  .vlak { background: var(--vlak); border: 1px solid var(--lijn); border-radius: 8px; overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  th, td { padding: 6px 10px; text-align: left; border-bottom: 1px solid var(--lijn); white-space: nowrap; }
+  th { background: var(--kop-bg); font-weight: 600; font-size: 12px; color: var(--dim); position: sticky; top: 0; }
+  td.getal, th.getal { text-align: right; }
+  tr:last-child td { border-bottom: 0; }
+  tr.slecht td { background: var(--mis-bg); }
+  .raak { color: var(--goed); }
+  .mis { color: var(--mis); font-weight: 600; }
+  .filters { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; margin: 8px 0; }
+  select, input[type="search"] { font: inherit; color: var(--tekst); background: var(--vlak); border: 1px solid var(--lijn); border-radius: 6px; padding: 4px 8px; max-width: 100%; }
+  select { max-width: 260px; }
+  label { display: inline-flex; gap: 6px; align-items: center; }
+  .leeg { padding: 16px; color: var(--dim); }
+  button { font: inherit; border-radius: 6px; padding: 4px 12px; border: 1px solid var(--lijn); background: var(--vlak); color: var(--tekst); cursor: pointer; }
+  button.hoofd { background: var(--accent); border-color: var(--accent); color: var(--accent-tekst); }
+  button:disabled { opacity: .5; cursor: default; }
+  button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  /* tabs */
+  .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--lijn); margin-bottom: 16px; }
+  .tabs button { border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none; padding: 8px 12px; color: var(--dim); }
+  .tabs button[aria-selected="true"] { color: var(--tekst); border-bottom-color: var(--accent); font-weight: 600; }
+  /* modellen */
+  .regel { margin: 0 0 12px; }
+  .label { display: inline-block; font-size: 12px; padding: 1px 8px; border-radius: 10px; background: var(--kop-bg); color: var(--dim); }
+  .label.goed { background: var(--goed-bg); color: var(--goed); }
+  .label.wisselend { background: var(--let-bg); color: var(--let); }
+  .label.zwak { background: var(--mis-bg); color: var(--mis); }
+  .rijen { display: grid; gap: 8px; }
+  .rij { background: var(--vlak); border: 1px solid var(--lijn); border-radius: 8px; padding: 10px 12px; display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; }
+  .rij .naam { font-weight: 600; min-width: 72px; }
+  .rij .id { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; word-break: break-all; }
+  .rij .info { flex: 1 1 260px; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  .rij .knoppen { display: flex; gap: 6px; }
+  .rij .gestopt { flex-basis: 100%; color: var(--mis); display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .paneel { margin-top: 16px; background: var(--vlak); border: 1px solid var(--lijn); border-radius: 8px; padding: 12px; }
+  .paneel-kop { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 8px; }
+  .paneel-kop h2 { margin: 0; flex: 1 1 auto; }
+  .paneel-kop input { flex: 1 1 220px; }
+  .lijst { display: grid; gap: 0; }
+  .model { display: flex; flex-wrap: wrap; gap: 4px 16px; align-items: center; padding: 8px 4px; border-top: 1px solid var(--lijn); }
+  .model .wie { flex: 1 1 260px; min-width: 0; }
+  .model .wie .id { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: var(--dim); word-break: break-all; }
+  .model .cijfers { display: flex; flex-wrap: wrap; gap: 4px 12px; font-variant-numeric: tabular-nums; }
+  .waarschuwing { color: var(--mis); font-size: 12px; }
+  .melding { padding: 8px 12px; border-radius: 6px; margin: 0 0 12px; }
+  .melding.fout { background: var(--mis-bg); color: var(--mis); }
+  .melding.ok { background: var(--goed-bg); color: var(--goed); }
+  .melding.info { background: var(--kop-bg); }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>FutureFlowAI · OpenRouter-proxy</h1>
+    <span class="dim" id="kop-info"></span>
+    <span class="fout-balk" id="verbinding"></span>
+  </header>
+
+  <nav class="tabs" role="tablist">
+    <button type="button" role="tab" id="tab-knop-modellen" aria-selected="true" aria-controls="tab-modellen">Modellen</button>
+    <button type="button" role="tab" id="tab-knop-logboek" aria-selected="false" aria-controls="tab-logboek">Logboek</button>
+  </nav>
+
+  <!-- Modellen: Model 1-5 kiezen, meten en wisselen; alles via de CLI achter /_ff/* -->
+  <section id="tab-modellen" role="tabpanel" aria-labelledby="tab-knop-modellen">
+    <p class="regel" id="startcheck"></p>
+    <p class="melding info" id="modellen-melding" hidden></p>
+    <p class="melding" id="actie-melding" hidden></p>
+    <p class="regel dim" id="meet-stand" hidden></p>
+    <div class="rijen" id="rijen"></div>
+    <p class="dim">Een wissel geldt meteen voor lopende claude-or-sessies. De eerste beurt daarna is zonder cache.</p>
+
+    <div class="paneel" id="kies-paneel" hidden>
+      <div class="paneel-kop">
+        <h2 id="kies-kop">Kies een model</h2>
+        <input type="search" id="zoek" placeholder="Zoek op naam of id" aria-label="Zoek op naam of id" autocomplete="off">
+        <button type="button" id="ververs-lijst">Ververs lijst</button>
+        <button type="button" id="sluit-paneel">Sluit</button>
+      </div>
+      <p class="dim" id="lijst-info"></p>
+      <div class="lijst" id="lijst"></div>
+    </div>
+  </section>
+
+  <section id="tab-logboek" role="tabpanel" aria-labelledby="tab-knop-logboek" hidden>
+    <h2>Per sessie en model</h2>
+    <div class="vlak">
+      <table>
+        <thead><tr>
+          <th>Sessie</th><th>Model</th><th class="getal">Aanvragen</th><th class="getal">Raak</th><th class="getal">Mis</th>
+          <th class="getal">% uit cache</th><th>Aanbieder</th><th>Vaste aanbieder</th><th>Laatste aanvraag</th>
+        </tr></thead>
+        <tbody id="samenvatting"></tbody>
+      </table>
+      <div class="leeg" id="samenvatting-leeg">Nog geen aanvragen. Start een sessie met claude-or.</div>
+    </div>
+
+    <h2>Aanvragen</h2>
+    <div class="filters">
+      <label>Sessie <select id="f-sessie"><option value="">alle</option></select></label>
+      <label>Model <select id="f-model"><option value="">alle</option></select></label>
+      <label><input type="checkbox" id="f-slecht"> alleen missers en fouten</label>
+    </div>
+    <div class="vlak">
+      <table>
+        <thead><tr>
+          <th>Tijd</th><th>Sessie</th><th>Model</th><th>Aanbieder</th><th class="getal">Status</th><th class="getal">In</th>
+          <th class="getal">Uit</th><th class="getal">% uit cache</th><th>Telling</th><th>Actie</th><th class="getal">Duur</th><th>Fout</th>
+        </tr></thead>
+        <tbody id="regels"></tbody>
+      </table>
+      <div class="leeg" id="regels-leeg">Nog geen aanvragen. Start een sessie met claude-or.</div>
+    </div>
+  </section>
+</main>
+<script>
+'use strict'
+// Alle waarden gaan via textContent in de pagina; nooit als HTML. De pagina schrijft zelf niets: kiezen en
+// meten gaan via POST /_ff/kies en /_ff/meet, en de proxy roept daarvoor de CLI aan.
+const MAX = 2000
+const LIJST_MAX = 200
+const SLOTS = ['m1', 'm2', 'm3', 'm4', 'm5']
+const REDEN = { zwak: 'cachet niet in een agent-lus', ongemeten: 'is nog niet gemeten' }
+let regels = []
+let nieuwste = 0
+let stand = null
+let inst = null
+let modellen = null
+let kiesVoor = null
+let bezig = false
+let eersteLog = true
+let meetTimer = null
+
+const $ = id => document.getElementById(id)
+const tijd = t => new Date(t).toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+const datumTijd = t => new Date(t).toLocaleString('nl-NL', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', second: '2-digit' })
+const getal = n => (typeof n === 'number' ? n.toLocaleString('nl-NL') : '')
+const duur = ms => (typeof ms !== 'number' ? '' : ms >= 1000 ? `${(ms / 1000).toLocaleString('nl-NL', { maximumFractionDigits: 1 })} s` : `${ms} ms`)
+const kort = s => String(s ?? '').slice(0, 8)
+const zonder1m = id => String(id ?? '').replace(/\[1m\]$/, '')
+const contextTekst = n => (typeof n !== 'number' || n <= 0 ? '?' : n >= 1_000_000 ? `${(Math.round(n / 100_000) / 10).toLocaleString('nl-NL')}M` : `${Math.round(n / 1000)}k`)
+const prijs = n => (typeof n === 'number' ? `$${n.toLocaleString('nl-NL', { maximumFractionDigits: n >= 1 ? 2 : 3 })}` : '?')
+
+// Per kijker onthouden welke tab open stond; zonder opslag gewoon niet.
+function bewaard(sleutel) {
+  try {
+    return localStorage.getItem(sleutel)
+  } catch {
+    return null
+  }
+}
+function bewaar(sleutel, waarde) {
+  try {
+    localStorage.setItem(sleutel, waarde)
+  } catch {
+    // Geen opslag: niets.
+  }
+}
+
+function el(soort, tekst, klasse) {
+  const e = document.createElement(soort)
+  if (tekst !== undefined && tekst !== null) e.textContent = tekst
+  if (klasse) e.className = klasse
+  return e
+}
+
+function cel(rij, tekst, klasse) {
+  const td = el('td', tekst ?? '', klasse)
+  rij.appendChild(td)
+  return td
+}
+
+function leeg(e) {
+  while (e.firstChild) e.removeChild(e.firstChild)
+}
+
+function knop(tekst, actie, { hoofd = false, uit = false } = {}) {
+  const b = el('button', tekst, hoofd ? 'hoofd' : '')
+  b.type = 'button'
+  b.disabled = uit || bezig
+  b.addEventListener('click', actie)
+  return b
+}
+
+// ---- tabs ----
+
+function toonTab(naam, onthoud = true) {
+  for (const t of ['modellen', 'logboek']) {
+    $(`tab-${t}`).hidden = t !== naam
+    $(`tab-knop-${t}`).setAttribute('aria-selected', String(t === naam))
+  }
+  if (onthoud) bewaar('ff-proxy-tab', naam)
+  if (naam === 'modellen') laadInstellingen()
+}
+$('tab-knop-modellen').addEventListener('click', () => toonTab('modellen'))
+$('tab-knop-logboek').addEventListener('click', () => toonTab('logboek'))
+
+// ---- modellen ----
+
+async function vraagJson(pad, opties) {
+  const r = await fetch(pad, { cache: 'no-store', ...opties })
+  let d = null
+  try {
+    d = await r.json()
+  } catch {
+    d = null
+  }
+  return { status: r.status, d }
+}
+
+function post(pad, data) {
+  return vraagJson(pad, { method: 'POST', headers: { 'x-ff': '1', 'content-type': 'application/json' }, body: JSON.stringify(data) })
+}
+
+function melding(tekst, soort) {
+  const m = $('actie-melding')
+  m.hidden = !tekst
+  m.textContent = tekst ?? ''
+  m.className = `melding ${soort ?? 'info'}`
+}
+
+function metingLabel(id) {
+  const m = inst?.metingen?.[zonder1m(id)]
+  if (!m) return { tekst: 'niet gemeten', klasse: 'label' }
+  if (m.oordeel === 'zwak') return { tekst: 'zwak', klasse: 'label zwak' }
+  return { tekst: `${m.oordeel} ${m.raak}/${m.van}`, klasse: `label ${m.oordeel}` }
+}
+
+// Vaste aanbieder(s) uit de lopende sessies, anders de beste bekende (raak/mis uit aanbieders.json).
+function aanbiederTekst(id) {
+  const model = zonder1m(id)
+  const vast = new Set()
+  for (const perSessie of Object.values(stand?.vast ?? {})) for (const [m, a] of Object.entries(perSessie ?? {})) if (zonder1m(m) === model) vast.add(a)
+  const perAanbieder = inst?.aanbieders?.[model] ?? {}
+  const nu = Date.now()
+  const delen = []
+  let beste = null
+  for (const [naam, s] of Object.entries(perAanbieder)) {
+    if (s?.slechtTot > nu) continue
+    if (!(s?.raak > 0)) continue
+    const score = s.raak / (s.raak + (s.mis ?? 0))
+    if (!beste || score > beste.score) beste = { naam, score, s }
+  }
+  const telling = naam => {
+    const s = perAanbieder[naam]
+    return s ? ` (${s.raak ?? 0} raak, ${s.mis ?? 0} mis)` : ''
+  }
+  if (vast.size) delen.push(`vast: ${[...vast].map(a => a + telling(a)).join(', ')}`)
+  else if (beste) delen.push(`beste aanbieder: ${beste.naam}${telling(beste.naam)}`)
+  const slecht = Object.entries(perAanbieder).filter(([, s]) => s?.slechtTot > nu).map(([n]) => n)
+  if (slecht.length) delen.push(`24 u overgeslagen: ${slecht.join(', ')}`)
+  return delen.join(' · ')
+}
+
+function tekenModellen() {
+  const rijen = $('rijen')
+  leeg(rijen)
+  const sc = $('startcheck')
+  const mm = $('modellen-melding')
+  if (!inst) {
+    sc.textContent = 'Instellingen laden…'
+    sc.className = 'regel dim'
+    return
+  }
+  // Startcheck van claude-or (poortbestand).
+  if (inst.poort?.ok === true) {
+    sc.textContent = 'claude-or start met deze keuze'
+    sc.className = 'regel groen'
+  } else if (inst.poort?.ok === false) {
+    sc.textContent = `claude-or start niet: ${(inst.poort.redenen ?? []).map(r => `${r.id} ${REDEN[r.reden] ?? r.reden}`).join('; ')}`
+    sc.className = 'regel rood'
+  } else {
+    sc.textContent = 'Nog geen keuze voor claude-or.'
+    sc.className = 'regel dim'
+  }
+  let kanKiezen = true
+  if (!inst.cli) {
+    mm.textContent = 'Open /futureflow één keer in een sessie; daarna kun je hier kiezen.'
+    kanKiezen = false
+  } else if (!inst.heeftKey) {
+    mm.textContent = 'Bewaar eerst een OpenRouter-key in /futureflow, tab 2 Wisselen.'
+    kanKiezen = false
+  }
+  mm.hidden = kanKiezen
+  if (!kanKiezen) $('kies-paneel').hidden = true
+  const gestopt = new Set((inst.gestopt ?? []).map(zonder1m))
+  SLOTS.forEach((s, i) => {
+    const id = inst.rijen?.[s]
+    const rij = el('div', null, 'rij')
+    rij.appendChild(el('span', `Model ${i + 1}`, 'naam'))
+    const info = el('div', null, 'info')
+    const regel1 = el('div')
+    regel1.appendChild(el('span', id ?? (i === 0 ? '—' : i < 4 ? '— (gebruikt Model 1)' : '—'), id ? 'id' : 'dim'))
+    info.appendChild(regel1)
+    info.appendChild(el('span', inst.uitleg?.[s] ?? '', 'dim'))
+    if (id) {
+      const l = metingLabel(id)
+      const regel3 = el('div')
+      regel3.appendChild(el('span', l.tekst, l.klasse))
+      const a = aanbiederTekst(id)
+      if (a) regel3.appendChild(el('span', `  ${a}`, 'dim'))
+      info.appendChild(regel3)
+    }
+    rij.appendChild(info)
+    if (kanKiezen) {
+      const k = el('div', null, 'knoppen')
+      k.appendChild(knop('Kies', () => openPaneel(s, i)))
+      if (i > 0 && id) k.appendChild(knop('Leeg', () => kies(s, null, false)))
+      rij.appendChild(k)
+    }
+    if (id && gestopt.has(zonder1m(id))) {
+      const g = el('div', null, 'gestopt')
+      g.appendChild(el('span', 'gestopt: cachet niet'))
+      if (kanKiezen) g.appendChild(knop('Meet opnieuw', () => meetOpnieuw(id)))
+      rij.appendChild(g)
+    }
+    rijen.appendChild(rij)
+  })
+}
+
+async function laadInstellingen() {
+  try {
+    const { status, d } = await vraagJson('/_ff/instellingen')
+    if (status !== 200 || !d) throw new Error(String(status))
+    inst = d
+    $('verbinding').textContent = ''
+  } catch {
+    $('verbinding').textContent = 'Proxy niet bereikbaar; claude-or start hem opnieuw.'
+  }
+  tekenModellen()
+  if (!$('kies-paneel').hidden) tekenLijst()
+}
+
+// ---- kiezen ----
+
+function openPaneel(slot, i) {
+  kiesVoor = slot
+  $('kies-kop').textContent = `Kies Model ${i + 1}`
+  $('kies-paneel').hidden = false
+  $('zoek').focus()
+  if (modellen) tekenLijst()
+  else laadModellen(false)
+}
+
+async function laadModellen(ververs) {
+  $('lijst-info').textContent = 'Lijst laden…'
+  leeg($('lijst'))
+  try {
+    const { status, d } = await vraagJson(`/_ff/modellen${ververs ? '?ververs=1' : ''}`)
+    if (status !== 200 || !Array.isArray(d?.modellen)) {
+      $('lijst-info').textContent = `Lijst niet opgehaald: ${d?.fout ?? `status ${status}`}`
+      return
+    }
+    modellen = d
+    tekenLijst()
+  } catch {
+    $('lijst-info').textContent = 'Lijst niet opgehaald: proxy niet bereikbaar.'
+  }
+}
+
+function tekenLijst() {
+  const lijst = $('lijst')
+  leeg(lijst)
+  if (!modellen) return
+  const z = $('zoek').value.trim().toLowerCase()
+  const alle = modellen.modellen
+    .filter(m => !z || m.id.toLowerCase().includes(z) || String(m.naam ?? '').toLowerCase().includes(z))
+    .sort((a, b) => Number(b.id.startsWith('anthropic/')) - Number(a.id.startsWith('anthropic/')) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+  const info = [`${alle.length} modellen`]
+  if (modellen.uitCache && modellen.opgehaald) info.push(`lijst van ${datumTijd(modellen.opgehaald)}`)
+  if (modellen.fout) info.push(modellen.fout)
+  $('lijst-info').textContent = info.join(' · ')
+  const huidig = inst?.rijen?.[kiesVoor] ?? (kiesVoor !== 'm5' ? inst?.rijen?.m1 : undefined)
+  for (const m of alle.slice(0, LIJST_MAX)) {
+    const r = el('div', null, 'model')
+    const wie = el('div', null, 'wie')
+    wie.appendChild(el('div', m.naam ?? m.id))
+    wie.appendChild(el('div', m.id, 'id'))
+    if (m.teKlein) wie.appendChild(el('div', 'te klein voor Claude Code', 'waarschuwing'))
+    if (m.zwak) wie.appendChild(el('div', 'cachet niet', 'waarschuwing'))
+    r.appendChild(wie)
+    const cijfers = el('div', null, 'cijfers')
+    cijfers.appendChild(el('span', `context ${contextTekst(m.context)}`))
+    cijfers.appendChild(el('span', `${prijs(m.in)} in / ${prijs(m.uit)} uit per Mtok`, 'dim'))
+    const l = m.meting ? { tekst: m.meting.oordeel === 'zwak' ? 'zwak' : `${m.meting.oordeel} ${m.meting.raak}/${m.meting.van}`, klasse: `label ${m.meting.oordeel}` } : m.zwak ? { tekst: 'zwak', klasse: 'label zwak' } : { tekst: 'niet gemeten', klasse: 'label' }
+    cijfers.appendChild(el('span', l.tekst, l.klasse))
+    r.appendChild(cijfers)
+    const isHuidig = huidig && zonder1m(huidig) === m.id
+    if (m.zwak) r.appendChild(knop('cachet niet', () => {}, { uit: true }))
+    else if (isHuidig) r.appendChild(knop('gekozen', () => {}, { uit: true }))
+    else if (m.meting) r.appendChild(knop('Kies', () => kiesUitLijst(m, false), { hoofd: true }))
+    else r.appendChild(knop('Meet en kies (~35-60k tokens)', () => kiesUitLijst(m, true), { hoofd: true }))
+    lijst.appendChild(r)
+  }
+  if (alle.length > LIJST_MAX) lijst.appendChild(el('p', '… verfijn je zoekopdracht', 'dim'))
+  if (!alle.length) lijst.appendChild(el('p', 'Geen model gevonden.', 'dim'))
+}
+
+function kiesUitLijst(m, meten) {
+  const huidig = inst?.rijen?.[kiesVoor] ?? (kiesVoor !== 'm5' ? inst?.rijen?.m1 : undefined)
+  const oud = huidig ? modellen?.modellen?.find(x => x.id === zonder1m(huidig)) : undefined
+  // Waarschuwing vóór het kiezen: kleiner contextvenster dan het model dat nu in deze rij staat.
+  if (oud && typeof oud.context === 'number' && typeof m.context === 'number' && m.context < oud.context) {
+    const ok = window.confirm(`${m.id} heeft een kleiner contextvenster (${contextTekst(m.context)}) dan ${oud.id} (${contextTekst(oud.context)}). Een lopende sessie met een lang gesprek past er misschien niet in. Toch kiezen?`)
+    if (!ok) return
+  }
+  kies(kiesVoor, m.kiesId ?? m.id, meten)
+}
+
+async function kies(slot, model, meten) {
+  bezig = true
+  tekenModellen()
+  if (modellen && !$('kies-paneel').hidden) tekenLijst()
+  const n = SLOTS.indexOf(slot) + 1
+  melding(meten ? `Meten en kiezen: ${model} …` : model ? `Model ${n} kiezen: ${model} …` : `Model ${n} leegmaken …`, 'info')
+  if (meten) volgMeting()
+  try {
+    const { status, d } = await post('/_ff/kies', { rij: slot, model, meet: meten })
+    if (status === 200 && d?.ok) {
+      melding(model ? `Model ${n} is nu ${model}.` : `Model ${n} is leeg (gebruikt ${slot === 'm5' ? 'geen extra regel' : 'Model 1'}).`, 'ok')
+      $('kies-paneel').hidden = true
+    } else {
+      melding(d?.fout ? `Niet gekozen: ${d.fout}` : `Niet gekozen (status ${status}).`, 'fout')
+    }
+  } catch {
+    melding('Niet gekozen: proxy niet bereikbaar.', 'fout')
+  }
+  bezig = false
+  await laadInstellingen()
+  if (modellen) await laadModellen(false)
+}
+
+async function meetOpnieuw(id) {
+  melding(`Meting gestart: ${zonder1m(id)} …`, 'info')
+  const { status, d } = await post('/_ff/meet', { model: zonder1m(id) }).catch(() => ({ status: 0, d: null }))
+  if (status !== 200) return melding(`Meting niet gestart: ${d?.fout ?? 'proxy niet bereikbaar'}`, 'fout')
+  volgMeting(true)
+}
+
+// Toont de meting die loopt; met `melden` na afloop de uitslag in gewone taal.
+function volgMeting(melden = false) {
+  clearTimeout(meetTimer)
+  const stap = async () => {
+    let d = null
+    try {
+      d = (await vraagJson('/_ff/meet')).d
+    } catch {
+      d = null
+    }
+    const ms = $('meet-stand')
+    if (d?.bezig) {
+      ms.hidden = false
+      ms.textContent = `Meten: ${d.bezig} …${d.rij?.length ? ` daarna: ${d.rij.join(', ')}` : ''}`
+      meetTimer = setTimeout(stap, 2000)
+      return
+    }
+    ms.hidden = true
+    // Een keuze met meting loopt nog (de meting start misschien net): blijven kijken.
+    if (bezig) {
+      meetTimer = setTimeout(stap, 1000)
+      return
+    }
+    if (melden && d?.laatste) {
+      const l = d.laatste
+      if (!l.ok) melding(`Meting van ${l.model} mislukt: ${l.fout}`, 'fout')
+      else if (l.oordeel === 'zwak') melding(`${l.model} cachet niet (${l.raak} van ${l.van} raak); blijft gestopt.`, 'fout')
+      else melding(`${l.model} cachet weer (${l.oordeel}, ${l.raak} van ${l.van} raak).`, 'ok')
+      laadInstellingen()
+    }
+  }
+  stap()
+}
+
+$('zoek').addEventListener('input', tekenLijst)
+$('ververs-lijst').addEventListener('click', () => laadModellen(true))
+$('sluit-paneel').addEventListener('click', () => { $('kies-paneel').hidden = true })
+
+// ---- logboek ----
+
+function vulKeuze(select, waarden) {
+  const gekozen = select.value
+  const bestaand = new Set(Array.from(select.options).map(o => o.value))
+  for (const w of waarden) {
+    if (bestaand.has(w)) continue
+    const o = document.createElement('option')
+    o.value = w
+    o.textContent = select.id === 'f-sessie' ? kort(w) : w
+    select.appendChild(o)
+  }
+  select.value = gekozen
+}
+
+function tekenSamenvatting() {
+  const body = $('samenvatting')
+  leeg(body)
+  const rijen = []
+  for (const [sessie, perModel] of Object.entries(stand?.sessies ?? {})) {
+    for (const [model, s] of Object.entries(perModel ?? {})) rijen.push({ sessie, model, ...s })
+  }
+  rijen.sort((a, b) => (b.laatst ?? 0) - (a.laatst ?? 0))
+  $('samenvatting-leeg').hidden = rijen.length > 0
+  for (const s of rijen) {
+    const rij = document.createElement('tr')
+    if (s.mis > 0) rij.className = 'slecht'
+    cel(rij, kort(s.sessie)).title = s.sessie
+    cel(rij, s.model)
+    cel(rij, getal(s.aanvragen), 'getal')
+    cel(rij, getal(s.raak), 'getal raak')
+    cel(rij, getal(s.mis), s.mis > 0 ? 'getal mis' : 'getal')
+    cel(rij, s.in ? `${Math.round((100 * s.read) / s.in)} %` : '', 'getal')
+    cel(rij, s.aanbieder ?? '')
+    cel(rij, stand?.vast?.[s.sessie]?.[s.model] ?? '')
+    cel(rij, s.laatst ? datumTijd(s.laatst) : '')
+    body.appendChild(rij)
+  }
+}
+
+function tekenRegels() {
+  vulKeuze($('f-sessie'), [...new Set(regels.map(r => r.sessie))])
+  vulKeuze($('f-model'), [...new Set(regels.map(r => r.model).filter(Boolean))])
+  const fs = $('f-sessie').value
+  const fm = $('f-model').value
+  const slecht = $('f-slecht').checked
+  const body = $('regels')
+  leeg(body)
+  let n = 0
+  for (let i = regels.length - 1; i >= 0; i--) {
+    const r = regels[i]
+    const fout = !!r.fout || !(r.status >= 200 && r.status < 300)
+    if (fs && r.sessie !== fs) continue
+    if (fm && r.model !== fm) continue
+    if (slecht && !fout && r.telling !== 'mis') continue
+    const rij = document.createElement('tr')
+    if (fout || r.telling === 'mis') rij.className = 'slecht'
+    cel(rij, tijd(r.t)).title = datumTijd(r.t)
+    cel(rij, kort(r.sessie)).title = r.sessie
+    const m = cel(rij, r.model ?? r.pad)
+    if (r.van) m.title = `was ${r.van}`
+    cel(rij, r.aanbieder ? `${r.aanbieder}${r.vast ? ' (vast)' : ''}` : '')
+    cel(rij, String(r.status), 'getal')
+    cel(rij, getal((r.in ?? 0) + (r.read ?? 0) + (r.write ?? 0)), 'getal')
+    cel(rij, getal(r.uit), 'getal')
+    cel(rij, `${r.aandeel ?? 0} %`, 'getal')
+    cel(rij, r.telling, r.telling === 'raak' ? 'raak' : r.telling === 'mis' ? 'mis' : 'dim')
+    cel(rij, r.actie === 'wissel' ? 'andere aanbieder' : r.actie === 'stop' ? 'model gestopt' : r.van ? `gewisseld van ${r.van}` : '', r.actie ? 'mis' : 'dim')
+    cel(rij, duur(r.ms), 'getal')
+    cel(rij, r.fout ?? '', r.fout ? 'mis' : '')
+    body.appendChild(rij)
+    n += 1
+  }
+  $('regels-leeg').hidden = n > 0
+  $('regels-leeg').textContent = regels.length ? 'Geen aanvragen met dit filter.' : 'Nog geen aanvragen. Start een sessie met claude-or.'
+}
+
+async function ververs() {
+  try {
+    const [st, nieuw] = await Promise.all([
+      fetch('/_ff/stand', { cache: 'no-store' }).then(r => r.json()),
+      fetch(`/_ff/log?na=${nieuwste}&max=${MAX}`, { cache: 'no-store' }).then(r => r.json()),
+    ])
+    stand = st
+    $('verbinding').textContent = ''
+    $('kop-info').textContent = `versie ${stand.versie} · draait sinds ${datumTijd(stand.sinds)}`
+    if (Array.isArray(nieuw) && nieuw.length) {
+      regels = regels.concat(nieuw).slice(-MAX)
+      nieuwste = regels[regels.length - 1].t
+    }
+    // Eerste keer: Modellen als er nog geen aanvragen zijn, anders de laatst gekozen tab.
+    if (eersteLog) {
+      eersteLog = false
+      if (regels.length) {
+        const t = bewaard('ff-proxy-tab')
+        toonTab(t === 'modellen' ? 'modellen' : 'logboek', false)
+      }
+    }
+    tekenSamenvatting()
+    tekenRegels()
+    if (!$('tab-modellen').hidden && inst) tekenModellen()
+  } catch {
+    $('verbinding').textContent = 'Proxy niet bereikbaar; claude-or start hem opnieuw.'
+  }
+}
+
+for (const id of ['f-sessie', 'f-model', 'f-slecht']) $(id).addEventListener('change', tekenRegels)
+toonTab('modellen', false)
+ververs()
+volgMeting()
+setInterval(ververs, 3000)
+// Instellingen (startcheck, metingen, gestopt) elke 10 s, alleen als de tab open is en er niets loopt.
+setInterval(() => { if (!$('tab-modellen').hidden && !bezig) laadInstellingen() }, 10_000)
+</script>
+</body>
+</html>

@@ -67,7 +67,7 @@ function fake(on: any) {
       if (args[0] === 'openrouter' && args[1] === 'modellen') {
         return ok({ modellen: [{ id: 'anthropic/claude-sonnet-4.5-met-een-hele-lange-naam', naam: 'Lang', context: 1000000, in: 3, uit: 15 }, { id: 'x/klein', naam: 'Klein', context: 32000, in: 0.1, uit: 0.2 }], opgehaald: NU })
       }
-      return args[0] === 'status' ? ok({ heeftKey: true, staart: 'WXYZ', modus: 'abonnement', vreemdeHelper: false }) : ok({ aan: true })
+      return args[0] === 'status' ? ok({ heeftKey: true, staart: 'WXYZ', modus: 'abonnement', vreemdeHelper: false, orProxy: true, orLogboek: 'http://127.0.0.1:20817/' }) : ok({ aan: true })
     }
     if (cli('accounts.mjs') >= 0) {
       const args = e.argv.slice(cli('accounts.mjs') + 1)
@@ -166,6 +166,8 @@ for (const kolommen of [44, 100]) {
         if (stap === 'open') {
           if (!(await ui.find({ type: 'Button', key: `meer-${tab}` }))) break
           await ui.press({ key: `meer-${tab}` })
+          // Tab Wisselen met Meer open: de knop Logboek staat erin (proxy aan) en past mee.
+          if (tab === 'wisselen') expect(await ui.find({ type: 'Button', key: 'or-logboek' })).toBeDefined()
         }
         const fout: string[] = []
         const breed = minBreed((await ui.drawn()) as Knoop, fout)

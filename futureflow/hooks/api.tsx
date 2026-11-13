@@ -11,7 +11,7 @@ import { beslis, dagSleutel, geldigeKey, houdTot, kosten, kostenOverzicht, limie
 import type { Beschikbaar, Door, Modus } from '../lib/api.mjs'
 import { instellingenVan, kettingAan } from '../lib/accounts.mjs'
 import { cacheMetingen, geldigModel, keuzeVan, orKosten, OR_URL, SLOTS, START } from '../lib/openrouter.mjs'
-import type { OrKeuze as LibOrKeuze } from '../lib/openrouter.mjs'
+import type { OrKeuze as LibOrKeuze, Slot } from '../lib/openrouter.mjs'
 
 // Tab API: de API-key in de macOS-sleutelhanger en wisselen tussen abonnement en API, met de hand
 // of automatisch op de rate limits. Alles buiten de plugin (settings.json, sleutelhanger) gaat via
@@ -107,10 +107,14 @@ export async function leesStatus($: Engine): Promise<ApiStatus> {
       ...(geldigModel(d.orModel) ? { orModel: d.orModel } : {}),
       ...(geldigModel(d.orSnel) ? { orSnel: d.orSnel } : {}),
       ...Object.fromEntries((['orM1', 'orM2', 'orM3', 'orM4', 'orM5'] as const).filter(s => geldigModel(d[s])).map(s => [s, d[s]])),
+      ...(Array.isArray(d.orGestopt) ? { orGestopt: d.orGestopt.filter((v: unknown) => geldigModel(v)).slice(0, 10) } : {}),
       orKlaar: d.orKlaar === true,
       orShim: d.orShim === true,
       orOpPad: d.orOpPad !== false,
       oudeOr: d.oudeOr === true,
+      orProxy: d.orProxy === true,
+      // Alleen een adres van de lokale proxy; iets anders opent de knop nooit.
+      ...(d.orProxy === true && typeof d.orLogboek === 'string' && /^http:\/\/127\.0\.0\.1:\d{1,5}\/$/.test(d.orLogboek) ? { orLogboek: d.orLogboek } : {}),
       ...(typeof d.fout === 'string' ? { fout: d.fout.slice(0, 200) } : {}),
     }
   } catch (err) {
@@ -204,7 +208,13 @@ export async function startApi($: Engine): Promise<void> {
     if (gelezen) await controleerStandaardModel($, gelezen.model)
     if (gelezen?.oudeOr) void ruimOudeOrOp($).catch(err => failOpen($, err))
     // Startcheck (0.15.0): metingen naar de CLI, die de shim en het poortbestand van claude-or bijwerkt.
-    void syncPoort($).catch(err => failOpen($, err))
+    // 0.17.0: daarna de keuze Model 1-5 gelijk aan het settings-bestand (de proxy-pagina kan hem wijzigen).
+    // Alleen als dat bestand er is: anders start de sessie geen extra CLI.
+    void syncPoort($)
+      .then(async () => {
+        if (await orBestandBestaat($)) await volgKeuze($, await leesStatus($))
+      })
+      .catch(err => failOpen($, err))
     // Sinds 0.8 één schakelaar voor API en accounts: stond alleen accounts-auto aan, dan ook die van de API.
     const t0 = await leesToestand($)
     if (!t0.auto) {
@@ -235,6 +245,29 @@ export async function syncPoort($: Engine): Promise<void> {
 export type OrKeuze = LibOrKeuze
 export async function orKeuze($: Engine): Promise<OrKeuze> {
   return keuzeVan(await $.store.get('openrouter.keuze'))
+}
+
+// Bestaat het eigen settings-bestand van claude-or? (de CLI gebruikt altijd de standaardmap, zie cli.ts)
+async function orBestandBestaat($: Engine): Promise<boolean> {
+  const home = (await $.env.get('HOME')) ?? (await $.env.get('USERPROFILE'))
+  if (!home) return false
+  return $.fs.exists(`${home}/.claude/futureflow/openrouter/settings.json`).catch(() => false)
+}
+
+// 0.17.0: het eigen settings-bestand van claude-or is de bron voor Model 1-5 (de proxy-pagina kiest via de
+// CLI). Wijkt wat claude-or nu gebruikt af van de store, dan wordt de store gelijk aan het bestand; 2-4 die
+// gelijk zijn aan Model 1 worden leeg. Zonder settings-bestand (orKlaar false) blijft de store.
+export async function volgKeuze($: Engine, status: ApiStatus): Promise<boolean> {
+  if (status.fout || status.orKlaar !== true || !status.orM1) return false
+  const k = await orKeuze($)
+  const effectief = (x: Partial<Record<Slot, string>>, s: Slot) => (s === 'm5' ? x.m5 : x[s] ?? x.m1)
+  const bestand: Partial<Record<Slot, string>> = { m1: status.orM1, m2: status.orM2, m3: status.orM3, m4: status.orM4, m5: status.orM5 }
+  if (SLOTS.every(s => effectief(k, s) === effectief(bestand, s))) return false
+  const nieuw: Partial<Record<Slot, string>> = { m1: status.orM1 }
+  for (const s of ['m2', 'm3', 'm4'] as const) if (bestand[s] && bestand[s] !== status.orM1) nieuw[s] = bestand[s]
+  if (bestand.m5) nieuw.m5 = bestand.m5
+  await $.store.set('openrouter.keuze', nieuw)
+  return true
 }
 
 // Welke stappen van de ketting kunnen (zonder CLI): de API tenzij de laatste status zei dat er geen

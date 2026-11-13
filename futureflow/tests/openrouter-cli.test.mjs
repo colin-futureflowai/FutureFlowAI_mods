@@ -1,13 +1,14 @@
 // node --test futureflow/tests/openrouter-cli.test.mjs
 // Alleen met een tijdelijk settings-bestand (SETTINGS_JSON), een nep-`security` (SECURITY_BIN), een
 // tijdelijke map voor marker, cache en eigen settings (OPENROUTER_DIR), een tijdelijke map voor de
-// shim (SHIM_DIR) en een lokale http-server (OPENROUTER_URL);
-// nooit met het echte ~/.claude, de echte sleutelhanger of openrouter.ai.
+// shim (SHIM_DIR), een lokale http-server (OPENROUTER_URL) en een vrije poort voor de proxy (OR_PROXY_POORT);
+// nooit met het echte ~/.claude, de echte sleutelhanger, poort 20817 of openrouter.ai.
 import { test, beforeEach, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawn, spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import http from 'node:http'
+import net from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -17,7 +18,28 @@ import { HELPER, OR_HELPER } from '../lib/api.mjs'
 const CLI = fileURLToPath(new URL('../cli/api.mjs', import.meta.url))
 const ORKEY = 'sk-or-v1-0123456789abcdef0123456789abcdefQRST'
 const APIKEY = 'sk-ant-api03-ABCDEFGHIJKLMNOPQRSTUVWXYZ_abc-WXYZ'
-let dir, bestand, nep, log, ordir, shim, server, url, verzoeken, antwoord
+let dir, bestand, nep, log, ordir, shim, server, url, verzoeken, antwoord, pxPoort
+const PLUGIN = fileURLToPath(new URL('..', import.meta.url))
+
+function vrijePoort() {
+  return new Promise((resolve, reject) => {
+    const s = net.createServer()
+    s.on('error', reject)
+    s.listen(0, '127.0.0.1', () => {
+      const { port } = s.address()
+      s.close(() => resolve(port))
+    })
+  })
+}
+
+async function proxyStand(poort = pxPoort) {
+  try {
+    const r = await fetch(`http://127.0.0.1:${poort}/_ff/stand`, { signal: AbortSignal.timeout(1000) })
+    return r.ok ? await r.json() : undefined
+  } catch {
+    return undefined
+  }
+}
 
 // Nep-security per service: bewaart een key (uit `-i … -s <service> … -w <key>`) in sleutel-<service>.
 const NEP = `#!/bin/sh
@@ -72,6 +94,7 @@ beforeEach(async () => {
   })
   await new Promise(r => server.listen(0, '127.0.0.1', r))
   url = `http://127.0.0.1:${server.address().port}`
+  pxPoort = await vrijePoort()
   // Startcheck: de modellen uit deze tests hebben een goede cache-meting, behalve waar een test dat anders zet.
   gemeten(Object.fromEntries(GEMETEN.map(id => [id, 'goed'])))
 })
@@ -84,13 +107,20 @@ function gemeten(per) {
   fs.writeFileSync(path.join(ordir, 'cache.json'), JSON.stringify(Object.fromEntries(Object.entries(per).map(([id, o]) => [id, meting(o)]))))
 }
 
-afterEach(() => new Promise(r => server.close(r)))
+afterEach(async () => {
+  // Een proxy die de shim in deze test startte: stoppen en wachten tot hij weg is.
+  if (await proxyStand()) {
+    await fetch(`http://127.0.0.1:${pxPoort}/_ff/stop`, { method: 'POST' }).catch(() => {})
+    for (let i = 0; i < 60 && (await proxyStand()); i++) await new Promise(r => setTimeout(r, 50))
+  }
+  await new Promise(r => server.close(r))
+})
 
 // Asynchroon starten: de lokale server draait in dit proces.
 function cli(args, stdin) {
   return new Promise(resolve => {
     const p = spawn(process.execPath, [CLI, ...args], {
-      env: { ...process.env, SETTINGS_JSON: bestand, SECURITY_BIN: nep, OPENROUTER_DIR: ordir, OPENROUTER_URL: url, SHIM_DIR: path.dirname(shim) },
+      env: { ...process.env, SETTINGS_JSON: bestand, SECURITY_BIN: nep, OPENROUTER_DIR: ordir, OPENROUTER_URL: url, SHIM_DIR: path.dirname(shim), OR_PROXY_POORT: String(pxPoort) },
     })
     let stdout = ''
     let stderr = ''
@@ -153,7 +183,7 @@ test('klaarzetten: eigen settings-bestand en shim; ~/.claude/settings.json blijf
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(ordir, 'settings.json'), 'utf8')), {
     apiKeyHelper: OR_HELPER,
     env: {
-      ANTHROPIC_BASE_URL: 'https://openrouter.ai/api',
+      ANTHROPIC_BASE_URL: `http://127.0.0.1:${pxPoort}`,
       ANTHROPIC_API_KEY: '',
       ANTHROPIC_MODEL: 'openai/gpt-5',
       ANTHROPIC_DEFAULT_OPUS_MODEL: 'openai/gpt-5',
@@ -166,7 +196,15 @@ test('klaarzetten: eigen settings-bestand en shim; ~/.claude/settings.json blijf
   })
   assert.equal(fs.statSync(shim).mode & 0o777, 0o755)
   assert.match(fs.readFileSync(shim, 'utf8'), /# futureflow: claude-or/)
+  // De drie proxybestanden staan naast elkaar onder <OPENROUTER_DIR>/proxy, gelijk aan de bron.
+  for (const rel of ['bridge/or-proxy.mjs', 'bridge/logboek.html', 'lib/proxy.mjs']) {
+    assert.equal(fs.readFileSync(path.join(ordir, 'proxy', rel), 'utf8'), fs.readFileSync(path.join(PLUGIN, rel), 'utf8'), rel)
+  }
+  assert.ok(fs.readFileSync(shim, 'utf8').includes(`PX='${path.join(ordir, 'proxy', 'bridge', 'or-proxy.mjs')}'`))
+  assert.ok(fs.readFileSync(shim, 'utf8').includes(`PP=${pxPoort}`))
   const s = json(await cli(['status']))
+  assert.equal(s.orProxy, true)
+  assert.equal(s.orLogboek, `http://127.0.0.1:${pxPoort}/`)
   assert.equal(s.modus, 'abonnement')
   assert.equal(s.orKlaar, true)
   assert.equal(s.orShim, true)
@@ -230,7 +268,7 @@ test('startcheck: de shim start alleen met poort ok; een latere zwakke meting ho
   // De mod geeft een nieuwere, zwakke meting door: poort dicht, shim weigert en noemt het model.
   const p = await cli(['openrouter', 'poort'], JSON.stringify({ 'openai/gpt-5-mini': meting('zwak', 2000), 'openai/gpt-5': meting('zwak', 1) }))
   assert.equal(p.status, 0, p.stderr)
-  assert.deepEqual(json(p), { ok: false, redenen: [{ id: 'openai/gpt-5-mini', reden: 'zwak' }], shim: true })
+  assert.deepEqual(json(p), { ok: false, redenen: [{ id: 'openai/gpt-5-mini', reden: 'zwak' }], shim: true, proxy: true })
   const r = start()
   assert.equal(r.status, 1)
   assert.equal(r.stdout, '')
@@ -252,15 +290,19 @@ test('startcheck: de shim start alleen met poort ok; een latere zwakke meting ho
 
 test('startcheck: poort zonder settings-bestand bewaart alleen de metingen; een oude shim krijgt de check', async () => {
   const p = json(await cli(['openrouter', 'poort'], JSON.stringify({ 'nieuw/model': meting('goed', 5), onzin: { oordeel: 'laat' } })))
-  assert.deepEqual(p, { ok: null, redenen: [], shim: false })
+  assert.deepEqual(p, { ok: null, redenen: [], shim: false, proxy: false })
   assert.equal(JSON.parse(fs.readFileSync(path.join(ordir, 'cache.json'), 'utf8'))['nieuw/model'].oordeel, 'goed')
   assert.equal(fs.existsSync(shim), false)
   // Een settings-bestand en shim van vóór 0.15 (zonder check): poort herschrijft de shim en schrijft de poort.
   fs.writeFileSync(path.join(ordir, 'settings.json'), JSON.stringify({ apiKeyHelper: OR_HELPER, env: { ANTHROPIC_BASE_URL: 'https://openrouter.ai/api', ANTHROPIC_MODEL: 'oud/model', ANTHROPIC_DEFAULT_HAIKU_MODEL: 'nieuw/model[1m]' } }))
   fs.mkdirSync(path.dirname(shim), { recursive: true })
   fs.writeFileSync(shim, '#!/bin/sh\n# futureflow: claude-or\nexec claude "$@"\n', { mode: 0o755 })
-  assert.deepEqual(json(await cli(['openrouter', 'poort'])), { ok: false, redenen: [{ id: 'oud/model', reden: 'ongemeten' }], shim: true })
+  assert.deepEqual(json(await cli(['openrouter', 'poort'])), { ok: false, redenen: [{ id: 'oud/model', reden: 'ongemeten' }], shim: true, proxy: true })
   assert.match(fs.readFileSync(shim, 'utf8'), /poort/)
+  // Overgang naar 0.16: de oude OpenRouter-URL wordt de proxy-URL; de rest blijft; proxybestanden staan klaar.
+  const omgezet = JSON.parse(fs.readFileSync(path.join(ordir, 'settings.json'), 'utf8'))
+  assert.deepEqual(omgezet, { apiKeyHelper: OR_HELPER, env: { ANTHROPIC_BASE_URL: `http://127.0.0.1:${pxPoort}`, ANTHROPIC_MODEL: 'oud/model', ANTHROPIC_DEFAULT_HAIKU_MODEL: 'nieuw/model[1m]' } })
+  assert.ok(fs.existsSync(path.join(ordir, 'proxy', 'lib', 'proxy.mjs')))
   assert.equal(fs.readFileSync(path.join(ordir, 'poort'), 'utf8'), 'geweigerd\noud/model is nog niet gemeten\n')
   // Een claude-or van iemand anders blijft staan.
   fs.writeFileSync(shim, '#!/bin/sh\necho eigen\n', { mode: 0o755 })
@@ -473,4 +515,95 @@ test('model-weg: haalt alleen `model` weg, alleen bij exact dezelfde waarde; res
   assert.deepEqual(lees(), { env: { FOO: 'bar' } })
   assert.deepEqual(json(await cli(['openrouter', 'model-weg', '--waarde', 'openai/gpt-5.1'])), { gewijzigd: false })
   assert.equal((await cli(['openrouter', 'model-weg'])).status, 1)
+})
+
+test('proxy: een vreemde base-URL in het eigen settings-bestand blijft staan (proxy: false)', async () => {
+  fs.mkdirSync(ordir, { recursive: true })
+  const eigen = { apiKeyHelper: OR_HELPER, env: { ANTHROPIC_BASE_URL: 'https://gw.example', ANTHROPIC_MODEL: 'a/b' } }
+  fs.writeFileSync(path.join(ordir, 'settings.json'), JSON.stringify(eigen))
+  const r = await cli(['openrouter', 'poort'])
+  assert.equal(r.status, 0, r.stderr)
+  assert.equal(json(r).proxy, false)
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(ordir, 'settings.json'), 'utf8')), eigen)
+  const s = json(await cli(['status']))
+  assert.equal(s.orProxy, false)
+  assert.equal(s.orLogboek, undefined)
+})
+
+test('proxy: een draaiende proxy met een andere versie krijgt POST /_ff/stop; dezelfde versie niet', async () => {
+  const gezien = []
+  let versie = 'oud'
+  const nepPx = http.createServer((req, res) => {
+    gezien.push(`${req.method} ${req.url} ${req.headers.origin ?? ''}`.trim())
+    res.setHeader('content-type', 'application/json')
+    res.end(req.url === '/_ff/stand' ? JSON.stringify({ versie, sinds: 1, poort: pxPoort, sessies: {} }) : '{"ok":true}')
+  })
+  await new Promise(r => nepPx.listen(pxPoort, '127.0.0.1', r))
+  try {
+    await cli(['openrouter', 'zet-key'], ORKEY)
+    const r = await cli(['modus', 'openrouter', ...MODEL])
+    assert.equal(r.status, 0, r.stderr)
+    assert.deepEqual(gezien, ['GET /_ff/stand', 'POST /_ff/stop'])
+    gezien.length = 0
+    versie = JSON.parse(fs.readFileSync(path.join(PLUGIN, '.claude-plugin', 'plugin.json'), 'utf8')).version
+    assert.equal(json(await cli(['openrouter', 'poort'])).proxy, true)
+    assert.deepEqual(gezien, ['GET /_ff/stand'])
+  } finally {
+    await new Promise(r => { nepPx.closeAllConnections(); nepPx.close(r) })
+  }
+})
+
+test('proxy: de shim start de gekopieerde proxy; die antwoordt op /_ff/stand', async () => {
+  await cli(['openrouter', 'zet-key'], ORKEY)
+  assert.equal((await cli(['modus', 'openrouter', ...MODEL])).status, 0)
+  const nepBin = fs.mkdtempSync(path.join(os.tmpdir(), 'or-claude-'))
+  fs.writeFileSync(path.join(nepBin, 'claude'), '#!/bin/sh\necho gestart\n', { mode: 0o755 })
+  // Asynchroon: wachten op de proxy kan niet in een geblokkeerde event-loop.
+  const r = await new Promise(resolve => {
+    const p = spawn(shim, [], { env: { ...process.env, PATH: `${nepBin}:/usr/bin:/bin` } })
+    let stdout = ''
+    p.stdout.on('data', c => { stdout += c })
+    p.on('close', status => resolve({ status, stdout }))
+  })
+  assert.equal(r.status, 0)
+  assert.equal(r.stdout, 'gestart\n')
+  const st = await proxyStand()
+  assert.equal(st?.poort, pxPoort)
+  assert.equal(typeof st?.versie, 'string')
+})
+
+test('0.17: modus openrouter schrijft rijen.json met historie; proxy/cli.json en de libs voor de proxy staan klaar', async () => {
+  gemeten({ a: 'goed', b: 'goed', c: 'goed', 'x/a': 'goed', 'x/b': 'goed', 'x/c': 'goed', 'x/v': 'goed' })
+  await cli(['openrouter', 'zet-key'], ORKEY)
+  let r = await cli(['modus', 'openrouter', '--m1', 'x/a', '--m2', 'x/b'])
+  assert.equal(r.status, 0, r.stderr)
+  const rijen = () => JSON.parse(fs.readFileSync(path.join(ordir, 'rijen.json'), 'utf8'))
+  assert.deepEqual(rijen().nu, { m1: 'x/a', m2: 'x/b', m3: 'x/a', m4: 'x/a' })
+  assert.deepEqual(rijen().historie, {})
+  r = await cli(['modus', 'openrouter', '--m1', 'x/c', '--m2', 'x/b', '--m5', 'x/v'])
+  assert.equal(r.status, 0, r.stderr)
+  const d = rijen()
+  assert.deepEqual(d.nu, { m1: 'x/c', m2: 'x/b', m3: 'x/c', m4: 'x/c', m5: 'x/v' })
+  assert.equal(d.historie.m1[0].id, 'x/a')
+  assert.equal(typeof d.historie.m1[0].t, 'number')
+  assert.equal(d.historie.m3[0].id, 'x/a')
+  assert.equal(d.historie.m2, undefined)
+  // Een weigering (exit 7) schrijft rijen.json niet.
+  gemeten({ 'x/c': 'goed', 'x/b': 'goed', 'x/v': 'goed', 'x/zwak': 'zwak' })
+  assert.equal((await cli(['modus', 'openrouter', '--m1', 'x/zwak'])).status, 7)
+  assert.deepEqual(rijen(), d)
+  // Hoogstens 10 per rij, nieuwste eerst.
+  gemeten(Object.fromEntries(Array.from({ length: 13 }, (_, i) => [`x/n${i}`, 'goed'])))
+  for (let i = 0; i < 13; i++) assert.equal((await cli(['modus', 'openrouter', '--m1', `x/n${i}`])).status, 0)
+  assert.equal(rijen().historie.m1.length, 10)
+  assert.equal(rijen().historie.m1[0].id, 'x/n11')
+  // status: orGestopt noemt modellen uit het settings-bestand die cache.json zwak noemt (stop door de proxy).
+  assert.deepEqual(json(await cli(['status'])).orGestopt, [])
+  gemeten({ 'x/n12': 'zwak' })
+  assert.deepEqual(json(await cli(['status'])).orGestopt, ['x/n12'])
+  // De proxy vindt de CLI en heeft de libs die hij voor de pagina nodig heeft.
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(ordir, 'proxy', 'cli.json'), 'utf8')), { cli: CLI })
+  for (const rel of ['lib/openrouter.mjs', 'lib/api.mjs']) {
+    assert.equal(fs.readFileSync(path.join(ordir, 'proxy', rel), 'utf8'), fs.readFileSync(path.join(PLUGIN, rel), 'utf8'), rel)
+  }
 })

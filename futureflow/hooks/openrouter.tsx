@@ -3,7 +3,7 @@ import type { EngineInterface as Engine, RenderElement } from 'claude-code'
 
 import type { ApiStatus, OrModel, OrModellen } from '../types'
 
-import { cli, foutVan, handmatig, laatsteJson, leesStatus, orKeuze, verversApi, wissel } from './api'
+import { cli, foutVan, handmatig, laatsteJson, leesStatus, orKeuze, verversApi, volgKeuze, wissel } from './api'
 import type { OrKeuze } from './api'
 import type { Slot } from '../lib/openrouter.mjs'
 import { failOpen } from './ctx'
@@ -80,7 +80,9 @@ async function laadModellen($: Engine, ververs: boolean): Promise<void> {
 
 // Bij openen van de tab: status opnieuw en de lijst (los, zodat het commando niet wacht).
 export async function openOpenrouter($: Engine): Promise<void> {
-  await verversApi($)
+  const status = await verversApi($)
+  // 0.17.0: keuze gelijk aan het settings-bestand (de proxy-pagina kiest ook), niet midden in een meting.
+  if (!((await read($, cacheAtom)) ?? '').startsWith('Cache meten')) await volgKeuze($, status)
   void laadModellen($, false).catch(err => failOpen($, err))
 }
 
@@ -240,6 +242,33 @@ async function meetModellen($: Engine, ids: string[]): Promise<void> {
   })().catch(err => failOpen($, err))
 }
 
+// Knop Logboek (0.16.0): de pagina van de proxy in de browser; zonder terminal of bij een fout een toast
+// met het adres. Het adres komt uit de status-atom (tekenen start geen CLI).
+async function openLogboek($: Engine): Promise<void> {
+  try {
+    const status = (await read($, statusAtom)) ?? (await leesStatus($))
+    const url = status.orLogboek
+    if (!url) {
+      $.ui.toast('Geen logboek: claude-or loopt nog niet via de proxy. Klik Gebruik nu.')
+      return
+    }
+    let terminal = false
+    try {
+      terminal = (await $.session.surfaces()).includes('terminal')
+    } catch {
+      terminal = false
+    }
+    if (!terminal) {
+      $.ui.toast(`Logboek: ${url}`)
+      return
+    }
+    const r = await $.process.run(['/usr/bin/open', url], { timeoutMs: 10_000 }).catch(() => null)
+    if (!r || r.exitCode !== 0) $.ui.toast(`Logboek: ${url}`)
+  } catch (err) {
+    failOpen($, err)
+  }
+}
+
 // Knop Meet cache: alle gekozen modellen opnieuw.
 async function meetCache($: Engine): Promise<void> {
   try {
@@ -378,6 +407,14 @@ export async function orBron($: Engine, e: any, k: Kleuren, meer = true): Promis
             </Text>
           )
         })()}
+        {(() => {
+          // 0.17.0: de proxy stopte een model (cache.json zwak); niet als de startcheck-regel het al zegt.
+          const alGezegd = new Set(poortOordeel(ids, metingen).redenen.filter(r => r.reden === 'zwak').map(r => r.id))
+          const gestopt = (status.orGestopt ?? []).filter(id => !alGezegd.has(kaal(id) ?? id))
+          return gestopt.length ? (
+            <Text key="or-gestopt" color={k.err} wrap="wrap">{`${gestopt.join(', ')} cachet niet in ${START} en is gestopt om kosten te voorkomen. Kies een ander model of meet opnieuw.`}</Text>
+          ) : ''
+        })()}
         {cacheRegel ? <Text color={cacheRegel.startsWith('Cache meten') ? k.mut : k.err} wrap="wrap">{cacheRegel}</Text> : ''}
         {status.oudeOr ? <Text color={k.warn} wrap="wrap">In ~/.claude/settings.json staan nog oude OpenRouter-regels; futureflow haalt ze bij de volgende sessiestart weg.</Text> : ''}
         {test ? <Text color={test.startsWith('Verbinding werkt (') ? k.ok : test.startsWith('Bezig') ? k.mut : k.err} wrap="wrap">{test}</Text> : ''}
@@ -392,8 +429,10 @@ export async function orBron($: Engine, e: any, k: Kleuren, meer = true): Promis
             {meer && status.orHeeftKey ? knop(ui, 'or-test', 'Test verbinding', () => testVerbinding($)) : ''}
             {meer && status.orHeeftKey ? knop(ui, 'or-cache', 'Meet cache', () => meetCache($)) : ''}
             {meer && status.orHeeftKey ? knop(ui, 'or-wis', 'Key wissen', () => wisKey($)) : ''}
+            {meer && status.orProxy ? knop(ui, 'or-logboek', 'Proxy', () => openLogboek($)) : ''}
           </Box>
         )}
+        {meer && status.orProxy ? uitleg(ui, 'Proxy: modellen kiezen, aanvragen en cache', 'or-logboek-uitleg') : ''}
         {meer && status.orHeeftKey ? uitleg(ui, CACHE_UITLEG, 'or-cache-uitleg') : ''}
       </Box>,
     ]

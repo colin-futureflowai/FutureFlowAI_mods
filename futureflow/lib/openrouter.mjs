@@ -8,6 +8,7 @@
 // `claude-or` (claude --settings <bestand>) laadt.
 
 import { OR_HELPER, OR_SERVICE, OR_URL } from './api.mjs'
+import { PROXY_POORT, proxyUrl } from './proxy.mjs'
 
 export { OR_HELPER, OR_SERVICE, OR_URL }
 export const OR_ACCOUNT = 'futureflow'
@@ -197,10 +198,16 @@ export const SHIM_MERK = '# futureflow: claude-or'
 // Omgevingsvariabele die de shim zet; de mod herkent een claude-or-sessie aan de waarde '1'.
 export const OR_MARKER = 'FUTUREFLOW_OPENROUTER'
 
-// Inhoud van de shim: claude met het eigen settings-bestand, alleen voor die sessie.
-export function shimTekst(settingsPad, poortPad = String(settingsPad).replace(/[^/]*$/, 'poort')) {
+// Inhoud van de shim: claude met het eigen settings-bestand, alleen voor die sessie, via de proxy van
+// futureflow (0.16.0). `proxy.script` is de kopie van bridge/or-proxy.mjs (standaard <map van settings>/proxy/bridge/),
+// `proxy.poort` de poort waar hij luistert (standaard PROXY_POORT; de CLI geeft OR_PROXY_POORT mee).
+export function shimTekst(settingsPad, poortPad = String(settingsPad).replace(/[^/]*$/, 'poort'), proxy = {}) {
   const q = s => String(s).replace(/'/g, `'\\''`)
   const pad = q(settingsPad)
+  const map = String(settingsPad).replace(/\/[^/]*$/, '') || '/'
+  const script = proxy?.script ?? `${map}/proxy/bridge/or-proxy.mjs`
+  const pp = Number.isInteger(proxy?.poort) && proxy.poort > 0 ? proxy.poort : PROXY_POORT
+  const nietGestart = `${START}: de proxy van futureflow start niet (poort $PP). Open /futureflow, tab 2 Wisselen en klik Gebruik nu, of kijk of iets anders poort $PP gebruikt.`
   return [
     '#!/bin/sh',
     SHIM_MERK,
@@ -219,6 +226,24 @@ export function shimTekst(settingsPad, poortPad = String(settingsPad).replace(/[
     '  [ -f "$P" ] && /usr/bin/tail -n +2 "$P" >&2',
     '  echo "Open /futureflow, tab 2 Wisselen: kies een ander model of klik Meet cache, en daarna Gebruik nu." >&2',
     '  exit 1',
+    'fi',
+    '# Proxy van futureflow: claude-or loopt via 127.0.0.1; draait hij niet, dan hier los starten en kort wachten.',
+    `PX='${q(script)}'`,
+    `PP=${pp}`,
+    `D='${q(map)}'`,
+    'leeft() { /usr/bin/curl -fsS -m 2 "http://127.0.0.1:$PP/_ff/stand" 2>/dev/null | /usr/bin/grep -q \'"versie"\'; }',
+    'if ! leeft; then',
+    '  if [ ! -f "$PX" ]; then',
+    `    echo "${nietGestart}" >&2`,
+    '    exit 1',
+    '  fi',
+    '  OPENROUTER_DIR="$D" OR_PROXY_POORT="$PP" PATH="/opt/homebrew/bin:/usr/local/bin:$PATH" /usr/bin/nohup /usr/bin/env node "$PX" </dev/null >/dev/null 2>&1 &',
+    '  i=0',
+    '  while [ $i -lt 25 ] && ! leeft; do /bin/sleep 0.2; i=$((i+1)); done',
+    '  if ! leeft; then',
+    `    echo "${nietGestart}" >&2`,
+    '    exit 1',
+    '  fi',
     'fi',
     '# Marker: zo ziet futureflow in de sessie dat die via OpenRouter loopt (het env-blok van --settings komt niet in de procesomgeving).',
     `export ${OR_MARKER}=1`,
@@ -272,11 +297,12 @@ export function keuzeVan(ruw) {
 }
 
 // Wat futureflow in het eigen settings-bestand van claude-or zet. Alleen m1 is verplicht.
-export function orInstellingen(k) {
+// Sinds 0.16.0 via de lokale proxy van futureflow (die geeft alles door aan OpenRouter); `poort` voor tests.
+export function orInstellingen(k, poort = PROXY_POORT) {
   const m1 = k.m1
   const of1 = v => (geldigModel(v) ? v : m1)
   const env = {
-    ANTHROPIC_BASE_URL: OR_URL,
+    ANTHROPIC_BASE_URL: proxyUrl(Number.isInteger(poort) && poort > 0 ? poort : PROXY_POORT),
     ANTHROPIC_API_KEY: '',
     // Wint van een vast model-id in ~/.claude/settings.json (bv. claude-fable-5-1[1m]); de DEFAULT_*-sleutels
     // vervangen alleen aliassen.

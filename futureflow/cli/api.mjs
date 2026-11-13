@@ -4,7 +4,7 @@
 //
 //   api zet-key                 key via stdin → sleutelhanger           → JSON { ok, staart }
 //   api wis-key                 item uit de sleutelhanger               → JSON { gewist }
-//   api status                                                          → JSON { heeftKey, staart, modus, vreemdeHelper, fout? }
+//   api status                                                          → JSON { heeftKey, staart, modus, vreemdeHelper, orM1-orM5, orGestopt, fout? }
 //   api modus api|abonnement    zet of verwijdert alleen onze helper    → JSON { modus, gewijzigd }
 //   api modus openrouter --m1 <id> [--m2 <id>] [--m3 <id>] [--m4 <id>] [--m5 <id>]
 //                               (oude flags als alias: --model/--opus = 1, --sonnet = 2, --fable = 3, --snel = 4)
@@ -22,8 +22,8 @@
 //   api openrouter cachetest --model <id>  zes aanvragen als agent-lus (~50k tokens) → JSON { ok, model, oordeel,
 //                               raak, van, aandeel, rondes, aanbieders, gemeten } of { ok: false, status?, fout };
 //                               een geslaagde meting gaat naar <OPENROUTER_DIR>/cache.json en werkt de poort bij
-//   api openrouter poort        metingen van de mod (JSON via stdin, mag leeg) erbij, shim en poortbestand bijwerken
-//                               → JSON { ok, redenen, shim }
+//   api openrouter poort        metingen van de mod (JSON via stdin, mag leeg) erbij, shim en poortbestand bijwerken,
+//                               proxybestanden kopiëren en een oude base-URL naar de proxy zetten → JSON { ok, redenen, shim, proxy }
 //
 // Startcheck (0.15.0): `claude-or` start alleen als elk model in het eigen settings-bestand een meting heeft
 // en niet `zwak` is. `modus openrouter` weigert anders (exit 7, niets geschreven); de shim leest
@@ -42,8 +42,15 @@
 // 3 er staat een andere apiKeyHelper of andere waarde (blijft staan), 4 geen key in de sleutelhanger,
 // 5 sleutelhanger-fout, 6 modellijst niet op te halen (en geen cache), 7 een gekozen model cachet niet of is
 // nog niet gemeten (niets klaargezet).
-// SETTINGS_JSON, SECURITY_BIN, OPENROUTER_DIR, OPENROUTER_URL en SHIM_DIR overschrijven paden,
-// programma en adres (tests).
+// Proxy (0.16.0): claude-or loopt via een lokale proxy (bridge/or-proxy.mjs). `modus openrouter` en
+// `openrouter poort` kopiëren bridge/or-proxy.mjs, bridge/logboek.html en lib/proxy.mjs naar
+// <OPENROUTER_DIR>/proxy/ en zetten de proxy-URL in het eigen settings-bestand; een draaiende proxy met een
+// andere versie krijgt POST /_ff/stop. `test` en `cachetest` gaan rechtstreeks naar OpenRouter.
+// 0.17.0: ook lib/openrouter.mjs en lib/api.mjs (voor de pagina), <OPENROUTER_DIR>/proxy/cli.json (waar de proxy deze
+// CLI vindt) en na een geslaagde `modus openrouter` <OPENROUTER_DIR>/rijen.json (Model 1-5 nu en eerder, voor de
+// modelwissel in lopende sessies). `status` noemt in `orGestopt` de modellen die cache.json zwak noemt.
+// SETTINGS_JSON, SECURITY_BIN, OPENROUTER_DIR, OPENROUTER_URL, SHIM_DIR en OR_PROXY_POORT overschrijven
+// paden, programma, adres en poort (tests).
 
 import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
@@ -56,6 +63,7 @@ import {
   CACHE_MS, cacheMetingen, cacheOordeel, cacheProef, cacheRonde, cacheTelling, eigenBasis, geldigeOrKey, geldigModel, haalWeg, instellingModellen, modellenVan, OR_ACCOUNT, OR_SERVICE,
   OR_URL, orInstellingen, poortBestand, poortOordeel, poortTekst, SHIM_MERK, shimTekst, SLOTS, START,
 } from '../lib/openrouter.mjs'
+import { PROXY_POORT, PROXY_VERSIE, proxyUrl } from '../lib/proxy.mjs'
 
 const BESTAND = process.env.SETTINGS_JSON || path.join(os.homedir(), '.claude', 'settings.json')
 const SECURITY = process.env.SECURITY_BIN || '/usr/bin/security'
@@ -72,6 +80,19 @@ const METINGEN = path.join(OR_DIR, 'cache.json')
 const POORT = path.join(OR_DIR, 'poort')
 const SHIM_DIR = process.env.SHIM_DIR || path.join(os.homedir(), '.local', 'bin')
 const SHIM = path.join(SHIM_DIR, START)
+// Proxy: poort uit de omgeving (tests), anders de vaste; kopie van de drie bestanden onder <OR_DIR>/proxy/.
+const PX_POORT = (n => (Number.isInteger(n) && n > 0 && n < 65536 ? n : PROXY_POORT))(Number(process.env.OR_PROXY_POORT))
+const PX_URL = proxyUrl(PX_POORT)
+const PX_MAP = path.join(OR_DIR, 'proxy')
+const PX_SCRIPT = path.join(PX_MAP, 'bridge', 'or-proxy.mjs')
+const PLUGIN = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
+// 0.17.0: ook lib/openrouter.mjs (en lib/api.mjs, die hij importeert) voor de paden van de proxy-pagina.
+const PX_BESTANDEN = ['bridge/or-proxy.mjs', 'bridge/logboek.html', 'lib/proxy.mjs', 'lib/openrouter.mjs', 'lib/api.mjs']
+// Waar de proxy de CLI vindt (hij start hem voor `openrouter poort`, modellen, metingen en keuzes).
+const PX_CLI = path.join(PX_MAP, 'cli.json')
+// Modelwissel in lopende sessies: per rij het huidige model en wat er eerder stond (de proxy leest het).
+const RIJEN = path.join(OR_DIR, 'rijen.json')
+const RIJ_HISTORIE_MAX = 10
 
 class Fout extends Error {
   constructor(bericht, code) {
@@ -208,7 +229,7 @@ function zetShim() {
   if (oud !== undefined && !oud.split('\n').includes(SHIM_MERK)) {
     throw new Fout(`${SHIM} bestaat al en is niet van futureflow; futureflow laat die staan`, 3)
   }
-  const tekst = shimTekst(OR_SETTINGS, POORT)
+  const tekst = shimTekst(OR_SETTINGS, POORT, { script: PX_SCRIPT, poort: PX_POORT })
   if (oud === tekst) return false
   fs.mkdirSync(SHIM_DIR, { recursive: true })
   const tmp = `${SHIM}.${process.pid}-${Date.now()}.tmp`
@@ -262,9 +283,60 @@ function werkPoortBij() {
   return oordeel
 }
 
+// ---- proxy (0.16.0) ----
+
+// Kopieert de proxybestanden uit de plugin naar <OR_DIR>/proxy/ (alleen bij verschil, atomisch) en stuurt
+// een draaiende proxy met een andere versie POST /_ff/stop; de shim start bij de volgende claude-or de nieuwe.
+async function werkProxyBij() {
+  for (const rel of PX_BESTANDEN) {
+    const bron = fs.readFileSync(path.join(PLUGIN, rel))
+    const doel = path.join(PX_MAP, rel)
+    let oud
+    try {
+      oud = fs.readFileSync(doel)
+    } catch {
+      oud = undefined
+    }
+    if (oud && oud.equals(bron)) continue
+    fs.mkdirSync(path.dirname(doel), { recursive: true, mode: 0o700 })
+    const tmp = `${doel}.${process.pid}-${Date.now()}.tmp`
+    try {
+      fs.writeFileSync(tmp, bron, { mode: 0o600, flag: 'wx' })
+      fs.renameSync(tmp, doel)
+    } catch (err) {
+      fs.rmSync(tmp, { force: true })
+      throw new Fout(`${doel} niet geschreven (${err.code ?? err.message})`, 2)
+    }
+  }
+  const cliBestand = fileURLToPath(import.meta.url)
+  if (leesJson(PX_CLI)?.cli !== cliBestand) schrijfJson(PX_CLI, { cli: cliBestand })
+  // Geen antwoord binnen 2 s (of geen proxy) = niets doen.
+  try {
+    const r = await fetch(`${PX_URL}/_ff/stand`, { signal: AbortSignal.timeout(2000) })
+    const d = await r.json()
+    if (d && typeof d === 'object' && d.versie !== PROXY_VERSIE) {
+      await fetch(`${PX_URL}/_ff/stop`, { method: 'POST', signal: AbortSignal.timeout(2000) })
+    }
+  } catch {
+    // Geen proxy of geen geldig antwoord.
+  }
+}
+
+// Zet in het eigen settings-bestand de base-URL op de proxy, alleen als die exact de oude OpenRouter-URL is.
+function zetProxyUrl() {
+  const d = leesJson(OR_SETTINGS)
+  if (!isObject(d) || !isObject(d.env)) return false
+  if (d.env.ANTHROPIC_BASE_URL === OR_URL) {
+    schrijfJson(OR_SETTINGS, { ...d, env: { ...d.env, ANTHROPIC_BASE_URL: PX_URL } })
+    return true
+  }
+  return d.env.ANTHROPIC_BASE_URL === PX_URL
+}
+
 // `openrouter poort`: neemt metingen van de mod over (JSON op stdin, mag leeg), zet de shim met de
 // startcheck erin (alleen als er al een claude-or van futureflow klaarstaat) en schrijft het poortbestand.
-function poort() {
+// Sinds 0.16.0 ook: proxybestanden bijwerken en een oude base-URL naar de proxy zetten.
+async function poort() {
   const invoer = process.stdin.isTTY ? '' : leesStdin().trim()
   if (invoer) {
     let d
@@ -276,7 +348,10 @@ function poort() {
     bewaarMetingen(d)
   }
   let shim = false
+  let proxy = false
   if (leesJson(OR_SETTINGS) !== undefined) {
+    proxy = zetProxyUrl()
+    await werkProxyBij()
     try {
       zetShim()
       shim = true
@@ -285,13 +360,33 @@ function poort() {
       if (!(err instanceof Fout) || err.code !== 3) throw err
     }
   }
-  return { ...werkPoortBij(), shim }
+  return { ...werkPoortBij(), shim, proxy }
+}
+
+// rijen.json na een geslaagde keuze: `nu` = wat claude-or per rij gebruikt (2-4 leeg = Model 1, 5 alleen als
+// gekozen); een rij die veranderde krijgt het vorige id met tijd vooraan in `historie` (hoogstens 10).
+function zetRijen(k) {
+  const oud = leesJson(RIJEN)
+  const oudNu = isObject(oud?.nu) ? oud.nu : {}
+  const historie = {}
+  if (isObject(oud?.historie)) {
+    for (const s of SLOTS) if (Array.isArray(oud.historie[s])) historie[s] = oud.historie[s].filter(v => isObject(v) && geldigModel(v.id) && typeof v.t === 'number')
+  }
+  const nu = { m1: k.m1, m2: k.m2 ?? k.m1, m3: k.m3 ?? k.m1, m4: k.m4 ?? k.m1 }
+  if (k.m5 !== undefined) nu.m5 = k.m5
+  const t = Date.now()
+  for (const s of SLOTS) {
+    if (!geldigModel(oudNu[s]) || oudNu[s] === nu[s]) continue
+    historie[s] = [{ id: oudNu[s], t }, ...(historie[s] ?? []).filter(v => v.id !== oudNu[s])].slice(0, RIJ_HISTORIE_MAX)
+  }
+  const data = { nu, historie }
+  if (!gelijk(oud, data)) schrijfJson(RIJEN, data)
 }
 
 const opPad = () => (process.env.PATH ?? '').split(path.delimiter).some(d => d && path.resolve(d) === path.resolve(SHIM_DIR))
 
 // Zet OpenRouter klaar voor `claude-or`. Raakt ~/.claude/settings.json nooit aan.
-function zetOpenrouter(opties) {
+async function zetOpenrouter(opties) {
   // --m1 … --m5; oude flags als alias: --model en --opus → 1, --sonnet → 2, --fable → 3, --snel → 4.
   const k = {
     m1: opties.m1 ?? opties.opus ?? opties.model,
@@ -303,7 +398,7 @@ function zetOpenrouter(opties) {
   if (!geldigModel(k.m1)) throw new Fout('kies minstens model 1 (--m1 <id>)', 1)
   for (const s of SLOTS) if (k[s] !== undefined && !geldigModel(k[s])) throw new Fout(`ongeldig model voor --${s}`, 1)
   if (leesKey(OR_SERVICE, OR_ACCOUNT) === undefined) throw new Fout('geen OpenRouter-key in de sleutelhanger; bewaar eerst een key', 4)
-  const gewenst = orInstellingen(k)
+  const gewenst = orInstellingen(k, PX_POORT)
   // Startcheck: niets klaarzetten met een model dat niet cachet of nog niet gemeten is.
   const oordeel = poortOordeel(instellingModellen(gewenst), leesMetingen())
   if (!oordeel.ok) throw new Fout(`${poortTekst(oordeel.redenen)}; niets klaargezet`, 7)
@@ -312,6 +407,8 @@ function zetOpenrouter(opties) {
     schrijfJson(OR_SETTINGS, gewenst)
     gewijzigd = true
   }
+  zetRijen(k)
+  await werkProxyBij()
   if (zetShim()) gewijzigd = true
   werkPoortBij()
   return { modus: 'openrouter', gewijzigd, settings: OR_SETTINGS, shim: SHIM, start: START, opPad: opPad() }
@@ -323,13 +420,17 @@ function orKlaar() {
   const env = isObject(d?.env) ? d.env : {}
   const uit = {}
   const m1 = env.ANTHROPIC_MODEL ?? env.ANTHROPIC_DEFAULT_OPUS_MODEL
-  if (d?.apiKeyHelper === orInstellingen({ m1: 'a/b' }).apiKeyHelper && env.ANTHROPIC_BASE_URL === OR_URL && geldigModel(m1)) {
+  // Klaar met de proxy-URL, of (van vóór 0.16) nog de oude OpenRouter-URL tot `openrouter poort` hem omzet.
+  if (d?.apiKeyHelper === orInstellingen({ m1: 'a/b' }).apiKeyHelper && (env.ANTHROPIC_BASE_URL === PX_URL || env.ANTHROPIC_BASE_URL === OR_URL) && geldigModel(m1)) {
     uit.orKlaar = true
     // Wat claude-or nu per model gebruikt (2-4 al met terugval op 1; 5 alleen als gezet).
     uit.orM1 = m1
     for (const [slot, sleutel] of [['orM2', 'ANTHROPIC_DEFAULT_SONNET_MODEL'], ['orM3', 'ANTHROPIC_DEFAULT_FABLE_MODEL'], ['orM4', 'ANTHROPIC_DEFAULT_HAIKU_MODEL'], ['orM5', 'ANTHROPIC_CUSTOM_MODEL_OPTION']]) {
       if (geldigModel(env[sleutel])) uit[slot] = env[sleutel]
     }
+    // 0.17.0: modellen die cache.json zwak noemt (de proxy stopt een model door dat daar te zetten).
+    const metingen = leesMetingen()
+    uit.orGestopt = instellingModellen(d).filter(id => metingen[id]?.oordeel === 'zwak')
     // Oude namen (kaart Automatisch wisselen, tests): hoofd = 1, snel = 4.
     uit.orModel = m1
     uit.orSnel = uit.orM4 ?? m1
@@ -342,6 +443,9 @@ function orKlaar() {
     uit.orShim = false
   }
   uit.orOpPad = opPad()
+  // Proxy: wijst het eigen settings-bestand naar de proxy, dan is er een logboek.
+  uit.orProxy = env.ANTHROPIC_BASE_URL === PX_URL
+  if (uit.orProxy) uit.orLogboek = `${PX_URL}/`
   return uit
 }
 
@@ -429,7 +533,7 @@ function vlagen(rest) {
   return uit
 }
 
-function zetModus(naar, opties = {}) {
+async function zetModus(naar, opties = {}) {
   if (!MODI.includes(naar)) throw new Fout('kies: modus api|abonnement|openrouter', 1)
   if (naar === 'openrouter') return zetOpenrouter(opties)
   const doel = doelPad()
@@ -675,14 +779,14 @@ export async function main(args) {
     if (cmd === 'zet-key' && rest.length === 0) console.log(JSON.stringify(zetKey()))
     else if (cmd === 'wis-key' && rest.length === 0) console.log(JSON.stringify(wisKey()))
     else if (cmd === 'status' && rest.length === 0) console.log(JSON.stringify(status()))
-    else if (cmd === 'modus' && rest.length >= 1) console.log(JSON.stringify(zetModus(sub, vlagen(vlag))))
+    else if (cmd === 'modus' && rest.length >= 1) console.log(JSON.stringify(await zetModus(sub, vlagen(vlag))))
     else if (cmd === 'takenlijst' && rest.length === 1) console.log(JSON.stringify(takenlijst(rest[0])))
     else if (cmd === 'openrouter' && sub === 'zet-key' && vlag.length === 0) console.log(JSON.stringify(zetKey(true)))
     else if (cmd === 'openrouter' && sub === 'wis-key' && vlag.length === 0) console.log(JSON.stringify(wisKey(true)))
     else if (cmd === 'openrouter' && sub === 'modellen') console.log(JSON.stringify(await modellen(vlagen(vlag))))
     else if (cmd === 'openrouter' && sub === 'test') console.log(JSON.stringify(await test(vlagen(vlag))))
     else if (cmd === 'openrouter' && sub === 'cachetest') console.log(JSON.stringify(await cachetest(vlagen(vlag))))
-    else if (cmd === 'openrouter' && sub === 'poort' && vlag.length === 0) console.log(JSON.stringify(poort()))
+    else if (cmd === 'openrouter' && sub === 'poort' && vlag.length === 0) console.log(JSON.stringify(await poort()))
     else if (cmd === 'openrouter' && sub === 'model-weg') console.log(JSON.stringify(modelWeg(vlagen(vlag))))
     else if (cmd === 'openrouter' && sub === 'opruimen' && vlag.length === 0) console.log(JSON.stringify(ruimOp()))
     else {

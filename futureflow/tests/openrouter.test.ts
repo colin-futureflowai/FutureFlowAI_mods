@@ -12,7 +12,7 @@ const MODELLEN = [
 ]
 
 type Modus = 'abonnement' | 'api' | 'openrouter'
-type Opties = { cachetest?: Record<string, unknown>; veel?: boolean; modus?: Modus; orKey?: boolean; store?: Record<string, unknown>; rateLimits?: unknown[]; test?: unknown; env?: Record<string, string>; weiger?: string }
+type Opties = { proxy?: boolean; surfaces?: string[]; openFout?: boolean; cachetest?: Record<string, unknown>; veel?: boolean; modus?: Modus; orKey?: boolean; store?: Record<string, unknown>; rateLimits?: unknown[]; test?: unknown; env?: Record<string, string>; weiger?: string; orRijen?: Record<string, unknown> }
 
 // Nep-omgeving met een nep-cli/api.mjs; alle mocks vóór de eerste $-aanroep.
 function fake(on: any, o: Opties = {}) {
@@ -30,6 +30,7 @@ function fake(on: any, o: Opties = {}) {
   on('env.get', ($: any, e: { name: string }) => ({ value: ({ HOME: '/home/t', PATH: '/usr/bin', ...o.env } as Record<string, string>)[e.name] }))
   on('session.id', () => ({ value: 'sessie-1' }))
   on('session.cwd', () => ({ value: '/proj' }))
+  on('session.surfaces', () => ({ value: o.surfaces ?? ['terminal'] }))
   on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200000 }, rateLimits: o.rateLimits ?? [] } }))
   on('session.measure', () => ({ changed: [] }) as never)
   on('session.start', ($: any, e: any) => e)
@@ -53,7 +54,12 @@ function fake(on: any, o: Opties = {}) {
   on('ui.panes', () => ({ value: [] }))
   on('ui.open', () => ({ value: { isPlaced: true } }))
   const envs: Array<Record<string, string> | undefined> = []
+  const geopend: string[][] = []
   on('process.run', ($: any, e: { argv: string[]; init?: { stdin?: string; env?: Record<string, string> } }) => {
+    if (e.argv[0] === '/usr/bin/open') {
+      geopend.push(e.argv)
+      return { value: { exitCode: o.openFout ? 1 : 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    }
     const ok = (stdout: unknown) => ({ value: { exitCode: 0, stdout: JSON.stringify(stdout) + '\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
     const fout = (exitCode: number, stderr: string) => ({ value: { exitCode, stdout: '', stderr: `[api] ${stderr}\n`, isStdoutTruncated: false, isStderrTruncated: false } })
     const i = e.argv.findIndex(a => a.endsWith('api.mjs'))
@@ -63,7 +69,7 @@ function fake(on: any, o: Opties = {}) {
     envs.push(e.init?.env)
     aanroepen.push({ args, argv: e.argv, stdin })
     if (args[0] === 'status') {
-      return ok({ heeftKey: false, staart: '', modus: cli.modus === 'openrouter' ? 'abonnement' : cli.modus, oudeOr: cli.modus === 'openrouter', vreemdeHelper: false, vreemdeBasis: false, orHeeftKey: cli.orKey, orStaart: cli.orKey ? 'QRST' : '', orKlaar: !!cli.model, orShim: !!cli.model, orOpPad: true, ...(cli.model ? { orModel: cli.model, orSnel: cli.snel } : {}) })
+      return ok({ heeftKey: false, staart: '', modus: cli.modus === 'openrouter' ? 'abonnement' : cli.modus, oudeOr: cli.modus === 'openrouter', vreemdeHelper: false, vreemdeBasis: false, orHeeftKey: cli.orKey, orStaart: cli.orKey ? 'QRST' : '', orKlaar: !!cli.model, orShim: !!cli.model, orOpPad: true, ...(cli.model ? { orModel: cli.model, orSnel: cli.snel } : {}), ...(o.proxy ? { orProxy: true, orLogboek: 'http://127.0.0.1:20817/' } : {}), ...(o.orRijen ? { orKlaar: true, ...o.orRijen } : {}) })
     }
     if (args[0] === 'openrouter' && args[1] === 'zet-key') {
       cli.orKey = true
@@ -104,7 +110,7 @@ function fake(on: any, o: Opties = {}) {
     return fout(1, 'gebruik')
   })
   const modusAanroepen = () => aanroepen.filter(a => a.args[0] === 'modus').map(a => a.args.slice(1).join(' '))
-  return { cli, aanroepen, toasts, store, modusAanroepen, clock, envs }
+  return { cli, aanroepen, toasts, store, modusAanroepen, clock, envs, geopend }
 }
 
 const run = ($: any, command: string, args: string) =>
@@ -486,4 +492,89 @@ test('oude of kapotte keuze in de store crasht de tab niet', async ($, on) => {
     await ui.press({ key: 'meer-wisselen' } as any)
     await ui.unmount()
   }
+})
+
+test('0.17: keuze volgt het settings-bestand bij openen; 2-4 gelijk aan 1 = leeg; zonder bestand blijft de store', async ($, on) => {
+  const f = fake(on, { orKey: true, store: { 'openrouter.keuze': { m1: 'oud/een', m2: 'oud/twee' } }, orRijen: { orM1: 'nieuw/een', orM2: 'nieuw/een', orM3: 'x/drie', orM4: 'nieuw/een', orM5: 'x/vijf' } })
+  await run($, 'futureflow', 'wisselen')
+  await f.clock.settle()
+  expect(f.store.get('openrouter.keuze')).toEqual({ m1: 'nieuw/een', m3: 'x/drie', m5: 'x/vijf' })
+  const ui = await $.ui.mount(PANE('terminal'))
+  expect(await ui.find({ type: 'Text', text: 'nieuw/een' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'x/drie' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'oud/twee' })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('0.17: zonder settings-bestand blijft de keuze in de store', async ($, on) => {
+  const f = fake(on, { orKey: true, store: { 'openrouter.keuze': { m1: 'oud/een', m2: 'oud/twee' } } })
+  await run($, 'futureflow', 'wisselen')
+  await f.clock.settle()
+  expect(f.store.get('openrouter.keuze')).toEqual({ m1: 'oud/een', m2: 'oud/twee' })
+})
+
+test('0.17: een model dat de proxy stopte, geeft één rode regel', async ($, on) => {
+  const f = fake(on, { orKey: true, store: { 'openrouter.keuze': { m1: 'x/een' }, 'openrouter.cache': { 'x/een': { oordeel: 'goed', aandeel: 80, raak: 5, van: 5, gemeten: 1 } } }, orRijen: { orM1: 'x/een', orM2: 'x/een', orM3: 'x/een', orM4: 'x/een', orGestopt: ['x/een'] } })
+  await run($, 'futureflow', 'wisselen')
+  await f.clock.settle()
+  const ui = await $.ui.mount(PANE('terminal'))
+  expect(await ui.find({ type: 'Text', text: /x\/een cachet niet in claude-or en is gestopt/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('knop Logboek: alleen met de proxy en onder Meer; opent het adres in de terminal', async ($, on) => {
+  const f = fake(on, { orKey: true, proxy: true })
+  await run($, 'futureflow', '')
+  const ui = await $.ui.mount(PANE('terminal'))
+  await ui.press({ key: 'tab-wisselen' } as any)
+  await f.clock.settle()
+  expect(await ui.find({ type: 'Button', key: 'or-logboek' } as any)).toBeUndefined()
+  await ui.press({ key: 'meer-wisselen' } as any)
+  expect(await ui.find({ type: 'Button', key: 'or-logboek' } as any)).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /modellen kiezen, aanvragen en cache/ })).toBeDefined()
+  expect(await ui.find({ type: 'Button', key: 'or-logboek', label: 'Proxy' } as any)).toBeDefined()
+  await ui.press({ key: 'or-logboek' } as any)
+  await f.clock.settle()
+  expect(f.geopend).toEqual([['/usr/bin/open', 'http://127.0.0.1:20817/']])
+  expect(f.toasts.filter(t => t.startsWith('Logboek'))).toEqual([])
+  await ui.unmount()
+})
+
+test('knop Logboek: zonder proxy geen knop', async ($, on) => {
+  const f = fake(on, { orKey: true })
+  await run($, 'futureflow', '')
+  const ui = await $.ui.mount(PANE('terminal'))
+  await ui.press({ key: 'tab-wisselen' } as any)
+  await f.clock.settle()
+  await ui.press({ key: 'meer-wisselen' } as any)
+  expect(await ui.find({ type: 'Button', key: 'or-logboek' } as any)).toBeUndefined()
+  await ui.unmount()
+})
+
+test('knop Logboek: zonder terminal of als open faalt een toast met het adres', async ($, on) => {
+  const f = fake(on, { orKey: true, proxy: true, surfaces: ['desktop'] })
+  await run($, 'futureflow', '')
+  const ui = await $.ui.mount(PANE('desktop'))
+  await ui.press({ key: 'tab-wisselen' } as any)
+  await f.clock.settle()
+  await ui.press({ key: 'meer-wisselen' } as any)
+  await ui.press({ key: 'or-logboek' } as any)
+  await f.clock.settle()
+  expect(f.geopend).toEqual([])
+  expect(f.toasts.at(-1)).toBe('Logboek: http://127.0.0.1:20817/')
+  await ui.unmount()
+})
+
+test('knop Logboek: open faalt in de terminal: toast met het adres', async ($, on) => {
+  const f = fake(on, { orKey: true, proxy: true, openFout: true })
+  await run($, 'futureflow', '')
+  const ui = await $.ui.mount(PANE('terminal'))
+  await ui.press({ key: 'tab-wisselen' } as any)
+  await f.clock.settle()
+  await ui.press({ key: 'meer-wisselen' } as any)
+  await ui.press({ key: 'or-logboek' } as any)
+  await f.clock.settle()
+  expect(f.geopend.length).toBe(1)
+  expect(f.toasts.at(-1)).toBe('Logboek: http://127.0.0.1:20817/')
+  await ui.unmount()
 })
