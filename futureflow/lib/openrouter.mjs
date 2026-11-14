@@ -256,6 +256,10 @@ export function shimTekst(settingsPad, poortPad = String(settingsPad).replace(/[
     '  ANTHROPIC_CUSTOM_HEADERS="x-session-id: $SID"',
     'fi',
     'export ANTHROPIC_CUSTOM_HEADERS',
+    '# Aanmelden bij de proxy (0.18.0): zolang dit proces leeft (exec houdt het proces-id), blijft de proxy draaien.',
+    '# Mapnaam alleen letters, cijfers, . _ -, hoogstens 40 tekens. Mislukt het, dan start claude toch.',
+    'M=$(printf \'%s\' "${PWD##*/}" | LC_ALL=C /usr/bin/tr -cd \'A-Za-z0-9._-\' | /usr/bin/cut -c1-40)',
+    '/usr/bin/curl -fsS -m 2 -X POST -H \'content-type: application/json\' -H \'x-ff: 1\' -d "{\\"pid\\":$$,\\"sessie\\":\\"$SID\\",\\"map\\":\\"$M\\"}" "http://127.0.0.1:$PP/_ff/sessie" >/dev/null 2>&1 || true',
     'exec claude --settings "$S" "$@"',
     '',
   ].join('\n')

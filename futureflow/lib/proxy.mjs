@@ -1,4 +1,4 @@
-// Proxy voor claude-or (0.16.0, 0.17.0): pure regels zonder Node-API's en zonder imports, want dit bestand wordt
+// Proxy voor claude-or (0.16.0-0.18.0): pure regels zonder Node-API's en zonder imports, want dit bestand wordt
 // los gekopieerd naar ~/.claude/futureflow/openrouter/proxy/lib/ (naast bridge/or-proxy.mjs).
 // Headers doorgeven, usage meelezen uit JSON en SSE, logregel met telling raak/mis, de stand per sessie
 // en model, en de host-check tegen DNS-rebinding. De proxy bewaart nooit headers of inhoud.
@@ -7,7 +7,7 @@
 export const PROXY_POORT = 20817
 // Gelijk aan `version` in .claude-plugin/plugin.json (test). Een draaiende proxy met een andere versie
 // krijgt van de CLI een /_ff/stop.
-export const PROXY_VERSIE = '0.17.0'
+export const PROXY_VERSIE = '0.18.0'
 // Na zoveel ms zonder aanvraag (en zonder lopende aanvraag) stopt de proxy.
 export const PROXY_STIL_MS = 1_800_000
 // Het log roteert op deze grootte naar log.1.jsonl (één generatie).
@@ -92,8 +92,13 @@ export function gebruikUitJson(obj) {
   const aanbieder = typeof d.provider === 'string' ? d.provider : typeof bericht.provider === 'string' ? bericht.provider : undefined
   if (aanbieder) g.aanbieder = aanbieder.slice(0, 60)
   if (kosten !== undefined) g.kosten = kosten
+  const stop = stopVan(d.stop_reason) ?? stopVan(bericht.stop_reason)
+  if (stop) g.stop = stop
   return g
 }
+
+// stop_reason (0.18.0): alleen een korte naam, nooit inhoud.
+const stopVan = v => (typeof v === 'string' && /^[a-z_]{1,40}$/.test(v) ? v : undefined)
 
 // Leest een SSE-stroom mee: message_start (message.usage, message.provider) en message_delta (usage).
 // Latere waarden > 0 overschrijven eerdere. Een regel die over chunks verdeeld is, telt pas als hij compleet is.
@@ -102,6 +107,7 @@ export function maakSseLezer() {
   const g = { in: 0, uit: 0, read: 0, write: 0 }
   let aanbieder
   let kosten
+  let stop
   const neem = nieuw => {
     for (const k of ['in', 'uit', 'read', 'write']) if (nieuw[k] > 0) g[k] = nieuw[k]
     if (nieuw.kosten !== undefined) kosten = nieuw.kosten
@@ -126,6 +132,8 @@ export function maakSseLezer() {
     } else if (d.type === 'message_delta') {
       neem(uitUsage(d.usage))
       if (typeof d.provider === 'string') aanbieder = d.provider.slice(0, 60)
+      const s = stopVan(isObj(d.delta) ? d.delta.stop_reason : undefined)
+      if (s) stop = s
     }
   }
   return {
@@ -139,6 +147,7 @@ export function maakSseLezer() {
       const uit = { ...g }
       if (aanbieder) uit.aanbieder = aanbieder
       if (kosten !== undefined) uit.kosten = kosten
+      if (stop) uit.stop = stop
       return uit
     },
   }
@@ -324,4 +333,70 @@ export function geldigeSchrijf({ host, origin, xff, contentType, poort }) {
   if (!geldigeHost(host, poort) || xff !== '1') return false
   if (typeof contentType !== 'string' || !contentType.toLowerCase().startsWith('application/json')) return false
   return origin === undefined || origin === `http://127.0.0.1:${poort}` || origin === `http://localhost:${poort}`
+}
+
+// ---- 0.18.0: warm houden en meldingen ----
+
+// Gemeten 14-11-2026 (kimi-k3.1-pro): bij Wafer, InferenceNet en Modal leeft de cache zonder ping minstens
+// 13 min, bij InferenceNet en Modal ook 20 min; bij Wafer na 20 min alleen met pings. Daarom 8 min, niet 4.
+export const WARM_STAP_MS = 480_000
+// Standaard zo lang na de laatste echte aanvraag warm houden.
+export const WARM_MAX_MS = 1_200_000
+// Meldingen zo lang na de laatste echte aanvraag, als het antwoord op de gebruiker wacht.
+export const MELD_MS = Object.freeze([240_000, 600_000, 900_000])
+const WARM_MIN = 240_000
+const WARM_GRENS = 3_600_000
+
+// Instelling uit proxy.json; onzin of ontbrekend = de standaard. warmMs begrensd op 4-60 min.
+export function warmInstelling(ruw) {
+  const d = isObj(ruw) ? ruw : {}
+  const ms = typeof d.warmMs === 'number' && Number.isFinite(d.warmMs) ? Math.min(WARM_GRENS, Math.max(WARM_MIN, Math.round(d.warmMs))) : WARM_MAX_MS
+  return { warm: typeof d.warm === 'boolean' ? d.warm : true, warmMs: ms, meldingen: typeof d.meldingen === 'boolean' ? d.meldingen : true }
+}
+
+// Momenten (ms na de laatste echte aanvraag) voor een ping: stap, 2·stap, … zolang < warmMs.
+export function pingMomenten(warmMs, stap = WARM_STAP_MS) {
+  if (!(stap > 0) || !(warmMs > 0)) return []
+  const uit = []
+  for (let t = stap; t < warmMs; t += stap) uit.push(t)
+  return uit
+}
+
+// Het antwoord wacht op de gebruiker: er is een stop_reason en het is geen tool-aanroep of pauze.
+export function wachtOpGebruiker(stopReason) {
+  return typeof stopReason === 'string' && stopReason !== '' && stopReason !== 'tool_use' && stopReason !== 'pause_turn'
+}
+
+// Body voor een ping: dezelfde aanvraag met max_tokens 1 en zonder streamen; `thinking` weg (budget past niet).
+export function pingBody(body) {
+  const { thinking: _weg, ...rest } = isObj(body) ? body : {}
+  return { ...rest, max_tokens: 1, stream: false }
+}
+
+// Goed = 2xx en minstens RAAK_GRENS % van de invoer uit de cache.
+export function pingGoed(status, gebruik) {
+  const totaal = invoer(gebruik)
+  return is2xx(status) && totaal > 0 && (100 * telling(gebruik?.read)) / totaal >= RAAK_GRENS
+}
+
+// Mapnaam voor een melding: alleen letters, cijfers, spatie, . _ -; hoogstens 40 tekens.
+export function mapNaam(ruw) {
+  const n = typeof ruw === 'string' ? ruw.replace(/[^\p{L}\p{N} ._-]/gu, '').trim().slice(0, 40).trim() : ''
+  return n || 'sessie'
+}
+
+// Tekst van een melding; minuten naar beneden afgerond.
+export function meldTekst({ map, wachtMs, warmTotMs }) {
+  const min = ms => Math.floor(Math.max(0, ms) / 60_000)
+  const warm = typeof warmTotMs === 'number' && warmTotMs > wachtMs
+  return {
+    titel: `claude-or wacht · ${map}`,
+    tekst: `Al ${min(wachtMs)} min stil. ${warm ? `Cache blijft warm tot ${min(warmTotMs)} min.` : 'De volgende beurt is zonder cache.'}`,
+  }
+}
+
+// AppleScript voor `display notification`; \ en " geëscaped. Het geluid komt los van afplay.
+export function meldScript({ titel, tekst }) {
+  const q = v => String(v ?? '').replace(/[\\"]/g, c => `\\${c}`).replace(/[\r\n]+/g, ' ')
+  return `display notification "${q(tekst)}" with title "${q(titel)}"`
 }

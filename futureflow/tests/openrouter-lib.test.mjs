@@ -553,3 +553,71 @@ test('cacheMetingen en cacheStand: een eigen meting gaat voor de vaste lijst; on
   assert.equal(cacheStand({ id: 'openai/gpt-5' }, { 'openai/gpt-5': { ...goed, oordeel: 'zwak' } }).tekst, 'cachet niet in een agent-lus: duur in Claude Code')
   assert.match(cacheStand({ id: 'a/b' }, { 'a/b': { ...goed, oordeel: 'wisselend' } }).tekst, /wisselend/)
 })
+
+// ---- plan 10: de shim meldt de sessie aan bij de proxy (0.18.0) ----
+
+test('shimTekst: aanmelden via /_ff/sessie met x-ff: 1, vóór de exec en na het sessie-id; mislukt = toch starten', () => {
+  const t = shimTekst('/a/settings.json', undefined, { script: '/x/or-proxy.mjs', poort: 4321 })
+  assert.ok(t.includes('/_ff/sessie'))
+  assert.ok(t.includes("-H 'x-ff: 1'"))
+  const r = t.split('\n')
+  const aanmeld = r.findIndex(x => x.includes('/_ff/sessie'))
+  assert.ok(aanmeld > r.findIndex(x => x.startsWith('SID=')))
+  assert.ok(aanmeld < r.findIndex(x => x.startsWith('exec claude')))
+  assert.match(r[aanmeld], /\|\| true$/)
+})
+
+// Shim tegen een echte proxy op een vrije poort; nep-claude slaapt even, zodat de aanmelding te zien is.
+async function shimAanmelding(mapnaam) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ff-shim-'))
+  const ordir = path.join(dir, 'or')
+  fs.mkdirSync(ordir)
+  const werk = path.join(dir, mapnaam)
+  fs.mkdirSync(werk)
+  const inst = path.join(dir, 'settings.json')
+  fs.writeFileSync(inst, '{}')
+  fs.writeFileSync(path.join(dir, 'poort'), 'ok\n')
+  const uit = path.join(dir, 'claude.uit')
+  fs.writeFileSync(path.join(dir, 'claude'), `#!/bin/sh\n/bin/sleep 2\necho gestart > '${uit}'\n`, { mode: 0o755 })
+  const poort = await vrijePoort()
+  const px = spawn(process.execPath, [PROXY], { env: { ...process.env, OR_PROXY_POORT: String(poort), OPENROUTER_DIR: ordir, OPENROUTER_URL: 'http://127.0.0.1:9' }, stdio: 'ignore' })
+  const pxEinde = new Promise(r => px.on('exit', r))
+  try {
+    for (let i = 0; i < 100 && !(await stand(poort)); i++) await new Promise(r => setTimeout(r, 30))
+    const shim = path.join(dir, 'claude-or')
+    fs.writeFileSync(shim, shimTekst(inst, undefined, { script: PROXY, poort }), { mode: 0o755 })
+    const p = spawn('/bin/sh', [shim], { cwd: werk, env: { PATH: `${dir}:/usr/bin:/bin` }, stdio: 'ignore' })
+    const klaar = new Promise(r => p.on('close', r))
+    let tijdens
+    for (let i = 0; i < 60; i++) {
+      tijdens = await stand(poort)
+      if (tijdens?.aangemeld === 1) break
+      await new Promise(r => setTimeout(r, 30))
+    }
+    const code = await klaar
+    return { tijdens, code, gestart: fs.existsSync(uit), pid: p.pid }
+  } finally {
+    px.kill('SIGKILL')
+    await pxEinde
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+}
+
+test('shim meldt zich aan: aangemeld 1 tijdens claude, met sessie-id en mapnaam', async () => {
+  const r = await shimAanmelding('mijn-proj_1.x')
+  assert.equal(r.code, 0)
+  assert.equal(r.gestart, true)
+  assert.equal(r.tijdens?.aangemeld, 1)
+  const sessies = Object.entries(r.tijdens.wacht)
+  assert.equal(sessies.length, 1)
+  assert.match(sessies[0][0], /^[0-9A-Za-z-]{8,}$/)
+  assert.equal(sessies[0][1].map, 'mijn-proj_1.x')
+})
+
+test('shim: een map met spatie, aanhalingsteken en backslash breekt de aanmelding niet; claude start', async () => {
+  const r = await shimAanmelding('a b"c\\d$(e)')
+  assert.equal(r.code, 0)
+  assert.equal(r.gestart, true)
+  assert.equal(r.tijdens?.aangemeld, 1)
+  assert.equal(Object.values(r.tijdens.wacht)[0].map, 'abcde')
+})

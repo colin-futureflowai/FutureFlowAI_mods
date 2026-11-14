@@ -272,3 +272,89 @@ test('geldigeSchrijf: host, x-ff, json en origin', () => {
   assert.equal(geldigeSchrijf({ ...goed, contentType: 'text/plain' }), false)
   assert.equal(geldigeSchrijf({ ...goed, host: 'evil.example:20817' }), false)
 })
+
+// ---- plan 10: warm houden en meldingen (0.18.0) ----
+
+import {
+  MELD_MS, mapNaam, meldScript, meldTekst, pingBody, pingGoed, pingMomenten, WARM_MAX_MS, WARM_STAP_MS, wachtOpGebruiker, warmInstelling,
+} from '../lib/proxy.mjs'
+
+test('warm: constanten en pingMomenten', () => {
+  assert.equal(WARM_STAP_MS, 480_000)
+  assert.equal(WARM_MAX_MS, 1_200_000)
+  assert.deepEqual([...MELD_MS], [240_000, 600_000, 900_000])
+  assert.deepEqual(pingMomenten(1_200_000), [480000, 960000])
+  assert.deepEqual(pingMomenten(1_200_000, 240_000), [240000, 480000, 720000, 960000])
+  assert.deepEqual(pingMomenten(240_000), [])
+  assert.deepEqual(pingMomenten(1000, 300), [300, 600, 900])
+  assert.deepEqual(pingMomenten(1000, 0), [])
+})
+
+test('warmInstelling: standaard, grenzen en onzin', () => {
+  const std = { warm: true, warmMs: WARM_MAX_MS, meldingen: true }
+  assert.deepEqual(warmInstelling('x'), std)
+  assert.deepEqual(warmInstelling(undefined), std)
+  assert.deepEqual(warmInstelling({ warmMs: 5 }), { ...std, warmMs: 240000 })
+  assert.deepEqual(warmInstelling({ warmMs: 99_999_999 }), { ...std, warmMs: 3_600_000 })
+  assert.deepEqual(warmInstelling({ warm: false, meldingen: false, warmMs: 600_000 }), { warm: false, warmMs: 600_000, meldingen: false })
+  assert.deepEqual(warmInstelling({ warm: 'nee', warmMs: 'x' }), std)
+})
+
+test('wachtOpGebruiker: alleen een stop_reason anders dan tool_use en pause_turn', () => {
+  assert.equal(wachtOpGebruiker('end_turn'), true)
+  assert.equal(wachtOpGebruiker('max_tokens'), true)
+  assert.equal(wachtOpGebruiker('tool_use'), false)
+  assert.equal(wachtOpGebruiker('pause_turn'), false)
+  assert.equal(wachtOpGebruiker(undefined), false)
+  assert.equal(wachtOpGebruiker(''), false)
+})
+
+test('pingBody: max_tokens 1, niet streamen, zonder thinking; origineel ongewijzigd', () => {
+  const origineel = { max_tokens: 8000, stream: true, thinking: { type: 'enabled' }, model: 'a' }
+  const kopie = JSON.parse(JSON.stringify(origineel))
+  const p = pingBody(origineel)
+  assert.equal(p.max_tokens, 1)
+  assert.equal(p.stream, false)
+  assert.equal('thinking' in p, false)
+  assert.equal(p.model, 'a')
+  assert.deepEqual(origineel, kopie)
+})
+
+test('pingGoed: 2xx en minstens RAAK_GRENS % uit de cache', () => {
+  assert.equal(pingGoed(200, { read: 900, in: 100, uit: 1, write: 0 }), true)
+  assert.equal(pingGoed(200, { read: 0, in: 1000, uit: 1, write: 0 }), false)
+  assert.equal(pingGoed(429, { read: 900, in: 100, uit: 1, write: 0 }), false)
+  assert.equal(pingGoed(200, { read: 0, in: 0, uit: 0, write: 0 }), false)
+})
+
+test('mapNaam: alleen veilige tekens, hoogstens 40, leeg = sessie', () => {
+  const n = mapNaam('a"b\\c$(x)')
+  for (const t of ['"', '\\', '$', '(', ')']) assert.ok(!n.includes(t), t)
+  assert.equal(n, 'abcx')
+  assert.equal(mapNaam('mijn map-1_2.x'), 'mijn map-1_2.x')
+  assert.equal(mapNaam('x'.repeat(60)).length, 40)
+  assert.equal(mapNaam(''), 'sessie')
+  assert.equal(mapNaam('"$()'), 'sessie')
+  assert.equal(mapNaam(42), 'sessie')
+})
+
+test('meldTekst: titel, warm tot, of zonder cache', () => {
+  assert.deepEqual(meldTekst({ map: 'proj', wachtMs: 4 * 60_000 + 59_000, warmTotMs: 20 * 60_000 }), { titel: 'claude-or wacht · proj', tekst: 'Al 4 min stil. Cache blijft warm tot 20 min.' })
+  assert.equal(meldTekst({ map: 'proj', wachtMs: 15 * 60_000, warmTotMs: null }).tekst, 'Al 15 min stil. De volgende beurt is zonder cache.')
+  assert.equal(meldTekst({ map: 'proj', wachtMs: 25 * 60_000, warmTotMs: 20 * 60_000 }).tekst, 'Al 25 min stil. De volgende beurt is zonder cache.')
+})
+
+test('meldScript: display notification met geëscapete aanhalingstekens en backslashes, zonder sound name', () => {
+  const s = meldScript({ titel: 'a\\b', tekst: 'zei "hoi"' })
+  assert.equal(s, 'display notification "zei \\"hoi\\"" with title "a\\\\b"')
+  assert.ok(!s.includes('sound name'))
+})
+
+test('stop_reason: SSE uit message_delta.delta, JSON van het bovenste niveau', () => {
+  const l = maakSseLezer()
+  l.voeg(`data: ${JSON.stringify({ type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 3 } })}\n`)
+  assert.equal(l.uit().stop, 'end_turn')
+  assert.equal(maakSseLezer().uit().stop, undefined)
+  assert.equal(gebruikUitJson({ stop_reason: 'tool_use', usage: { input_tokens: 1 } }).stop, 'tool_use')
+  assert.equal(gebruikUitJson({ usage: {} }).stop, undefined)
+})

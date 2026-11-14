@@ -4,7 +4,7 @@ import type { EngineInterface as Engine, Register } from 'claude-code'
 import type { MinifyInkorting, MinifyNiveau, MinifyTeller } from '../types'
 
 import { accountsBeurtKlaar } from './accounts'
-import { apiMeetLos, apiTurnComplete } from './api'
+import { apiMeetLos, apiTurnComplete, bewaakProxy } from './api'
 import { failOpen, log, oud } from './ctx'
 import { openDashboard } from './paneel'
 import { kaart, knop, knoppen, leeg, paneelVan, raster, stat, uitleg } from './paneel-ui'
@@ -364,6 +364,8 @@ export const registerMinify = (on: Parameters<Register>[0]): void => {
     apiMeetLos($)
     // Tab Accounts: sessiebestand op tussen en kijken of er gewisseld moet worden, los van de beurt.
     void accountsBeurtKlaar($, e).catch(() => undefined)
+    // Proxy van claude-or: draait hij nog? Anders los opnieuw starten (hoogstens eens per 60 s).
+    void bewaakProxy($).catch(err => failOpen($, err))
     if (minifyOud) return result
     if (e.agentId || !e.usage || e.isAborted) return result
     const out = e.usage.output_tokens

@@ -12,7 +12,7 @@ const MODELLEN = [
 ]
 
 type Modus = 'abonnement' | 'api' | 'openrouter'
-type Opties = { proxy?: boolean; surfaces?: string[]; openFout?: boolean; cachetest?: Record<string, unknown>; veel?: boolean; modus?: Modus; orKey?: boolean; store?: Record<string, unknown>; rateLimits?: unknown[]; test?: unknown; env?: Record<string, string>; weiger?: string; orRijen?: Record<string, unknown> }
+type Opties = { proxy?: boolean; surfaces?: string[]; openFout?: boolean; cachetest?: Record<string, unknown>; veel?: boolean; modus?: Modus; orKey?: boolean; store?: Record<string, unknown>; rateLimits?: unknown[]; test?: unknown; env?: Record<string, string>; weiger?: string; orRijen?: Record<string, unknown>; proxyLeeft?: boolean; bestaat?: string[] }
 
 // Nep-omgeving met een nep-cli/api.mjs; alle mocks vóór de eerste $-aanroep.
 function fake(on: any, o: Opties = {}) {
@@ -48,14 +48,26 @@ function fake(on: any, o: Opties = {}) {
       : '',
   }))
   on('fs.write', () => ({ value: undefined }))
-  on('fs.exists', () => ({ value: false }))
+  on('fs.exists', ($: any, e: { path: string }) => ({ value: (o.bestaat ?? []).includes(e.path) }))
   on('fs.list', () => ({ value: [] }))
+  // Proxy (0.18.0): standaard antwoordt er niets (zoals een dichte poort).
+  const gevraagd: string[] = []
+  on('http.fetch', ($: any, e: { url: string }) => {
+    gevraagd.push(e.url)
+    if (!o.proxyLeeft) throw new Error('ECONNREFUSED')
+    return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify({ versie: '0.18.0', sessies: {} }) } }
+  })
+  const gestart: Array<{ argv: string[]; env?: Record<string, string> }> = []
   on('command.register', () => ({ value: undefined }) as any)
   on('ui.panes', () => ({ value: [] }))
   on('ui.open', () => ({ value: { isPlaced: true } }))
   const envs: Array<Record<string, string> | undefined> = []
   const geopend: string[][] = []
   on('process.run', ($: any, e: { argv: string[]; init?: { stdin?: string; env?: Record<string, string> } }) => {
+    if (e.argv[0] === '/bin/sh') {
+      gestart.push({ argv: e.argv, env: e.init?.env })
+      return { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    }
     if (e.argv[0] === '/usr/bin/open') {
       geopend.push(e.argv)
       return { value: { exitCode: o.openFout ? 1 : 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
@@ -110,7 +122,7 @@ function fake(on: any, o: Opties = {}) {
     return fout(1, 'gebruik')
   })
   const modusAanroepen = () => aanroepen.filter(a => a.args[0] === 'modus').map(a => a.args.slice(1).join(' '))
-  return { cli, aanroepen, toasts, store, modusAanroepen, clock, envs, geopend }
+  return { cli, aanroepen, toasts, store, modusAanroepen, clock, envs, geopend, gevraagd, gestart }
 }
 
 const run = ($: any, command: string, args: string) =>
@@ -577,4 +589,56 @@ test('knop Logboek: open faalt in de terminal: toast met het adres', async ($, o
   expect(f.geopend.length).toBe(1)
   expect(f.toasts.at(-1)).toBe('Logboek: http://127.0.0.1:20817/')
   await ui.unmount()
+})
+
+// ---- plan 10: vangnet voor de proxy (0.18.0) ----
+
+const PX_SCRIPT = '/home/t/.claude/futureflow/openrouter/proxy/bridge/or-proxy.mjs'
+const BEURT = { answer: 'x', durationMs: 1, isAborted: false, reason: 'answer' } as any
+
+test('vangnet: claude-or-sessie, proxy antwoordt niet: turn.complete start hem één keer los, met toast; binnen 60 s niets', async ($, on) => {
+  const f = fake(on, { env: { FUTUREFLOW_OPENROUTER: '1' }, bestaat: [PX_SCRIPT] })
+  await $.session.start(START)
+  await f.clock.settle()
+  // session.start keek al: één start.
+  expect(f.gestart.length).toBe(1)
+  expect(f.gevraagd[0]).toBe('http://127.0.0.1:20817/_ff/stand')
+  const s = f.gestart[0]!
+  expect(s.argv.slice(0, 2)).toEqual(['/bin/sh', '-c'])
+  expect(s.argv[2]).toContain('nohup /usr/bin/env node')
+  expect(s.argv.at(-1)).toBe(PX_SCRIPT)
+  expect(s.env?.OPENROUTER_DIR).toBe('/home/t/.claude/futureflow/openrouter')
+  expect(s.env?.OR_PROXY_POORT).toBe('20817')
+  expect(s.env?.PATH?.startsWith('/opt/homebrew/bin:')).toBe(true)
+  expect(f.toasts.filter(t => t === 'Proxy van futureflow opnieuw gestart').length).toBe(1)
+  // Binnen 60 s: niets.
+  await $.turn.complete({ ...BEURT, turnId: 't1' })
+  await f.clock.settle()
+  expect(f.gestart.length).toBe(1)
+  // Na 60 s: turn.complete kijkt opnieuw en start hem weer.
+  await f.clock.advance(61_000)
+  await $.turn.complete({ ...BEURT, turnId: 't2' })
+  await f.clock.settle()
+  expect(f.gestart.length).toBe(2)
+  expect(f.toasts.filter(t => t === 'Proxy van futureflow opnieuw gestart').length).toBe(2)
+})
+
+test('vangnet: buiten claude-or niets; proxy antwoordt = geen start', async ($, on) => {
+  const f = fake(on, { bestaat: [PX_SCRIPT] })
+  await $.session.start(START)
+  await $.turn.complete({ ...BEURT, turnId: 't1' })
+  await f.clock.settle()
+  expect(f.gevraagd).toEqual([])
+  expect(f.gestart).toEqual([])
+})
+
+test('vangnet: claude-or-sessie met een levende proxy start niets', async ($, on) => {
+  const f = fake(on, { env: { FUTUREFLOW_OPENROUTER: '1' }, bestaat: [PX_SCRIPT], proxyLeeft: true })
+  await $.session.start(START)
+  await f.clock.advance(61_000)
+  await $.turn.complete({ ...BEURT, turnId: 't1' })
+  await f.clock.settle()
+  expect(f.gevraagd.length).toBe(2)
+  expect(f.gestart).toEqual([])
+  expect(f.toasts.filter(t => t.includes('Proxy van futureflow'))).toEqual([])
 })

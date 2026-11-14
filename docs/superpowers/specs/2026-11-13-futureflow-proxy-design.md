@@ -88,6 +88,17 @@ Live gemeten bij de test van fase 1 (13-11-2026): OpenRouter stuurt `provider` o
 - Het eigen settings-bestand is de bron voor Model 1-5. De mod leest de keuze daaruit terug (`status`), zodat `/futureflow` en de pagina hetzelfde tonen.
 - Schrijvende paden (`POST /_ff/…`) eisen een geldige `Host`, de header `x-ff: 1`, `content-type: application/json`, en een `Origin` die ontbreekt of het eigen adres is.
 
+### Fase 2b: doordraaien, cache warm houden en meldingen (plan 10, 0.18.0)
+
+Aanleiding (13-11-2026, live): de proxy stopte na 30 minuten zonder aanvragen terwijl een `claude-or`-sessie nog open stond; die sessie liep daarna tegen een dichte poort. In dezelfde sessie werkte de bescherming wel: twee missers bij Wafer, wissel naar Modal, daarna 88-100 % uit cache.
+
+- **Doordraaien.** De shim meldt de sessie aan (`POST /_ff/sessie` met het proces-id van de shim, dat `exec claude` behoudt, het sessie-id en de naam van de map). De proxy stopt pas als geen aangemeld proces meer leeft én er 30 minuten geen aanvraag was. Vangnet in de mod: in een `claude-or`-sessie controleert de mod na elke beurt of de proxy antwoordt en start hem anders opnieuw.
+- **Warm houden.** Per sessie onthoudt de proxy, alleen in het geheugen, de laatste aanvraag van de hoofdbaan (de baan met de grootste invoer). Blijft de sessie stil, dan stuurt hij die aanvraag elke 8 minuten opnieuw met `max_tokens: 1` en zonder streamen, tot 20 minuten na de laatste echte aanvraag (pings op 8 en 16 minuten). Een ping telt niet mee voor raak/mis, de vaste aanbieder of de harde stop. Komen twee pings op rij niet uit de cache (< 50 %) of geeft een ping een fout, dan stopt het warm houden voor die sessie: verder pingen zou alleen geld kosten.
+- **Gemeten 14-11-2026** (kimi-k3.1-pro, vast op één aanbieder, één tot twee runs): zonder ping raakt de cache na 13 minuten nog bij Wafer, InferenceNet en Modal, en na 20 minuten bij InferenceNet en Modal maar niet bij Wafer. Met pings raakte Wafer na 20 minuten wel. Pings kwamen soms toevallig koud terug terwijl de cache er nog was (3 van 17). Daarom een stap van 8 minuten in plaats van 4, en stoppen pas na twee koude pings op rij. Na 30 minuten is niet gemeten: de maandlimiet van de key was bereikt.
+- **Meldingen met geluid.** Wacht de sessie op de gebruiker (het laatste antwoord van de hoofdbaan eindigde niet op een tool-aanroep), dan geeft de proxy na 4, 10 en 15 minuten een macOS-melding met geluid: welke map wacht, hoe lang, en tot wanneer de cache warm blijft. Een nieuwe aanvraag van die sessie zet alles terug. Wachten op een toestemmingsvraag ziet de proxy niet; dat valt hier buiten.
+- **Instellen op de pagina.** Warm houden aan/uit, de duur (standaard 20 minuten) en meldingen aan/uit staan in `<OPENROUTER_DIR>/proxy.json`, dat alleen de proxy schrijft. De pagina toont per sessie: wacht sinds, warm tot, aantal pings en de tokens die de pings lazen.
+- De bewaarde aanvraag en de bijbehorende headers (met de key) staan alleen in het geheugen van de proxy, nooit op schijf of in het log.
+
 ### Fase 4: lokale modellen
 
 Vertaler tussen het Anthropic-formaat en het OpenAI-formaat (berichten, tools, streaming) voor Ollama en LM Studio.

@@ -12,6 +12,7 @@ import type { Beschikbaar, Door, Modus } from '../lib/api.mjs'
 import { instellingenVan, kettingAan } from '../lib/accounts.mjs'
 import { cacheMetingen, geldigModel, keuzeVan, orKosten, OR_URL, SLOTS, START } from '../lib/openrouter.mjs'
 import type { OrKeuze as LibOrKeuze, Slot } from '../lib/openrouter.mjs'
+import { PROXY_POORT, proxyUrl } from '../lib/proxy.mjs'
 
 // Tab API: de API-key in de macOS-sleutelhanger en wisselen tussen abonnement en API, met de hand
 // of automatisch op de rate limits. Alles buiten de plugin (settings.json, sleutelhanger) gaat via
@@ -204,6 +205,8 @@ export async function startApi($: Engine): Promise<void> {
     // --settings komt niet in de procesomgeving (gemeten 11-11-2026); ANTHROPIC_BASE_URL is alleen terugval.
     sessieOpOpenrouter =
       gelezen?.oudeOr === true || (await $.env.get('FUTUREFLOW_OPENROUTER')) === '1' || (await $.env.get('ANTHROPIC_BASE_URL')) === OR_URL
+    // Vangnet (0.18.0): draait de proxy niet, dan los opnieuw starten.
+    void bewaakProxy($).catch(err => failOpen($, err))
     // /model → Enter in claude-or zet het OpenRouter-model als standaard voor alle sessies: melden.
     if (gelezen) await controleerStandaardModel($, gelezen.model)
     if (gelezen?.oudeOr) void ruimOudeOrOp($).catch(err => failOpen($, err))
@@ -230,6 +233,49 @@ export async function startApi($: Engine): Promise<void> {
   } catch (err) {
     failOpen($, err)
   }
+}
+
+// Vangnet voor de proxy (0.18.0): de shim meldt de sessie aan en de proxy draait door zolang die leeft;
+// stopte hij toch (crash, kill), dan start de mod hem hier opnieuw. Alleen in een claude-or-sessie, hoogstens
+// eens per 60 s, bij session.start en na elke beurt (minify), altijd los van de beurt.
+// Los gestart via sh + nohup (zoals de shim): een kind van $.process.spawn stopt met deze module, en de proxy
+// is van alle claude-or-sessies.
+const BEWAAK_MS = 60_000
+const STAND_WACHT_MS = 3000
+let bewaakLaatst = Number.NEGATIVE_INFINITY
+let bewaakBezig = false
+
+export async function bewaakProxy($: Engine): Promise<void> {
+  if (!sessieOpOpenrouter || bewaakBezig) return
+  const nu = await $.clock.now()
+  if (nu - bewaakLaatst < BEWAAK_MS) return
+  bewaakLaatst = nu
+  bewaakBezig = true
+  try {
+    const ruw = await $.env.get('OR_PROXY_POORT')
+    const poort = ruw && /^\d{1,5}$/.test(ruw) ? Number(ruw) : PROXY_POORT
+    if (await proxyAntwoordt($, `${proxyUrl(poort)}/_ff/stand`)) return
+    const home = (await $.env.get('HOME')) ?? (await $.env.get('USERPROFILE'))
+    const dir = (await $.env.get('OPENROUTER_DIR')) || (home ? `${home}/.claude/futureflow/openrouter` : undefined)
+    if (!dir) return
+    const script = `${dir}/proxy/bridge/or-proxy.mjs`
+    // Nog nooit klaargezet (geen kopie van de CLI): niets te starten.
+    if (!(await $.fs.exists(script).catch(() => false))) return
+    const pad = (await $.env.get('PATH')) || '/usr/bin:/bin'
+    const r = await $.process.run(['/bin/sh', '-c', 'nohup /usr/bin/env node "$1" </dev/null >/dev/null 2>&1 &', 'or-proxy', script], {
+      env: { PATH: `/opt/homebrew/bin:/usr/local/bin:${pad}`, OPENROUTER_DIR: dir, OR_PROXY_POORT: String(poort) },
+    })
+    if (r.exitCode === 0) $.ui.toast('Proxy van futureflow opnieuw gestart')
+  } finally {
+    bewaakBezig = false
+  }
+}
+
+// Antwoordt de proxy op /_ff/stand (met "versie")? Geen antwoord binnen STAND_WACHT_MS = nee.
+async function proxyAntwoordt($: Engine, url: string): Promise<boolean> {
+  const vraag = $.http.fetch(url).then(r => r.ok && r.text.includes('"versie"'), () => false)
+  const wacht = $.clock.sleep(STAND_WACHT_MS).then(() => false, () => false)
+  return Promise.race([vraag, wacht])
 }
 
 // Startcheck (0.15.0): claude-or start alleen met modellen die gemeten zijn en cachen. De CLI beslist

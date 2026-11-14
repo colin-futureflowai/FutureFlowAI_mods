@@ -75,6 +75,15 @@
   .melding.fout { background: var(--mis-bg); color: var(--mis); }
   .melding.ok { background: var(--goed-bg); color: var(--goed); }
   .melding.info { background: var(--kop-bg); }
+  /* sessies en warm houden (0.18.0) */
+  .boven { display: grid; gap: 12px; margin-bottom: 16px; }
+  .boven h2 { margin: 0 0 8px; }
+  .sessies { display: grid; gap: 6px; }
+  .sessie { display: flex; flex-wrap: wrap; gap: 2px 16px; align-items: baseline; padding: 6px 0; border-top: 1px solid var(--lijn); }
+  .sessie:first-child { border-top: 0; }
+  .sessie .map { font-weight: 600; min-width: 120px; word-break: break-all; }
+  .warm-keuzes { display: flex; flex-wrap: wrap; gap: 8px 20px; align-items: center; margin-bottom: 6px; }
+  .ping-label { display: inline-block; font-size: 11px; padding: 0 6px; margin-left: 6px; border-radius: 8px; background: var(--kop-bg); color: var(--dim); }
   [hidden] { display: none !important; }
 </style>
 </head>
@@ -85,6 +94,29 @@
     <span class="dim" id="kop-info"></span>
     <span class="fout-balk" id="verbinding"></span>
   </header>
+
+  <!-- Sessies en warm houden: boven beide tabs -->
+  <div class="boven">
+    <div class="paneel">
+      <h2>Sessies</h2>
+      <div class="sessies" id="sessies"></div>
+      <div class="dim" id="sessies-leeg">Geen claude-or-sessie aangemeld.</div>
+    </div>
+    <div class="paneel">
+      <h2>Warm houden en meldingen</h2>
+      <div class="warm-keuzes">
+        <label><input type="checkbox" id="w-warm"> Warm houden</label>
+        <label>Duur <select id="w-duur">
+          <option value="600000">10 minuten</option>
+          <option value="1200000">20 minuten</option>
+          <option value="1800000">30 minuten</option>
+        </select></label>
+        <label><input type="checkbox" id="w-meld"> Meldingen met geluid</label>
+        <span class="rood" id="w-fout"></span>
+      </div>
+      <p class="dim" style="margin:0">Een ping leest de hele context uit de cache en kost dus een beetje; na de ingestelde tijd laat de proxy de cache los.</p>
+    </div>
+  </div>
 
   <nav class="tabs" role="tablist">
     <button type="button" role="tab" id="tab-knop-modellen" aria-selected="true" aria-controls="tab-modellen">Modellen</button>
@@ -130,6 +162,7 @@
       <label>Sessie <select id="f-sessie"><option value="">alle</option></select></label>
       <label>Model <select id="f-model"><option value="">alle</option></select></label>
       <label><input type="checkbox" id="f-slecht"> alleen missers en fouten</label>
+      <label><input type="checkbox" id="f-pings"> toon pings</label>
     </div>
     <div class="vlak">
       <table>
@@ -551,6 +584,7 @@ function tekenRegels() {
   const fs = $('f-sessie').value
   const fm = $('f-model').value
   const slecht = $('f-slecht').checked
+  const pings = $('f-pings').checked
   const body = $('regels')
   leeg(body)
   let n = 0
@@ -560,19 +594,22 @@ function tekenRegels() {
     if (fs && r.sessie !== fs) continue
     if (fm && r.model !== fm) continue
     if (slecht && !fout && r.telling !== 'mis') continue
+    if (r.ping && !pings) continue
     const rij = document.createElement('tr')
     if (fout || r.telling === 'mis') rij.className = 'slecht'
     cel(rij, tijd(r.t)).title = datumTijd(r.t)
     cel(rij, kort(r.sessie)).title = r.sessie
     const m = cel(rij, r.model ?? r.pad)
     if (r.van) m.title = `was ${r.van}`
+    if (r.ping) m.appendChild(el('span', 'ping', 'ping-label'))
     cel(rij, r.aanbieder ? `${r.aanbieder}${r.vast ? ' (vast)' : ''}` : '')
     cel(rij, String(r.status), 'getal')
     cel(rij, getal((r.in ?? 0) + (r.read ?? 0) + (r.write ?? 0)), 'getal')
     cel(rij, getal(r.uit), 'getal')
     cel(rij, `${r.aandeel ?? 0} %`, 'getal')
     cel(rij, r.telling, r.telling === 'raak' ? 'raak' : r.telling === 'mis' ? 'mis' : 'dim')
-    cel(rij, r.actie === 'wissel' ? 'andere aanbieder' : r.actie === 'stop' ? 'model gestopt' : r.van ? `gewisseld van ${r.van}` : '', r.actie ? 'mis' : 'dim')
+    const actie = { wissel: 'andere aanbieder', stop: 'model gestopt', 'warm-stop': 'warm houden gestopt' }[r.actie] ?? (r.van ? `gewisseld van ${r.van}` : '')
+    cel(rij, actie, r.actie ? 'mis' : 'dim')
     cel(rij, duur(r.ms), 'getal')
     cel(rij, r.fout ?? '', r.fout ? 'mis' : '')
     body.appendChild(rij)
@@ -581,6 +618,79 @@ function tekenRegels() {
   $('regels-leeg').hidden = n > 0
   $('regels-leeg').textContent = regels.length ? 'Geen aanvragen met dit filter.' : 'Nog geen aanvragen. Start een sessie met claude-or.'
 }
+
+// ---- sessies en warm houden ----
+
+const WARM_REDEN = { koud: 'een ping kwam niet meer uit de cache', fout: 'een ping gaf een fout' }
+let warmInst = null
+
+function tekenSessies() {
+  const lijst = $('sessies')
+  leeg(lijst)
+  const nu = Date.now()
+  const rijen = Object.entries(stand?.wacht ?? {}).sort((a, b) => (b[1]?.sinds ?? 0) - (a[1]?.sinds ?? 0))
+  $('sessies-leeg').hidden = rijen.length > 0
+  for (const [sessie, w] of rijen) {
+    const r = el('div', null, 'sessie')
+    r.appendChild(el('span', w.map ?? 'sessie', 'map'))
+    const begonnen = !!stand?.sessies?.[sessie]
+    const status = !begonnen ? 'gestart, nog geen beurt' : w.wachtOpGebruiker ? `wacht al ${Math.max(0, Math.floor((nu - w.sinds) / 60_000))} min` : 'bezig'
+    r.appendChild(el('span', status, w.wachtOpGebruiker ? '' : 'dim'))
+    if (begonnen) {
+      if (typeof w.warmTot === 'number' && w.warmTot > nu) r.appendChild(el('span', `cache warm tot ${tijd(w.warmTot)}`, 'groen'))
+      else r.appendChild(el('span', w.warmGestopt ? `cache losgelaten: ${WARM_REDEN[w.warmGestopt] ?? w.warmGestopt}` : 'cache losgelaten', w.warmGestopt ? 'rood' : 'dim'))
+      r.appendChild(el('span', `${getal(w.pings ?? 0)} ${w.pings === 1 ? 'ping' : 'pings'} · ${getal(w.pingRead ?? 0)} tokens gelezen`, 'dim'))
+    }
+    const id = el('span', kort(sessie), 'dim')
+    id.title = sessie
+    r.appendChild(id)
+    lijst.appendChild(r)
+  }
+}
+
+function tekenWarm() {
+  const w = warmInst
+  for (const id of ['w-warm', 'w-duur', 'w-meld']) $(id).disabled = !w
+  if (!w) return
+  $('w-warm').checked = w.warm
+  $('w-meld').checked = w.meldingen
+  const duur = $('w-duur')
+  // Een duur die niet in de lijst staat (proxy.json met de hand): toch tonen.
+  if (!Array.from(duur.options).some(o => Number(o.value) === w.warmMs)) {
+    const o = document.createElement('option')
+    o.value = String(w.warmMs)
+    o.textContent = `${Math.round(w.warmMs / 60_000)} minuten`
+    duur.appendChild(o)
+  }
+  duur.value = String(w.warmMs)
+  duur.disabled = !w.warm
+}
+
+async function laadWarm() {
+  try {
+    const { status, d } = await vraagJson('/_ff/warm')
+    if (status === 200 && d) warmInst = d
+  } catch {
+    // Proxy niet bereikbaar: de verbindingsregel zegt het al.
+  }
+  tekenWarm()
+}
+
+async function zetWarm(data) {
+  $('w-fout').textContent = ''
+  try {
+    const { status, d } = await post('/_ff/warm', data)
+    if (status === 200 && d) warmInst = d
+    else $('w-fout').textContent = `Niet bewaard (status ${status}).`
+  } catch {
+    $('w-fout').textContent = 'Niet bewaard: proxy niet bereikbaar.'
+  }
+  tekenWarm()
+}
+
+$('w-warm').addEventListener('change', e => zetWarm({ warm: e.target.checked }))
+$('w-meld').addEventListener('change', e => zetWarm({ meldingen: e.target.checked }))
+$('w-duur').addEventListener('change', e => zetWarm({ warmMs: Number(e.target.value) }))
 
 async function ververs() {
   try {
@@ -603,6 +713,7 @@ async function ververs() {
         toonTab(t === 'modellen' ? 'modellen' : 'logboek', false)
       }
     }
+    tekenSessies()
     tekenSamenvatting()
     tekenRegels()
     if (!$('tab-modellen').hidden && inst) tekenModellen()
@@ -611,8 +722,10 @@ async function ververs() {
   }
 }
 
-for (const id of ['f-sessie', 'f-model', 'f-slecht']) $(id).addEventListener('change', tekenRegels)
+for (const id of ['f-sessie', 'f-model', 'f-slecht', 'f-pings']) $(id).addEventListener('change', tekenRegels)
 toonTab('modellen', false)
+tekenWarm()
+laadWarm()
 ververs()
 volgMeting()
 setInterval(ververs, 3000)

@@ -9,14 +9,14 @@ export function proxyUrl(poort?: number): string
 export function doorHeaders(headers: Record<string, string | string[] | undefined>): Record<string, string | string[]>
 export type Info = { model?: string; stream: boolean; baan?: string }
 export function aanvraagInfo(bodyTekst: string): Info
-export type Gebruik = { in: number; uit: number; read: number; write: number; aanbieder?: string; kosten?: number }
+export type Gebruik = { in: number; uit: number; read: number; write: number; aanbieder?: string; kosten?: number; stop?: string }
 export function gebruikUitJson(obj: unknown): Gebruik
 export function maakSseLezer(): { voeg(tekst: string): void; uit(): Gebruik }
 export type Telling = 'raak' | 'mis' | 'telt-niet'
 export type Regel = {
   t: number; sessie: string; pad: string; model?: string; baan?: string; stream: boolean; status: number
   aanbieder?: string; in: number; uit: number; read: number; write: number; aandeel: number; telling: Telling; ms: number; kosten?: number; vast?: boolean; fout?: string
-  van?: string; actie?: 'wissel' | 'stop'
+  van?: string; actie?: 'wissel' | 'stop' | 'warm-stop'; ping?: boolean
 }
 export function logRegel(a: { t: number; sessie?: string; pad: string; info: Info; status: number; gebruik: Gebruik; ms: number; fout?: string; vorige?: Regel; gewisseld?: boolean; vast?: boolean; venster?: number }): Regel
 export type Stand = Record<string, Record<string, { aanvragen: number; raak: number; mis: number; in: number; read: number; aanbieder?: string; laatst: number }>>
@@ -44,3 +44,15 @@ export function isZwak(metingen: unknown, model: string): boolean
 export function stopBericht(model: string, poort: number): string
 export function zwakMeting(aandeel: number, nu: number): { oordeel: 'zwak'; aandeel: number; raak: 0; van: number; gemeten: number }
 export function geldigeSchrijf(a: { host: unknown; origin: unknown; xff: unknown; contentType: unknown; poort: number }): boolean
+export const WARM_STAP_MS: number
+export const WARM_MAX_MS: number
+export const MELD_MS: readonly number[]
+export type WarmInstelling = { warm: boolean; warmMs: number; meldingen: boolean }
+export function warmInstelling(ruw: unknown): WarmInstelling
+export function pingMomenten(warmMs: number, stap?: number): number[]
+export function wachtOpGebruiker(stopReason: unknown): boolean
+export function pingBody(body: Record<string, unknown>): Record<string, unknown>
+export function pingGoed(status: number, gebruik: Gebruik): boolean
+export function mapNaam(ruw: unknown): string
+export function meldTekst(a: { map: string; wachtMs: number; warmTotMs: number | null }): { titel: string; tekst: string }
+export function meldScript(a: { titel: string; tekst: string }): string

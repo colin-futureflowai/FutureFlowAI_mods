@@ -721,3 +721,202 @@ test('pagina: tabs Modellen en Logboek, Meet en kies, x-ff; geen innerHTML en ge
   assert.doesNotMatch(html, /https?:\/\//)
   assert.doesNotMatch(html, /<(link|img|iframe)\b/i)
 })
+
+// ---- plan 10: aanmelden, warm houden en meldingen (0.18.0) ----
+
+// Nep-osascript en nep-afplay: schrijven hun argumenten als JSON-regel in <dir>/<naam>.jsonl.
+function nepMelders(dir) {
+  const map = path.join(dir, 'nepbin')
+  fs.mkdirSync(map, { recursive: true })
+  const maak = naam => {
+    const p = path.join(map, naam)
+    fs.writeFileSync(p, `#!${process.execPath}\nrequire('node:fs').appendFileSync(${JSON.stringify(path.join(map, `${naam}.jsonl`))}, JSON.stringify(process.argv.slice(2)) + '\\n')\n`, { mode: 0o755 })
+    return p
+  }
+  const lees = naam => {
+    try {
+      return fs.readFileSync(path.join(map, `${naam}.jsonl`), 'utf8').split('\n').filter(Boolean).map(l => JSON.parse(l))
+    } catch {
+      return []
+    }
+  }
+  return { env: { OSASCRIPT_BIN: maak('osascript'), AFPLAY_BIN: maak('afplay'), OR_PROXY_GELUID: '/nep/geluid.aiff' }, osa: () => lees('osascript'), afplay: () => lees('afplay') }
+}
+
+const WARM_KEY = 'sk-or-v1-warm-test-key-0123456789'
+const GEHEIM = 'GEHEIME-PROMPT-TEKST'
+const WARM_BODY = JSON.stringify({ model: 'm/x', max_tokens: 8000, stream: false, thinking: { type: 'enabled', budget_tokens: 2000 }, system: 'S', tools: [{ name: 'Read' }], messages: [{ role: 'user', content: GEHEIM }] })
+const WARM_KOP = { authorization: `Bearer ${WARM_KEY}`, 'x-session-id': 'w1', 'content-type': 'application/json' }
+
+// Upstream voor warm houden: `stand.stop` en `stand.ping` (usage voor pings) instelbaar per test.
+function warmUp(stand = {}) {
+  return upstream({
+    '/v1/messages': (req, res, a) => {
+      const b = bodyVan(a)
+      const ping = b.max_tokens === 1
+      const usage = ping ? (stand.ping ?? { input_tokens: 100, cache_read_input_tokens: 4000, output_tokens: 1 }) : { input_tokens: 100, cache_creation_input_tokens: 4000, output_tokens: 5 }
+      json(200, { id: 'm', provider: 'Wafer', stop_reason: ping ? 'max_tokens' : (stand.stop ?? 'end_turn'), usage })(req, res)
+    },
+  })
+}
+const pings = up => up.aanvragen.filter(a => bodyVan(a).max_tokens === 1)
+const stuurWarm = (px, kop = WARM_KOP) => vraag(px.poort, 'POST', '/v1/messages', { headers: kop, body: WARM_BODY })
+const standVan = async px => JSON.parse((await vraag(px.poort, 'GET', '/_ff/stand')).body)
+const zetWarm = (px, data) => post(px, '/_ff/warm', data, { 'x-ff': '1', 'content-type': 'application/json' })
+const aanmelden = (px, data, headers = { 'x-ff': '1', 'content-type': 'application/json' }) => post(px, '/_ff/sessie', data, headers)
+
+test('aanmelden: met een levend proces draait de proxy na de stiltetijd door; stopt als het proces weg is', async () => {
+  const hulp = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], { stdio: 'ignore' })
+  opruimen.push(() => { if (hulp.exitCode === null) hulp.kill('SIGKILL') })
+  const px = await start({ stil: 300, env: { OR_PROXY_LEEFT_MS: '100' } })
+  const r = await aanmelden(px, { pid: hulp.pid, sessie: 'w1', map: 'proj' })
+  assert.equal(r.status, 200)
+  assert.deepEqual(JSON.parse(r.body), { ok: true })
+  await wacht(700)
+  assert.equal(px.proc.exitCode, null)
+  const st = await standVan(px)
+  assert.equal(st.aangemeld, 1)
+  assert.equal(st.wacht.w1.map, 'proj')
+  hulp.kill('SIGKILL')
+  assert.equal(await px.einde, 0)
+})
+
+test('aanmelden: zonder x-ff 403, pid -1 of geen getal 400', async () => {
+  const px = await start({})
+  assert.equal((await aanmelden(px, { pid: process.pid, sessie: 's', map: 'm' }, { 'content-type': 'application/json' })).status, 403)
+  assert.equal((await aanmelden(px, { pid: -1, sessie: 's', map: 'm' })).status, 400)
+  assert.equal((await aanmelden(px, { pid: 1.5, sessie: 's', map: 'm' })).status, 400)
+  assert.equal((await aanmelden(px, { pid: '12', sessie: 's', map: 'm' })).status, 400)
+  assert.equal((await standVan(px)).aangemeld, 0)
+})
+
+test('warm: twee pings met max_tokens 1, zelfde key en sessie; log ping; stand telt één aanvraag; meldingen op drie momenten', async () => {
+  const up = await warmUp()
+  const mdir = fs.mkdtempSync(path.join(os.tmpdir(), 'ff-meld-'))
+  opruimen.push(() => fs.rmSync(mdir, { recursive: true, force: true }))
+  const m = nepMelders(mdir)
+  const px = await start({ url: up.url, env: { OR_PROXY_WARM_STAP_MS: '150', OR_PROXY_MELD_MS: '100,300,500', ...m.env } })
+  await aanmelden(px, { pid: process.pid, sessie: 'w1', map: 'mijn proj' })
+  assert.equal((await stuurWarm(px)).status, 200)
+  await totDat(() => pings(up).length >= 2, 3000)
+  await wacht(400)
+  assert.equal(pings(up).length, 2)
+  for (const p of pings(up)) {
+    const b = bodyVan(p)
+    assert.equal(b.stream, false)
+    assert.equal('thinking' in b, false)
+    assert.equal(b.model, 'm/x')
+    assert.equal(p.headers.authorization, `Bearer ${WARM_KEY}`)
+    assert.equal(p.headers['x-session-id'], 'w1')
+  }
+  // De ping gaat naar dezelfde aanbieder als de echte aanvraag erna zou gaan (vaste aanbieder uit het antwoord).
+  const regels = await totRegels(px.dir, 3)
+  assert.equal(regels.filter(r => r.ping === true).length, 2)
+  assert.ok(regels.filter(r => r.ping).every(r => r.telling === 'telt-niet'))
+  const st = await standVan(px)
+  assert.equal(st.sessies.w1['m/x'].aanvragen, 1)
+  assert.equal(st.wacht.w1.pings, 2)
+  assert.equal(st.wacht.w1.pingRead, 8000)
+  assert.equal(st.wacht.w1.wachtOpGebruiker, true)
+  assert.equal(st.wacht.w1.map, 'mijn proj')
+  assert.equal(typeof st.wacht.w1.sinds, 'number')
+  // Meldingen: eerst afplay met het geluid, dan osascript met de mapnaam.
+  await totDat(() => m.osa().length >= 3, 3000)
+  assert.equal(m.afplay().length, 3)
+  assert.deepEqual(m.afplay()[0], ['/nep/geluid.aiff'])
+  assert.equal(m.osa()[0][0], '-e')
+  assert.match(m.osa()[0][1], /^display notification ".*" with title "claude-or wacht · mijn proj"$/)
+  // Geen key en geen inhoud in log, proxy.json of stand.
+  const alles = [fs.readFileSync(path.join(px.dir, 'log.jsonl'), 'utf8'), JSON.stringify(st), JSON.stringify(m.osa())].join('\n')
+  assert.ok(!alles.includes(WARM_KEY) && !alles.includes('warm-test-key'))
+  assert.ok(!alles.includes(GEHEIM))
+})
+
+test('warm: twee koude pings op rij stoppen het warm houden (koud); de eerste is alleen ping-koud', async () => {
+  const up = await warmUp({ ping: { input_tokens: 4100, output_tokens: 1 } })
+  const px = await start({ url: up.url, env: { OR_PROXY_WARM_STAP_MS: '100', OR_PROXY_MELD_MS: '100000' } })
+  await stuurWarm(px)
+  await totDat(() => pings(up).length >= 2)
+  await wacht(500)
+  assert.equal(pings(up).length, 2)
+  const st = await standVan(px)
+  assert.equal(st.wacht.w1.warmGestopt, 'koud')
+  assert.equal(st.wacht.w1.warmTot, null)
+  const acties = logRegels(px.dir).filter(r => r.ping).map(r => r.actie)
+  assert.deepEqual(acties, ['ping-koud', 'warm-stop'])
+})
+
+test('warm: een echte aanvraag tussen twee pings zet de reeks terug', async () => {
+  const up = await warmUp()
+  const px = await start({ url: up.url, env: { OR_PROXY_WARM_STAP_MS: '300', OR_PROXY_MELD_MS: '100000' } })
+  await stuurWarm(px)
+  await totDat(() => pings(up).length >= 1, 3000)
+  await stuurWarm(px)
+  const tEcht = Date.now()
+  await totDat(() => pings(up).length >= 2, 3000)
+  const tPing = Date.now()
+  // De volgende ping komt een stap ná de echte aanvraag, niet een stap na de vorige ping.
+  assert.ok(tPing - tEcht >= 280, `${tPing - tEcht} ms`)
+  assert.equal((await standVan(px)).sessies.w1['m/x'].aanvragen, 2)
+})
+
+test('warm: antwoord tool_use = wel pings, geen meldingen', async () => {
+  const up = await warmUp({ stop: 'tool_use' })
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ff-meld-'))
+  opruimen.push(() => fs.rmSync(dir, { recursive: true, force: true }))
+  const m = nepMelders(dir)
+  const px = await start({ url: up.url, env: { OR_PROXY_WARM_STAP_MS: '100', OR_PROXY_MELD_MS: '50,150,250', ...m.env } })
+  await stuurWarm(px)
+  await totDat(() => pings(up).length >= 2, 3000)
+  await wacht(300)
+  assert.deepEqual(m.osa(), [])
+  assert.deepEqual(m.afplay(), [])
+  assert.equal((await standVan(px)).wacht.w1.wachtOpGebruiker, false)
+})
+
+test('POST /_ff/warm: warm uit = geen pings, meldingen uit = geen meldingen; proxy.json bewaard en na herstart terug', async () => {
+  const up = await warmUp()
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ff-meld-'))
+  opruimen.push(() => fs.rmSync(dir, { recursive: true, force: true }))
+  const m = nepMelders(dir)
+  const ordir = fs.mkdtempSync(path.join(os.tmpdir(), 'ff-proxy-'))
+  const env = { OR_PROXY_WARM_STAP_MS: '100', OR_PROXY_MELD_MS: '50,150', ...m.env }
+  const p1 = await vrijePoort()
+  const px = await start({ url: up.url, env, dir: ordir, poort: p1 })
+  await totDat(async () => { try { return (await vraag(p1, 'GET', '/_ff/stand')).status === 200 } catch { return false } })
+  assert.deepEqual(JSON.parse((await vraag(p1, 'GET', '/_ff/warm')).body), { warm: true, warmMs: 1_200_000, meldingen: true })
+  assert.equal((await post(px, '/_ff/warm', { warm: false }, { 'content-type': 'application/json' })).status, 403)
+  const r = await zetWarm(px, { warm: false, meldingen: false, warmMs: 600_000 })
+  assert.equal(r.status, 200)
+  assert.deepEqual(JSON.parse(r.body), { warm: false, warmMs: 600_000, meldingen: false })
+  assert.deepEqual(leesJson(path.join(ordir, 'proxy.json')), { warm: false, warmMs: 600_000, meldingen: false })
+  await stuurWarm(px)
+  await wacht(400)
+  assert.equal(pings(up).length, 0)
+  assert.deepEqual(m.osa(), [])
+  // Herstart: de keuze komt terug uit proxy.json.
+  px.proc.kill('SIGTERM')
+  await px.einde.catch(() => {})
+  const p2 = await vrijePoort()
+  const tweede = spawn(process.execPath, [PROXY], { env: { ...process.env, OR_PROXY_POORT: String(p2), OPENROUTER_URL: up.url, OPENROUTER_DIR: ordir }, stdio: 'ignore' })
+  const tweedeEinde = new Promise(r => tweede.on('exit', r))
+  opruimen.push(async () => { if (tweede.exitCode === null && tweede.signalCode === null) tweede.kill('SIGKILL'); await tweedeEinde })
+  await totDat(async () => { try { return (await vraag(p2, 'GET', '/_ff/stand')).status === 200 } catch { return false } })
+  assert.deepEqual(JSON.parse((await vraag(p2, 'GET', '/_ff/warm')).body), { warm: false, warmMs: 600_000, meldingen: false })
+  await vraag(p2, 'POST', '/_ff/stop')
+  assert.equal(await tweedeEinde, 0)
+  assert.ok(!fs.readFileSync(path.join(ordir, 'proxy.json'), 'utf8').includes(WARM_KEY))
+})
+
+// ---- plan 10, Task 4: sessies, warm houden en pings op de pagina (statisch) ----
+
+test('pagina: blok Sessies, Warm houden en meldingen, toon pings; via /_ff/warm; geen innerHTML of externe URL', async () => {
+  const html = fs.readFileSync(LOGBOEK, 'utf8')
+  for (const t of ['Sessies', 'Warm houden', 'Meldingen met geluid', 'toon pings', '/_ff/warm', 'cache losgelaten', 'een ping kwam niet meer uit de cache', 'een ping gaf een fout',
+    'Een ping leest de hele context uit de cache en kost dus een beetje; na de ingestelde tijd laat de proxy de cache los.']) {
+    assert.ok(html.includes(t), t)
+  }
+  for (const min of [10, 20, 30]) assert.ok(html.includes(`value="${min * 60_000}"`), `${min} min`)
+  assert.doesNotMatch(html, /innerHTML|outerHTML|insertAdjacentHTML|document\.write/)
+  assert.doesNotMatch(html, /https?:\/\//)
+})

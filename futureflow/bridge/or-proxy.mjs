@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// or-proxy — lokale proxy tussen claude-or en OpenRouter (futureflow 0.16.0, 0.17.0). Alleen Node-builtins.
+// or-proxy — lokale proxy tussen claude-or en OpenRouter (futureflow 0.16.0-0.18.0). Alleen Node-builtins.
 //
 // Luistert alleen op 127.0.0.1:<OR_PROXY_POORT, standaard 20817>. Elke aanvraag gaat ongewijzigd door
 // naar <OPENROUTER_URL, standaard https://openrouter.ai/api> + pad en query; het antwoord komt ongewijzigd
@@ -27,8 +27,16 @@
 //   cache.json en de CLI (`openrouter poort`) werkt de startcheck bij. Stand per aanbieder in aanbieders.json.
 // De proxy schrijft nooit settings.json, de shim of de sleutelhanger; dat doet alleen de CLI (pad in
 // <OPENROUTER_DIR>/proxy/cli.json).
-// Stopt vanzelf na OR_PROXY_STIL_MS (standaard 30 min) zonder aanvraag. Exitcodes: 0 gestopt,
-// 1 interne fout, 2 poort bezet.
+//
+// 0.18.0:
+//   POST /_ff/sessie {pid, sessie, map}   de shim meldt een claude-or aan; zolang dat proces leeft, draait de proxy door
+//   GET  /_ff/warm, POST /_ff/warm {warm?, warmMs?, meldingen?}   instelling in <OPENROUTER_DIR>/proxy.json
+// - warm houden: per sessie de laatste aanvraag van de hoofdbaan (alleen in het geheugen, met headers en key)
+//   opnieuw sturen met max_tokens 1, elke 8 min tot 20 min na de laatste echte aanvraag; een koude of foute
+//   ping stopt het warm houden voor die sessie. Pings tellen niet mee (telling, vaste aanbieder, stil-stop).
+// - meldingen: wacht het antwoord van de hoofdbaan op de gebruiker, dan na 4, 10 en 15 min afplay + osascript.
+// Stopt vanzelf na OR_PROXY_STIL_MS (standaard 30 min) zonder aanvraag én zonder levend aangemeld proces.
+// Exitcodes: 0 gestopt, 1 interne fout, 2 poort bezet.
 //
 // Wordt los gekopieerd naar ~/.claude/futureflow/openrouter/proxy/bridge/, met lib/proxy.mjs ernaast in
 // ../lib/ (zelfde ligging als in de plugin).
@@ -47,6 +55,7 @@ import {
   aanvraagInfo, besluit, doorHeaders, foutAntwoord, gebruikUitJson, geldigeHost, isEigenPad, isZwak, kiesAanbieder, LOG_MAX_BYTES,
   geldigeSchrijf, logRegel, maakSseLezer, metAanbieder, probeerOpnieuw, PROXY_POORT, PROXY_STIL_MS, PROXY_VERSIE, slechte, stopBericht,
   TELT_VENSTER_MS, werkAanbiederBij, werkStandBij, wisselModel, zwakMeting,
+  mapNaam, MELD_MS, meldScript, meldTekst, pingBody, pingGoed, pingMomenten, wachtOpGebruiker, WARM_STAP_MS, warmInstelling,
 } from '../lib/proxy.mjs'
 
 // Geen inhoud van aanvragen op stderr: alleen de naam of code van de fout.
@@ -84,6 +93,24 @@ const VORIGE_MAX = 2000
 const LOG_STANDAARD = 500
 const LOG_GRENS = 2000
 
+// 0.18.0: warm houden en meldingen. OR_PROXY_WARM_STAP_MS (tests) verkort de hele reeks: pings, warmTot en
+// het opruimen schalen mee met stap / WARM_STAP_MS. OR_PROXY_MELD_MS (komma's) zet de meldmomenten.
+const WARM_STAP = getal(process.env.OR_PROXY_WARM_STAP_MS, WARM_STAP_MS)
+const SCHAAL = WARM_STAP / WARM_STAP_MS
+// Zoveel koude pings op rij (2xx, maar niet uit de cache) stoppen het warm houden voor die sessie.
+const KOUD_STOP = 2
+const MELD = (() => {
+  const l = String(process.env.OR_PROXY_MELD_MS ?? '').split(',').map(Number).filter(n => Number.isFinite(n) && n > 0)
+  return l.length ? l : [...MELD_MS]
+})()
+const OSASCRIPT = process.env.OSASCRIPT_BIN || '/usr/bin/osascript'
+const AFPLAY = process.env.AFPLAY_BIN || '/usr/bin/afplay'
+const GELUID = process.env.OR_PROXY_GELUID || '/System/Library/Sounds/Glass.aiff'
+const LEEFT_MS = getal(process.env.OR_PROXY_LEEFT_MS, 30_000)
+const PROXY_JSON = path.join(DIR, 'proxy.json')
+// Zoveel sessies houdt de proxy bij in `wacht`; de oudste valt weg.
+const WACHT_MAX = 50
+
 const sinds = Date.now()
 const stand = {}
 const vorige = new Map()
@@ -97,6 +124,19 @@ let aanbiedersLaatst = 0
 let lopend = 0
 let stoppen = false
 let stilTimer
+// Tijd van de laatste echte aanvraag (geen ping, geen eigen pad).
+let laatsteAanvraag = Date.now()
+let warm = warmInstelling(leesJson(PROXY_JSON))
+// Aangemelde processen: pid → sessie.
+const aangemeld = new Map()
+// Per sessie: de zichtbare stand (`wacht`) en, alleen in het geheugen, de hoofdbaan met body en headers.
+const wacht = new Map()
+const hoofd = new Map()
+const invoerPerBaan = new Map()
+const timers = new Map()
+const pingBezig = new Map()
+const lopendPer = new Map()
+let meldFoutGelogd = false
 
 const server = http.createServer(behandel)
 // Lange stromen: geen time-out van de server op aanvragen.
@@ -105,6 +145,9 @@ server.headersTimeout = 60_000
 
 function stop() {
   clearTimeout(stilTimer)
+  clearInterval(leeftTimer)
+  for (const s of [...timers.keys()]) wisTimers(s)
+  for (const p of pingBezig.values()) p.destroy()
   if (aanbiedersTimer) {
     clearTimeout(aanbiedersTimer)
     schrijfAanbieders()
@@ -114,14 +157,48 @@ function stop() {
   process.exit(0)
 }
 
+// Stoppen mag als niets loopt, geen aangemeld proces meer leeft en er STIL_MS geen echte aanvraag was.
+function magStoppen() {
+  return lopend === 0 && meetBezig === null && meetRij.length === 0 && !kiesBezig && levend() === 0 && Date.now() - laatsteAanvraag >= STIL_MS
+}
+
 function planStil() {
   clearTimeout(stilTimer)
   stilTimer = setTimeout(() => {
-    // Ook niet midden in een meting of keuze van de pagina.
-    if (lopend === 0 && meetBezig === null && meetRij.length === 0 && !kiesBezig) stop()
-    else planStil()
-  }, STIL_MS)
+    if (magStoppen()) stop()
+    // Een levend aangemeld proces: de controle hieronder stopt de proxy zodra het weg is.
+    else if (levend() === 0) planStil()
+  }, stilRest())
 }
+
+// Resterende stiltetijd; is die al om (iets loopt nog), dan opnieuw kijken na een hele STIL_MS (geen lus).
+function stilRest() {
+  const rest = laatsteAanvraag + STIL_MS - Date.now()
+  return rest > 0 ? rest : STIL_MS
+}
+
+// Aangemelde processen die nog leven; een dood proces wordt afgemeld (zijn sessie verliest body en timers).
+function levend() {
+  for (const [pid, sessie] of [...aangemeld]) {
+    try {
+      process.kill(pid, 0)
+    } catch (err) {
+      if (err?.code === 'EPERM') continue
+      aangemeld.delete(pid)
+      if (sessie && ![...aangemeld.values()].includes(sessie)) {
+        vergeetHoofd(sessie)
+        wacht.delete(sessie)
+      }
+    }
+  }
+  return aangemeld.size
+}
+
+const leeftTimer = setInterval(() => {
+  if (aangemeld.size === 0) return
+  levend()
+  if (magStoppen()) stop()
+}, LEEFT_MS)
 
 function stuurJson(res, status, data, extra = {}) {
   const tekst = JSON.stringify(data)
@@ -460,6 +537,25 @@ async function schrijfPad(req, res, pad) {
   }
   const d = await leesBody(req)
   if (!d || typeof d !== 'object') return stuurJson(res, 400, { ok: false, fout: 'geen geldige JSON' })
+  if (pad === '/_ff/sessie') {
+    if (!Number.isSafeInteger(d.pid) || d.pid <= 0) return stuurJson(res, 400, { ok: false, fout: 'ongeldig pid' })
+    const sessie = typeof d.sessie === 'string' ? d.sessie.slice(0, 100) : ''
+    aangemeld.set(d.pid, sessie)
+    if (sessie) {
+      const w = wachtVan(sessie)
+      w.map = mapNaam(d.map)
+    }
+    return stuurJson(res, 200, { ok: true })
+  }
+  if (pad === '/_ff/warm') {
+    const nieuw = { ...warm }
+    for (const k of ['warm', 'warmMs', 'meldingen']) if (d[k] !== undefined) nieuw[k] = d[k]
+    warm = warmInstelling(nieuw)
+    schrijfJson(PROXY_JSON, warm)
+    // Lopende reeksen volgen de nieuwe instelling (vanaf hun eigen begin).
+    for (const s of hoofd.keys()) if (!lopendPer.get(s)) planWarm(s, wacht.get(s)?.sinds)
+    return stuurJson(res, 200, warm)
+  }
   if (pad === '/_ff/meet') {
     const lib = await or()
     if (!lib || !cliPad()) return stuurJson(res, 503, { ok: false, fout: 'geen-cli' })
@@ -475,11 +571,14 @@ function eigen(req, res, url) {
   if (!geldigeHost(req.headers.host, POORT)) return stuurJson(res, 403, foutAntwoord('futureflow-proxy: verboden'))
   const pad = url.pathname
   const fout = () => { if (!res.headersSent) stuurJson(res, 500, { ok: false, fout: 'interne fout' }) }
-  if (req.method === 'POST' && (pad === '/_ff/kies' || pad === '/_ff/meet')) return void schrijfPad(req, res, pad).catch(fout)
+  if (req.method === 'POST' && ['/_ff/kies', '/_ff/meet', '/_ff/sessie', '/_ff/warm'].includes(pad)) return void schrijfPad(req, res, pad).catch(fout)
+  if (req.method === 'GET' && pad === '/_ff/warm') return stuurJson(res, 200, warm)
   if (req.method === 'GET' && pad === '/_ff/instellingen') return void instellingen().then(d => stuurJson(res, 200, d), fout)
   if (req.method === 'GET' && pad === '/_ff/modellen') return void modellenPad(url).then(([s, d]) => stuurJson(res, s, d), fout)
   if (req.method === 'GET' && pad === '/_ff/meet') return stuurJson(res, 200, { bezig: meetBezig, rij: [...meetRij], laatste: meetLaatste })
-  if (req.method === 'GET' && pad === '/_ff/stand') return stuurJson(res, 200, { versie: PROXY_VERSIE, sinds, poort: POORT, sessies: stand, vast: vastStand(), gestopt: gestoptNu() })
+  if (req.method === 'GET' && pad === '/_ff/stand') {
+    return stuurJson(res, 200, { versie: PROXY_VERSIE, sinds, poort: POORT, sessies: stand, vast: vastStand(), gestopt: gestoptNu(), wacht: Object.fromEntries(wacht), aangemeld: levend() })
+  }
   if (req.method === 'POST' && pad === '/_ff/stop') {
     if (req.headers.origin !== undefined) return stuurJson(res, 403, foutAntwoord('futureflow-proxy: verboden'))
     stoppen = true
@@ -543,6 +642,7 @@ function behandel(req, res) {
 
 function doorgeven(req, res, url) {
   lopend += 1
+  laatsteAanvraag = Date.now()
   planStil()
   const t0 = Date.now()
   const delen = []
@@ -555,7 +655,14 @@ function doorgeven(req, res, url) {
   let aanbieder
   let opnieuw = false
   let van
+  // De body als JSON (alleen POST /v1/messages), zoals hij het laatst verstuurd is.
+  let obj
   const sm = () => `${sessie}|${info.model ?? ''}`
+  // Een echte aanvraag van deze sessie: geplande pings en meldingen weg, een lopende ping afbreken.
+  if (sessie) {
+    annuleer(sessie)
+    lopendPer.set(sessie, (lopendPer.get(sessie) ?? 0) + 1)
+  }
 
   const afronden = (status, gebruik, fout) => {
     if (klaar) return
@@ -569,12 +676,22 @@ function doorgeven(req, res, url) {
       vorige.set(sleutel, regel)
       if (vorige.size > VORIGE_MAX) vorige.delete(vorige.keys().next().value)
       if (typeof info.model === 'string' && url.pathname === '/v1/messages') beoordeel(regel, sleutel)
+      if (sessie && obj && info.baan) onthoudHoofd(sessie, info.baan, regel, obj, doorHeaders(req.headers), `${url.pathname}${url.search}`, gebruik?.stop)
     }
     if (url.pathname !== '/api/hello') {
       schrijfLog(regel)
       werkStandBij(stand, regel)
     }
     lopend -= 1
+    laatsteAanvraag = Date.now()
+    if (sessie) {
+      const n = (lopendPer.get(sessie) ?? 1) - 1
+      if (n > 0) lopendPer.set(sessie, n)
+      else {
+        lopendPer.delete(sessie)
+        if (hoofd.has(sessie)) planWarm(sessie)
+      }
+    }
     planStil()
     if (stoppen && lopend === 0) setImmediate(stop)
   }
@@ -623,7 +740,6 @@ function doorgeven(req, res, url) {
     let body = Buffer.concat(delen)
     const tekst = body.toString('utf8')
     info = aanvraagInfo(tekst)
-    let obj
     if (req.method === 'POST' && url.pathname === '/v1/messages' && typeof info.model === 'string') {
       try {
         obj = JSON.parse(tekst)
@@ -758,6 +874,180 @@ function doorgeven(req, res, url) {
       afronden(status, nul(), 'upstream-afgebroken')
       res.destroy()
     })
+  }
+}
+
+// ---- 0.18.0: warm houden en meldingen ----
+
+function wachtVan(sessie) {
+  let w = wacht.get(sessie)
+  if (!w) {
+    w = { map: 'sessie', sinds: Date.now(), wachtOpGebruiker: false, warmTot: null, pings: 0, pingRead: 0 }
+    wacht.set(sessie, w)
+    if (wacht.size > WACHT_MAX) {
+      const oudste = wacht.keys().next().value
+      wacht.delete(oudste)
+      vergeetHoofd(oudste)
+    }
+  }
+  return w
+}
+
+// Na een geslaagde aanvraag met een baan: is dit (nog) de hoofdbaan, dan body, headers en pad bewaren.
+function onthoudHoofd(sessie, baan, regel, body, headers, doelPad, stop) {
+  const perBaan = invoerPerBaan.get(sessie) ?? new Map()
+  invoerPerBaan.set(sessie, perBaan)
+  const invoer = regel.in + regel.read + regel.write
+  perBaan.set(baan, invoer)
+  for (const [b, n] of perBaan) if (b !== baan && n > invoer) return
+  hoofd.set(sessie, { baan, body, headers, doelPad, model: regel.model, t: regel.t })
+  wachtVan(sessie).wachtOpGebruiker = wachtOpGebruiker(stop)
+}
+
+function vergeetHoofd(sessie) {
+  wisTimers(sessie)
+  pingBezig.get(sessie)?.destroy()
+  pingBezig.delete(sessie)
+  hoofd.delete(sessie)
+  invoerPerBaan.delete(sessie)
+}
+
+function wisTimers(sessie) {
+  for (const t of timers.get(sessie) ?? []) clearTimeout(t)
+  timers.delete(sessie)
+}
+
+function annuleer(sessie) {
+  wisTimers(sessie)
+  const p = pingBezig.get(sessie)
+  if (p) {
+    pingBezig.delete(sessie)
+    p.destroy()
+  }
+}
+
+// Pings en meldingen vanaf `basis` (standaard nu = einde van de laatste echte aanvraag); voorbije momenten vallen weg.
+function planWarm(sessie, basis = Date.now()) {
+  wisTimers(sessie)
+  const w = wachtVan(sessie)
+  w.sinds = basis
+  const lijst = []
+  const na = (ms, fn) => {
+    const wachtMs = basis + ms - Date.now()
+    if (wachtMs >= 0) lijst.push(setTimeout(fn, wachtMs))
+  }
+  const warmMs = warm.warmMs * SCHAAL
+  const aan = warm.warm && !w.warmGestopt
+  w.warmTot = aan ? basis + warmMs : null
+  if (aan) for (const m of pingMomenten(warmMs, WARM_STAP)) na(m, () => stuurPing(sessie))
+  if (warm.meldingen && w.wachtOpGebruiker) MELD.forEach((m, i) => na(m, () => meld(sessie, i)))
+  // Na het venster heeft de proxy body en headers niet meer nodig: weg uit het geheugen.
+  na(Math.max(warmMs, ...MELD) + 1, () => {
+    const h = hoofd.get(sessie)
+    if (h) {
+      h.body = undefined
+      h.headers = undefined
+    }
+  })
+  timers.set(sessie, lijst)
+}
+
+// Eén ping: de bewaarde aanvraag met max_tokens 1. Raakt telling, vaste aanbieder, stand en stil-timer niet.
+function stuurPing(sessie) {
+  const h = hoofd.get(sessie)
+  const w = wacht.get(sessie)
+  if (!h?.body || !h.headers || !w || w.warmGestopt || stoppen || pingBezig.has(sessie) || lopendPer.get(sessie)) return
+  if (isZwak(cache(), h.model)) return
+  const t0 = Date.now()
+  const inhoud = Buffer.from(JSON.stringify(pingBody(h.body)))
+  const doel = new URL(`${BASIS.origin}${BASIS_PAD}${h.doelPad}`)
+  const headers = { ...h.headers, host: doel.host, 'content-length': String(inhoud.length) }
+  const mod = doel.protocol === 'https:' ? https : http
+  let klaar = false
+  const info = { model: h.model, baan: h.baan, stream: false }
+  const einde = (status, gebruik, fout) => {
+    if (klaar) return
+    klaar = true
+    // Afgebroken door een echte aanvraag: telt nergens mee en plant niets.
+    if (pingBezig.get(sessie) !== req) return
+    pingBezig.delete(sessie)
+    const regel = logRegel({ t: Date.now(), sessie, pad: new URL(h.doelPad, 'http://x').pathname, info, status, gebruik, ms: Date.now() - t0, fout, vast: !!h.body?.provider?.order })
+    regel.ping = true
+    w.pings += 1
+    w.pingRead += gebruik.read
+    const tweeXx = status >= 200 && status < 300 && !fout
+    // Een aanbieder geeft soms toevallig een koude ping terwijl de cache er nog is (gemeten 14-11-2026: Wafer
+    // op 8 en 12 min koud, op 16 en 20 min weer raak). Pas twee koude pings op rij stoppen het warm houden;
+    // een fout (429, 403, netwerk) stopt meteen.
+    if (pingGoed(status, gebruik)) w.koud = 0
+    else if (tweeXx && (w.koud = (w.koud ?? 0) + 1) < KOUD_STOP) regel.actie = 'ping-koud'
+    else {
+      w.warmGestopt = tweeXx ? 'koud' : 'fout'
+      w.warmTot = null
+      regel.actie = 'warm-stop'
+      // Alleen de pings weg; meldingen blijven (planWarm met dezelfde basis plant ze opnieuw zonder pings).
+      planWarm(sessie, w.sinds)
+    }
+    schrijfLog(regel)
+  }
+  const req = mod.request(doel, { method: 'POST', headers }, r => {
+    const sse = String(r.headers['content-type'] ?? '').startsWith('text/event-stream')
+    const lezer = sse ? maakSseLezer() : undefined
+    const decoder = new StringDecoder('utf8')
+    const delen = []
+    let n = 0
+    r.on('data', c => {
+      if (lezer) lezer.voeg(decoder.write(c))
+      else if ((n += c.length) <= JSON_MAX) delen.push(c)
+    })
+    r.on('end', () => {
+      let gebruik = nul()
+      let fout
+      if (lezer) gebruik = lezer.uit()
+      else if (n <= JSON_MAX) {
+        let d
+        try {
+          d = JSON.parse(Buffer.concat(delen).toString('utf8'))
+        } catch {
+          d = undefined
+        }
+        gebruik = gebruikUitJson(d)
+        if ((r.statusCode < 200 || r.statusCode >= 300) && typeof d?.error?.type === 'string') fout = d.error.type
+      }
+      const status = r.statusCode ?? 0
+      if ((status < 200 || status >= 300) && !fout) fout = `http-${status}`
+      einde(status, gebruik, fout)
+    })
+    r.on('error', () => einde(r.statusCode ?? 0, nul(), 'upstream-afgebroken'))
+  })
+  pingBezig.set(sessie, req)
+  req.on('error', err => einde(0, nul(), err?.code ?? 'netwerkfout'))
+  req.end(inhoud)
+}
+
+// Melding met geluid: eerst afplay, dan osascript; beide los, fouten genegeerd (één logregel per run).
+function meld(sessie, i) {
+  const w = wacht.get(sessie)
+  if (!w || !warm.meldingen || !w.wachtOpGebruiker || lopendPer.get(sessie)) return
+  const warmTotMs = warm.warm && !w.warmGestopt ? warm.warmMs : null
+  const { titel, tekst } = meldTekst({ map: w.map, wachtMs: MELD_MS[i] ?? MELD[i], warmTotMs })
+  los(AFPLAY, [GELUID])
+  los(OSASCRIPT, ['-e', meldScript({ titel, tekst })])
+}
+
+function los(bin, args) {
+  const fout = () => {
+    if (meldFoutGelogd) return
+    meldFoutGelogd = true
+    schrijfLog(logRegel({ t: Date.now(), sessie: 'proxy', pad: '/_ff/melding', info: { stream: false }, status: 0, gebruik: nul(), ms: 0, fout: 'melding' }))
+  }
+  try {
+    const p = spawn(bin, args, { stdio: 'ignore' })
+    p.on('error', fout)
+    p.on('exit', code => { if (code !== 0) fout() })
+    p.unref()
+  } catch {
+    fout()
   }
 }
 
